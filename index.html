@@ -55,7 +55,7 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
 .row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 0.5px solid var(--border); }
 .row:first-of-type { border-top: none; padding-top: 4px; }
 .row .info { flex: 1; min-width: 0; }
-.row .info .top { display: flex; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 2px; align-items: center; }
+.row .info .top { display: flex; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 2px; align-items: center; flex-wrap: wrap; }
 .row .info .from { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
 .row .info .subject { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .row .info .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
@@ -66,6 +66,7 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
 .badge.danger { background: var(--danger-bg); color: var(--danger-text); }
 .badge.ok { background: var(--ok-bg); color: var(--ok-text); }
 .badge.info { background: var(--info-bg); color: var(--info-text); }
+.badge.mbox { background: transparent; border: 1px solid currentColor; }
 .actions { display: flex; gap: 6px; flex-shrink: 0; }
 .btn { background: var(--surface); border: 0.5px solid var(--border-strong); border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 500; color: var(--text); cursor: pointer; font-family: inherit; text-decoration: none; display: inline-block; transition: all .15s; }
 .btn:hover { background: var(--bg); border-color: var(--muted); }
@@ -96,20 +97,17 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
 </style>
 </head>
 <body>
-
 <div id="config-error" style="display:none">
   <h1>Administratie</h1>
   <div class="config-warning">
     <strong>Eerst even instellen.</strong> Dit dashboard heeft een Microsoft Azure AD <em>Application (client) ID</em> nodig om in te kunnen loggen. Open <code>index.html</code> in een editor en vul je client-id in bij <code>CLIENT_ID</code> bovenaan in het <code>&lt;script&gt;</code>-blok. Zie <a href="README.md">README.md</a> voor 10-minuten setup-stappen.
   </div>
 </div>
-
 <div id="signin" class="signin" style="display:none">
   <h1>Administratie</h1>
   <p>Log in met je Microsoft-account om je inbox en agenda te zien.</p>
   <button class="btn primary" onclick="signIn()">Inloggen met Microsoft</button>
 </div>
-
 <div id="app" style="display:none">
   <div class="header-row">
     <div>
@@ -127,63 +125,65 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
       <a onclick="signOut()">Uitloggen</a>
     </div>
   </div>
-
   <div id="alert-area"></div>
-
   <div class="stats">
     <div class="stat warn"><div class="label">Te verwerken / betalen</div><div class="value" id="stat-invoices">–</div></div>
     <div class="stat danger"><div class="label">Wacht op antwoord</div><div class="value" id="stat-reply">–</div></div>
     <div class="stat"><div class="label">Komende deadlines</div><div class="value" id="stat-deadlines">–</div></div>
     <div class="stat ok"><div class="label">Komende afspraken</div><div class="value" id="stat-events">–</div></div>
   </div>
-
   <div class="section">
     <h2>Te verwerken / te betalen <span class="count" id="invoices-count">0</span></h2>
     <div id="invoices-list"><div class="loading">Laden…</div></div>
   </div>
-
   <div class="section">
     <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
     <div id="reply-list"><div class="loading">Laden…</div></div>
   </div>
-
   <div class="section">
     <h2>Komende deadlines <span class="count" id="deadlines-count">0</span></h2>
     <div id="deadlines-list"><div class="loading">Laden…</div></div>
   </div>
-
   <div class="section">
     <h2>Komende 2 dagen <span class="count" id="events-count">0</span></h2>
     <div id="events-list"><div class="loading">Laden…</div></div>
   </div>
 </div>
-
 <div id="toast"></div>
-
-  <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
 <script>
 // ============================================================
-//  CONFIG — vul hier je Azure AD App (client) ID in.
+//  CONFIG
 // ============================================================
 const CLIENT_ID = "866230d7-2236-4814-af6f-cffb47d3ab08";
-const TENANT = "common"; // 'common' = persoonlijke + organisatie-accounts
+const TENANT = "common";
 const MONEYMONK_ADDRESS = "triplet-it@inkomend.moneymonk.nl";
 const PROCESSED_FOLDER_NAME = "MoneyMonk Verwerkt";
-const SCOPES = ["Mail.ReadWrite", "Calendars.Read", "User.Read"];
-// ============================================================
+
+// All mailboxes to monitor. The first one is the "primary" — used for calendar.
+// label = short name shown as badge; color = badge text color.
+const MAILBOXES = [
+  { email: "micha@triplet-it.nl",        label: "Micha",       color: "#185fa5" },
+  { email: "info@triplet-it.nl",         label: "Info",        color: "#534ab7" },
+  { email: "administratie@triplet-it.nl",label: "Admin",       color: "#3b6d11" },
+  { email: "inkoop@triplet-it.nl",       label: "Inkoop",      color: "#854f0b" },
+  { email: "facturen@triplet-it.nl",     label: "Facturen",    color: "#a32d2d" },
+  { email: "finance@triplet-it.nl",  label: "Crediteuren", color: "#d4537e" }
+];
+
+const SCOPES = ["Mail.ReadWrite", "Mail.ReadWrite.Shared", "Calendars.Read", "User.Read"];
 
 const SELF_DOMAINS = ["triplet-it.nl"];
-const SELF_EMAILS = ["michavantuyl@gmail.com", "micha@triplet-it.nl"];
+const SELF_EMAILS = ["michavantuyl@gmail.com", ...MAILBOXES.map(m => m.email.toLowerCase())];
+// ============================================================
 
 let msalInstance = null;
 let account = null;
 
 const $ = (id) => document.getElementById(id);
-
 function escapeHtml(s) {
   return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 }
-
 function showToast(text, kind) {
   const bar = $("toast");
   bar.textContent = text;
@@ -193,12 +193,10 @@ function showToast(text, kind) {
   clearTimeout(window.__toastTimer);
   window.__toastTimer = setTimeout(() => { bar.style.opacity = '0'; setTimeout(() => bar.style.display = 'none', 300); }, 2500);
 }
-
 function setStatus(text, live) {
   $("status-text").textContent = text;
   $("status-dot").className = "dot" + (live ? " live" : "");
 }
-
 function showError(msg) {
   const el = document.createElement('div');
   el.className = 'err';
@@ -214,7 +212,6 @@ async function initAuth() {
     $("config-error").style.display = "block";
     return false;
   }
-
   msalInstance = new msal.PublicClientApplication({
     auth: {
       clientId: CLIENT_ID,
@@ -223,38 +220,28 @@ async function initAuth() {
     },
     cache: { cacheLocation: "localStorage" }
   });
-
   await msalInstance.initialize();
-
-  // Handle redirect response if returning from sign-in
   const resp = await msalInstance.handleRedirectPromise();
-  if (resp && resp.account) {
-    account = resp.account;
-  } else {
+  if (resp && resp.account) account = resp.account;
+  else {
     const accounts = msalInstance.getAllAccounts();
     if (accounts.length > 0) account = accounts[0];
   }
-
   return true;
 }
-
 async function signIn() {
   try {
     const resp = await msalInstance.loginPopup({ scopes: SCOPES, prompt: "select_account" });
     account = resp.account;
     showApp();
-  } catch (e) {
-    showToast("Inloggen mislukt: " + (e.message || e), 'err');
-  }
+  } catch (e) { showToast("Inloggen mislukt: " + (e.message || e), 'err'); }
 }
-
 function signOut() {
   msalInstance.logoutPopup({ account: account });
   account = null;
   $("app").style.display = "none";
   $("signin").style.display = "block";
 }
-
 async function getToken() {
   try {
     const resp = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account: account });
@@ -271,6 +258,7 @@ async function getToken() {
 // ============================================================
 //  GRAPH API
 // ============================================================
+// `userPath` is empty string for /me, or `/users/{email}` for shared mailboxes.
 async function graph(method, path, body) {
   const token = await getToken();
   const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + path;
@@ -294,48 +282,46 @@ async function graph(method, path, body) {
   return await res.json();
 }
 
-async function searchMessages(query, top) {
-  // $search returns up to N messages matching the query (subject + body + attachments)
-  const url = `/me/messages?$search="${encodeURIComponent(query)}"&$top=${top || 25}&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
-  const r = await graph("GET", url);
-  return r.value || [];
+function userPath(mbox) {
+  // Use /me for the signed-in user's own mailbox; /users/{email} for shared ones.
+  const signedIn = (account && account.username || "").toLowerCase();
+  return mbox.email.toLowerCase() === signedIn ? "/me" : `/users/${encodeURIComponent(mbox.email)}`;
 }
 
-async function listInbox(top) {
-  const url = `/me/mailFolders/Inbox/messages?$top=${top || 25}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+async function searchMessages(mbox, query, top) {
+  const base = userPath(mbox);
+  const url = `${base}/messages?$search="${encodeURIComponent(query)}"&$top=${top || 25}&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
   const r = await graph("GET", url);
-  return r.value || [];
+  return (r.value || []).map(m => ({ ...m, _mailbox: mbox }));
 }
-
+async function listInbox(mbox, top) {
+  const base = userPath(mbox);
+  const url = `${base}/mailFolders/Inbox/messages?$top=${top || 25}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+  const r = await graph("GET", url);
+  return (r.value || []).map(m => ({ ...m, _mailbox: mbox }));
+}
 async function listEvents(daysAhead) {
+  // Calendar only from the signed-in user's primary mailbox
   const start = new Date().toISOString();
   const end = new Date(Date.now() + (daysAhead || 2) * 86400000).toISOString();
   const url = `/me/calendarView?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$top=25&$orderby=start/dateTime&$select=id,subject,start,end,location,webLink,isCancelled`;
   const r = await graph("GET", url);
   return (r.value || []).filter(e => !e.isCancelled);
 }
-
-// Find folder ID by display name (walks the tree, caches result)
-async function findFolderId(name) {
-  const cacheKey = "folder_id_" + name;
+async function findFolderId(mbox, name) {
+  const cacheKey = "folder_id_" + mbox.email + "_" + name;
   const cached = localStorage.getItem(cacheKey);
   if (cached) return cached;
-
-  // BFS through folder hierarchy
+  const base = userPath(mbox);
   async function walk(parentId) {
     const url = parentId
-      ? `/me/mailFolders/${parentId}/childFolders?$top=100&$select=id,displayName,childFolderCount`
-      : `/me/mailFolders?$top=100&$select=id,displayName,childFolderCount`;
+      ? `${base}/mailFolders/${parentId}/childFolders?$top=100&$select=id,displayName,childFolderCount`
+      : `${base}/mailFolders?$top=100&$select=id,displayName,childFolderCount`;
     const r = await graph("GET", url);
     const folders = r.value || [];
-    for (const f of folders) {
-      if (f.displayName === name) return f.id;
-    }
-    for (const f of folders) {
-      if (f.childFolderCount > 0) {
-        const sub = await walk(f.id);
-        if (sub) return sub;
-      }
+    for (const f of folders) if (f.displayName === name) return f.id;
+    for (const f of folders) if (f.childFolderCount > 0) {
+      const sub = await walk(f.id); if (sub) return sub;
     }
     return null;
   }
@@ -343,21 +329,19 @@ async function findFolderId(name) {
   if (id) localStorage.setItem(cacheKey, id);
   return id;
 }
-
-async function moveMessage(messageId, folderId) {
-  return graph("POST", `/me/messages/${messageId}/move`, { destinationId: folderId });
+async function moveMessage(mbox, messageId, folderId) {
+  const base = userPath(mbox);
+  return graph("POST", `${base}/messages/${messageId}/move`, { destinationId: folderId });
 }
-
-async function markRead(messageId) {
-  return graph("PATCH", `/me/messages/${messageId}`, { isRead: true });
+async function markRead(mbox, messageId) {
+  const base = userPath(mbox);
+  return graph("PATCH", `${base}/messages/${messageId}`, { isRead: true });
 }
 
 // ============================================================
-//  HEURISTICS (replace AI classification)
+//  HEURISTICS
 // ============================================================
-function senderEmail(e) {
-  return (e.from && e.from.emailAddress && e.from.emailAddress.address) || "";
-}
+function senderEmail(e) { return (e.from && e.from.emailAddress && e.from.emailAddress.address) || ""; }
 function senderName(e) {
   const a = (e.from && e.from.emailAddress) || {};
   if (a.name) return a.name;
@@ -365,25 +349,21 @@ function senderName(e) {
   const at = addr.indexOf("@");
   return at > 0 ? addr.slice(0, at) : addr;
 }
-
 function isOwnInvoice(email) {
   const s = senderEmail(email).toLowerCase();
   if (SELF_EMAILS.includes(s)) return true;
   return SELF_DOMAINS.some(d => s.endsWith("@" + d) || s.endsWith("." + d));
 }
-
 function looksLikeInvoice(email) {
   const subj = (email.subject || "").toLowerCase();
   const body = (email.bodyPreview || "").toLowerCase();
   return /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov/.test(subj)
     || /factuur|invoice|vervaldatum|te betalen|betaaldatum|betalingsherinnering/.test(body.slice(0, 300));
 }
-
 function looksLikePayment(email) {
   const subj = (email.subject || "").toLowerCase();
   return /betalingsherinnering|herinnering|premie|aanmaning|incasso|aov/.test(subj);
 }
-
 function looksAutomated(email) {
   const s = senderEmail(email).toLowerCase();
   const subj = (email.subject || "").toLowerCase();
@@ -391,78 +371,24 @@ function looksAutomated(email) {
     || /^(your |uw )?(weekly|monthly|daily) /i.test(subj)
     || /nieuwsbrief|newsletter|wachtwoord/i.test(subj);
 }
-
 function needsReply(email) {
   if (email.isRead) return false;
   if (looksAutomated(email)) return false;
   if (looksLikeInvoice(email)) return false;
   if (isOwnInvoice(email)) return false;
-  // Skip pure delivery/confirmation patterns
   const subj = (email.subject || "").toLowerCase();
   if (/bezorgen|verzonden|bestelling|tracking|levering|payment received|betaling ontvangen/.test(subj)) return false;
   return true;
 }
 
-// Date pattern extractor — handles Dutch date forms
-const MONTHS_NL = { jan: 1, feb: 2, mrt: 3, maart: 3, apr: 4, mei: 5, jun: 6, juni: 6, jul: 7, juli: 7, aug: 8, sep: 9, sept: 9, okt: 10, nov: 11, dec: 12, januari: 1, februari: 2, maart_: 3, april: 4, augustus: 8, september: 9, oktober: 10, november: 11, december: 12 };
+const MONTHS_NL = { jan:1,feb:2,mrt:3,maart:3,apr:4,mei:5,jun:6,juni:6,jul:7,juli:7,aug:8,sep:9,sept:9,okt:10,nov:11,dec:12,januari:1,februari:2,april:4,augustus:8,september:9,oktober:10,november:11,december:12 };
 const MONTH_REGEX = "(jan|januari|feb|februari|mrt|maart|apr|april|mei|jun|juni|jul|juli|aug|augustus|sep|sept|september|okt|oktober|nov|november|dec|december)";
-
-function extractDeadlines(emails) {
-  const out = [];
-  const now = new Date();
-  const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
-
-  for (const e of emails) {
-    const text = ((e.subject || "") + " " + (e.bodyPreview || "")).slice(0, 800);
-    // Look for "vervaldatum: 7 juni 2026" or "betalen voor 25 mei" or "5 mei 2026"
-    let match;
-
-    // Pattern 1: "vervaldatum/uiterlijk/voor [datum]"
-    const ctxRegex = new RegExp(`(?:vervaldatum|vervalt op|uiterlijk|voor|betalen voor|betaaldatum|te betalen voor)\\s*:?\\s*(\\d{1,2})\\s+${MONTH_REGEX}(?:\\s+(\\d{4}))?`, "gi");
-    while ((match = ctxRegex.exec(text)) !== null) {
-      const d = buildDate(match[1], match[2], match[3]);
-      if (d && d > cutoff) {
-        out.push({
-          what: shortSubject(e),
-          date: d.toISOString().slice(0, 10),
-          context: senderName(e),
-          amount: extractAmount(text),
-          email: e
-        });
-        break; // one per mail
-      }
-    }
-    if (out.find(x => x.email === e)) continue;
-
-    // Pattern 2: bare "DD month YYYY" in body
-    const bareRegex = new RegExp(`\\b(\\d{1,2})\\s+${MONTH_REGEX}\\s+(\\d{4})\\b`, "i");
-    match = bareRegex.exec(text);
-    if (match) {
-      const d = buildDate(match[1], match[2], match[3]);
-      // Only include if it's a future or recent past deadline AND looks like an invoice context
-      if (d && Math.abs(d - now) < 90 * 86400000 && (looksLikeInvoice(e) || looksLikePayment(e))) {
-        out.push({
-          what: shortSubject(e),
-          date: d.toISOString().slice(0, 10),
-          context: senderName(e),
-          amount: extractAmount(text),
-          email: e
-        });
-      }
-    }
-  }
-  // Sort ascending by date
-  out.sort((a, b) => new Date(a.date) - new Date(b.date));
-  return out.slice(0, 12);
-}
-
 function buildDate(day, monthStr, yearStr) {
   const m = MONTHS_NL[monthStr.toLowerCase()];
   if (!m) return null;
   const d = parseInt(day, 10);
   let y = parseInt(yearStr, 10);
   if (!y) {
-    // Assume current or next year
     const now = new Date();
     y = now.getFullYear();
     const candidate = new Date(y, m - 1, d);
@@ -471,26 +397,43 @@ function buildDate(day, monthStr, yearStr) {
   const dateObj = new Date(y, m - 1, d);
   return isNaN(dateObj) ? null : dateObj;
 }
-
-function shortSubject(e) {
-  let s = e.subject || "";
-  if (s.length > 60) s = s.slice(0, 57) + "…";
-  return s;
-}
-
-function extractAmount(text) {
-  const m = text.match(/€\s*([\d.,]+)/);
-  if (!m) return null;
-  return "€ " + m[1];
+function shortSubject(e) { let s = e.subject || ""; if (s.length > 60) s = s.slice(0, 57) + "…"; return s; }
+function extractAmount(text) { const m = text.match(/€\s*([\d.,]+)/); return m ? "€ " + m[1] : null; }
+function extractDeadlines(emails) {
+  const out = [];
+  const now = new Date();
+  const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+  for (const e of emails) {
+    const text = ((e.subject || "") + " " + (e.bodyPreview || "")).slice(0, 800);
+    let match;
+    const ctxRegex = new RegExp(`(?:vervaldatum|vervalt op|uiterlijk|voor|betalen voor|betaaldatum|te betalen voor)\\s*:?\\s*(\\d{1,2})\\s+${MONTH_REGEX}(?:\\s+(\\d{4}))?`, "gi");
+    let used = false;
+    while ((match = ctxRegex.exec(text)) !== null) {
+      const d = buildDate(match[1], match[2], match[3]);
+      if (d && d > cutoff) {
+        out.push({ what: shortSubject(e), date: d.toISOString().slice(0, 10), context: senderName(e), amount: extractAmount(text), email: e });
+        used = true; break;
+      }
+    }
+    if (used) continue;
+    const bareRegex = new RegExp(`\\b(\\d{1,2})\\s+${MONTH_REGEX}\\s+(\\d{4})\\b`, "i");
+    match = bareRegex.exec(text);
+    if (match) {
+      const d = buildDate(match[1], match[2], match[3]);
+      if (d && Math.abs(d - now) < 90 * 86400000 && (looksLikeInvoice(e) || looksLikePayment(e))) {
+        out.push({ what: shortSubject(e), date: d.toISOString().slice(0, 10), context: senderName(e), amount: extractAmount(text), email: e });
+      }
+    }
+  }
+  out.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return out.slice(0, 12);
 }
 
 // ============================================================
 //  FORMATTING
 // ============================================================
 function fmtRelative(iso) {
-  if (!iso) return "";
-  const d = new Date(iso);
-  if (isNaN(d)) return "";
+  if (!iso) return ""; const d = new Date(iso); if (isNaN(d)) return "";
   const days = Math.floor((Date.now() - d.getTime()) / 86400000);
   if (days < 1) return "vandaag";
   if (days === 1) return "gisteren";
@@ -498,12 +441,8 @@ function fmtRelative(iso) {
   if (days < 30) return Math.floor(days / 7) + " weken geleden";
   return d.toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
 }
-
-function fmtEventTime(iso, tz) {
-  if (!iso) return "";
-  // Graph returns local times in event.start.dateTime as "2026-06-05T07:00:00.0000000"
-  const d = new Date(iso);
-  if (isNaN(d)) return "";
+function fmtEventTime(iso) {
+  if (!iso) return ""; const d = new Date(iso); if (isNaN(d)) return "";
   const now = new Date();
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const tomorrow = new Date(today.getTime() + 86400000);
@@ -516,6 +455,11 @@ function fmtEventTime(iso, tz) {
   return d.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" }) + " " + time;
 }
 
+function mboxBadge(mbox) {
+  if (!mbox) return "";
+  return `<span class="badge mbox" style="color:${escapeHtml(mbox.color || '#5f5e5a')}">${escapeHtml(mbox.label || mbox.email)}</span>`;
+}
+
 // ============================================================
 //  RENDER
 // ============================================================
@@ -523,19 +467,15 @@ function renderInvoices(emails) {
   $("stat-invoices").textContent = emails.length;
   $("invoices-count").textContent = emails.length;
   const list = $("invoices-list");
-  if (emails.length === 0) {
-    list.innerHTML = '<div class="empty">Niets te verwerken of te betalen. ✓</div>';
-    return;
-  }
+  if (emails.length === 0) { list.innerHTML = '<div class="empty">Niets te verwerken of te betalen. ✓</div>'; return; }
   list.innerHTML = emails.map(e => {
     const unreadBadge = !e.isRead ? '<span class="badge info">Nieuw</span>' : '';
     const isPayment = looksLikePayment(e);
-    const typeBadge = isPayment
-      ? '<span class="badge danger">Betalen</span>'
-      : (e.hasAttachments ? '<span class="badge">PDF</span>' : '<span class="badge warn">geen bijlage</span>');
+    const typeBadge = isPayment ? '<span class="badge danger">Betalen</span>' : (e.hasAttachments ? '<span class="badge">PDF</span>' : '<span class="badge warn">geen bijlage</span>');
     return `<div class="row" data-id="${escapeHtml(e.id)}">
       <div class="info">
         <div class="top">
+          ${mboxBadge(e._mailbox)}
           <span class="from" title="${escapeHtml(senderEmail(e))}">${escapeHtml(senderName(e))}</span>
           ${unreadBadge}
           ${typeBadge}
@@ -547,31 +487,27 @@ function renderInvoices(emails) {
       </div>
       <div class="actions">
         <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Open</a>
-        <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" title="Verplaats naar ${PROCESSED_FOLDER_NAME}">Verwerkt ✓</button>
+        <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}">Verwerkt ✓</button>
       </div>
     </div>`;
   }).join("");
   list.querySelectorAll('[data-action="processed"]').forEach(btn => {
-    btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id));
+    btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id, btn.dataset.mbox));
   });
 }
-
 function renderReply(emails) {
   $("stat-reply").textContent = emails.length;
   $("reply-count").textContent = emails.length;
   const list = $("reply-list");
-  if (emails.length === 0) {
-    list.innerHTML = '<div class="empty">Geen mails die persoonlijk antwoord vragen. ✓</div>';
-    return;
-  }
+  if (emails.length === 0) { list.innerHTML = '<div class="empty">Geen mails die persoonlijk antwoord vragen. ✓</div>'; return; }
   list.innerHTML = emails.map(e => {
     const rel = fmtRelative(e.receivedDateTime);
-    const ageMs = Date.now() - new Date(e.receivedDateTime).getTime();
-    const old = ageMs > 3 * 86400000;
+    const old = Date.now() - new Date(e.receivedDateTime).getTime() > 3 * 86400000;
     const ageBadge = `<span class="badge ${old ? 'warn' : ''}">${escapeHtml(rel)}</span>`;
     return `<div class="row" data-id="${escapeHtml(e.id)}">
       <div class="info">
         <div class="top">
+          ${mboxBadge(e._mailbox)}
           <span class="from" title="${escapeHtml(senderEmail(e))}">${escapeHtml(senderName(e))}</span>
           ${ageBadge}
         </div>
@@ -581,23 +517,19 @@ function renderReply(emails) {
       </div>
       <div class="actions">
         <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Beantwoorden</a>
-        <button class="btn primary" data-action="handled" data-id="${escapeHtml(e.id)}" title="Markeer als gelezen">Klaar ✓</button>
+        <button class="btn primary" data-action="handled" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}">Klaar ✓</button>
       </div>
     </div>`;
   }).join("");
   list.querySelectorAll('[data-action="handled"]').forEach(btn => {
-    btn.addEventListener('click', () => markHandled(btn, btn.dataset.id));
+    btn.addEventListener('click', () => markHandled(btn, btn.dataset.id, btn.dataset.mbox));
   });
 }
-
 function renderDeadlines(items) {
   $("stat-deadlines").textContent = items.length;
   $("deadlines-count").textContent = items.length;
   const list = $("deadlines-list");
-  if (items.length === 0) {
-    list.innerHTML = '<div class="empty">Geen deadlines gedetecteerd in recente mails.</div>';
-    return;
-  }
+  if (items.length === 0) { list.innerHTML = '<div class="empty">Geen deadlines gedetecteerd in recente mails.</div>'; return; }
   list.innerHTML = items.map(d => {
     const dateObj = new Date(d.date);
     const days = Math.ceil((dateObj.getTime() - Date.now()) / 86400000);
@@ -611,6 +543,7 @@ function renderDeadlines(items) {
     return `<div class="row">
       <div class="info">
         <div class="top">
+          ${mboxBadge(d.email && d.email._mailbox)}
           <span class="from">${escapeHtml(d.what)}</span>
           <span class="badge ${urgencyClass}">${escapeHtml(urgencyLabel)}</span>
         </div>
@@ -622,15 +555,11 @@ function renderDeadlines(items) {
     </div>`;
   }).join("");
 }
-
 function renderEvents(events) {
   $("stat-events").textContent = events.length;
   $("events-count").textContent = events.length;
   const list = $("events-list");
-  if (events.length === 0) {
-    list.innerHTML = '<div class="empty">Geen afspraken in de komende 2 dagen.</div>';
-    return;
-  }
+  if (events.length === 0) { list.innerHTML = '<div class="empty">Geen afspraken in de komende 2 dagen.</div>'; return; }
   list.innerHTML = events.map(e => {
     const startIso = (e.start && e.start.dateTime) ? e.start.dateTime : null;
     return `<div class="event-row">
@@ -648,15 +577,9 @@ function fadeOutRow(rowEl, onDone) {
   rowEl.style.opacity = '0';
   rowEl.style.transform = 'translateX(20px)';
   rowEl.style.maxHeight = '100px';
-  setTimeout(() => {
-    rowEl.style.maxHeight = '0';
-    rowEl.style.padding = '0';
-    rowEl.style.margin = '0';
-    rowEl.style.overflow = 'hidden';
-  }, 200);
+  setTimeout(() => { rowEl.style.maxHeight = '0'; rowEl.style.padding = '0'; rowEl.style.margin = '0'; rowEl.style.overflow = 'hidden'; }, 200);
   setTimeout(() => { rowEl.remove(); if (onDone) onDone(); }, 600);
 }
-
 function decrementCount(statId, countId, listId, emptyMsg) {
   for (const id of [statId, countId]) {
     const el = $(id);
@@ -666,41 +589,39 @@ function decrementCount(statId, countId, listId, emptyMsg) {
     }
   }
   const list = $(listId);
-  if (list && list.children.length === 0) {
-    list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
-  }
+  if (list && list.children.length === 0) list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
 }
+function findMbox(email) { return MAILBOXES.find(m => m.email.toLowerCase() === (email || "").toLowerCase()); }
 
-async function markProcessed(btn, id) {
+async function markProcessed(btn, id, mboxEmail) {
+  const mbox = findMbox(mboxEmail);
+  if (!mbox) { showToast("Onbekende mailbox", 'err'); return; }
   const row = btn.closest('.row');
   const orig = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Verplaatsen…';
+  btn.disabled = true; btn.textContent = 'Verplaatsen…';
   try {
-    const folderId = await findFolderId(PROCESSED_FOLDER_NAME);
-    if (!folderId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" niet gevonden in je mailboxen.`);
-    await moveMessage(id, folderId);
-    showToast('Verplaatst naar ' + PROCESSED_FOLDER_NAME, 'ok');
+    const folderId = await findFolderId(mbox, PROCESSED_FOLDER_NAME);
+    if (!folderId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" niet gevonden in ${mbox.email}.`);
+    await moveMessage(mbox, id, folderId);
+    showToast(`Verplaatst (${mbox.label})`, 'ok');
     fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
   } catch (e) {
-    btn.disabled = false;
-    btn.textContent = orig;
+    btn.disabled = false; btn.textContent = orig;
     showToast('Verplaatsen mislukt: ' + (e.message || e), 'err');
   }
 }
-
-async function markHandled(btn, id) {
+async function markHandled(btn, id, mboxEmail) {
+  const mbox = findMbox(mboxEmail);
+  if (!mbox) { showToast("Onbekende mailbox", 'err'); return; }
   const row = btn.closest('.row');
   const orig = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = 'Markeren…';
+  btn.disabled = true; btn.textContent = 'Markeren…';
   try {
-    await markRead(id);
-    showToast('Gemarkeerd als gelezen', 'ok');
+    await markRead(mbox, id);
+    showToast(`Gemarkeerd (${mbox.label})`, 'ok');
     fadeOutRow(row, () => decrementCount('stat-reply', 'reply-count', 'reply-list', 'Geen mails die persoonlijk antwoord vragen. ✓'));
   } catch (e) {
-    btn.disabled = false;
-    btn.textContent = orig;
+    btn.disabled = false; btn.textContent = orig;
     showToast('Markeren mislukt: ' + (e.message || e), 'err');
   }
 }
@@ -709,9 +630,7 @@ async function markHandled(btn, id) {
 //  MAIN LOAD
 // ============================================================
 async function loadAll() {
-  $("today-line").textContent = new Date().toLocaleDateString('nl-NL', {
-    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
-  });
+  $("today-line").textContent = new Date().toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   $("alert-area").innerHTML = `
     <div class="help">
       <strong>Workflow:</strong> klik <em>Open</em> om de mail door te sturen naar
@@ -723,32 +642,49 @@ async function loadAll() {
 
   try {
     const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning"];
-    const [recents, ...invoiceResults] = await Promise.all([
-      listInbox(50).catch(e => { showError("Inbox: " + e.message); return []; }),
-      ...queries.map(q => searchMessages(q, 25).catch(() => []))
-    ]);
-    const events = await listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; });
 
-    // Merge invoice results + dedupe
+    // For each mailbox: inbox + invoice searches
+    const inboxPromises = MAILBOXES.map(m =>
+      listInbox(m, 30).catch(e => { showError(`Inbox ${m.email}: ${e.message}`); return []; })
+    );
+    const searchPromises = MAILBOXES.flatMap(m =>
+      queries.map(q => searchMessages(m, q, 20).catch(() => []))
+    );
+    const eventsPromise = listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; });
+
+    const [inboxResults, searchResults, events] = await Promise.all([
+      Promise.all(inboxPromises),
+      Promise.all(searchPromises),
+      eventsPromise
+    ]);
+
+    const allInbox = inboxResults.flat();
+    const allInvoiceCandidates = searchResults.flat();
+
+    // Dedupe by id (within a mailbox, ids are unique; across mailboxes they should also be unique)
     const seen = new Set();
     const invoiceCandidates = [];
-    for (const arr of invoiceResults) {
-      for (const m of arr) {
-        if (!m.id || seen.has(m.id)) continue;
-        seen.add(m.id);
-        invoiceCandidates.push(m);
-      }
+    for (const m of allInvoiceCandidates) {
+      if (!m.id || seen.has(m.id)) continue;
+      seen.add(m.id);
+      invoiceCandidates.push(m);
     }
 
-    // Find "MoneyMonk Verwerkt" folder ID to exclude already-processed
-    let processedFolderId = null;
-    try { processedFolderId = await findFolderId(PROCESSED_FOLDER_NAME); } catch (e) {}
-    const sixtyDaysAgo = Date.now() - 60 * 86400000;
+    // Determine "processed" folder IDs per mailbox
+    const processedIds = {};
+    await Promise.all(MAILBOXES.map(async m => {
+      try { processedIds[m.email] = await findFolderId(m, PROCESSED_FOLDER_NAME); }
+      catch (e) { processedIds[m.email] = null; }
+    }));
 
+    const sixtyDaysAgo = Date.now() - 60 * 86400000;
     const invoices = invoiceCandidates
       .filter(e => looksLikeInvoice(e))
       .filter(e => !isOwnInvoice(e))
-      .filter(e => !processedFolderId || e.parentFolderId !== processedFolderId)
+      .filter(e => {
+        const pid = e._mailbox && processedIds[e._mailbox.email];
+        return !pid || e.parentFolderId !== pid;
+      })
       .filter(e => {
         const t = new Date(e.receivedDateTime).getTime();
         return !isNaN(t) && t >= sixtyDaysAgo;
@@ -756,43 +692,33 @@ async function loadAll() {
       .sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
     renderInvoices(invoices);
 
-    // Reply candidates (from inbox)
-    const repliesNeeded = recents.filter(needsReply).slice(0, 8);
+    const repliesNeeded = allInbox.filter(needsReply).sort((a,b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime)).slice(0, 12);
     renderReply(repliesNeeded);
 
-    // Deadlines (from inbox + invoice candidates, dedupe by id)
-    const deadlinePool = [...recents];
+    const deadlinePool = [...allInbox];
     for (const m of invoiceCandidates) if (!deadlinePool.find(x => x.id === m.id)) deadlinePool.push(m);
-    const deadlines = extractDeadlines(deadlinePool);
-    renderDeadlines(deadlines);
+    renderDeadlines(extractDeadlines(deadlinePool));
 
     renderEvents(events);
 
-    setStatus("bijgewerkt " + new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }), false);
+    setStatus(`bijgewerkt ${new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })} · ${MAILBOXES.length} mailboxen`, false);
   } catch (e) {
     showError("Algemeen: " + (e.message || e));
     setStatus("fout bij laden", false);
   }
 }
 
-// ============================================================
-//  ENTRY
-// ============================================================
 function showApp() {
   $("signin").style.display = "none";
   $("app").style.display = "block";
   $("user-label").textContent = (account && (account.username || account.name)) || "";
   loadAll();
 }
-
 (async function init() {
   const ok = await initAuth();
-  if (!ok) return; // config error already shown
-  if (account) {
-    showApp();
-  } else {
-    $("signin").style.display = "block";
-  }
+  if (!ok) return;
+  if (account) showApp();
+  else $("signin").style.display = "block";
 })();
 </script>
 </body>
