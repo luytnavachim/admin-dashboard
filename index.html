@@ -259,7 +259,7 @@ async function getToken() {
 //  GRAPH API
 // ============================================================
 // `userPath` is empty string for /me, or `/users/{email}` for shared mailboxes.
-async function graph(method, path, body) {
+async function graph(method, path, body, retries) {
   const token = await getToken();
   const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + path;
   const opts = {
@@ -276,7 +276,16 @@ async function graph(method, path, body) {
     const errText = await res.text();
     let err;
     try { err = JSON.parse(errText); } catch (e) { err = { error: { message: errText } }; }
-    throw new Error((err.error && err.error.message) || ("HTTP " + res.status));
+    const msg = (err.error && err.error.message) || ("HTTP " + res.status);
+    const isThrottle = res.status === 429 || res.status === 503 || /concurrency|throttl/i.test(msg);
+    const left = (retries == null ? 3 : retries);
+    if (isThrottle && left > 0) {
+      const retryAfterHeader = res.headers.get("Retry-After");
+      const waitMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : (1500 * (4 - left));
+      await new Promise(r => setTimeout(r, waitMs));
+      return graph(method, path, body, left - 1);
+    }
+    throw new Error(msg);
   }
   if (res.status === 204) return null;
   return await res.json();
@@ -643,23 +652,32 @@ async function loadAll() {
   try {
     const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning"];
 
-    // For each mailbox: inbox + invoice searches
-    const inboxPromises = MAILBOXES.map(m =>
-      listInbox(m, 30).catch(e => { showError(`Inbox ${m.email}: ${e.message}`); return []; })
-    );
-    const searchPromises = MAILBOXES.flatMap(m =>
-      queries.map(q => searchMessages(m, q, 20).catch(() => []))
-    );
-    const eventsPromise = listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; });
+// Per mailbox: serieel ophalen (om MailboxConcurrency-limiet te respecteren).
+// Tussen mailboxen: parallel.
+async function fetchMailbox(m) {
+  try {
+    const inbox = await listInbox(m, 30);
+    const invoices = [];
+    for (const q of queries) {
+      try {
+        const r = await searchMessages(m, q, 20);
+        invoices.push(...r);
+      } catch (e) { /* swallow individual query failure */ }
+    }
+    return { inbox, invoices };
+  } catch (e) {
+    showError(`${m.email}: ${e.message}`);
+    return { inbox: [], invoices: [] };
+  }
+}
 
-    const [inboxResults, searchResults, events] = await Promise.all([
-      Promise.all(inboxPromises),
-      Promise.all(searchPromises),
-      eventsPromise
-    ]);
+const [perMbox, events] = await Promise.all([
+  Promise.all(MAILBOXES.map(fetchMailbox)),
+  listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; })
+]);
 
-    const allInbox = inboxResults.flat();
-    const allInvoiceCandidates = searchResults.flat();
+const allInbox = perMbox.flatMap(x => x.inbox);
+const allInvoiceCandidates = perMbox.flatMap(x => x.invoices);
 
     // Dedupe by id (within a mailbox, ids are unique; across mailboxes they should also be unique)
     const seen = new Set();
