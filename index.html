@@ -1,0 +1,801 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Administratie</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #fafaf7;
+  --surface: #ffffff;
+  --border: #e8e6df;
+  --border-strong: #d3d1c7;
+  --text: #1a1a1a;
+  --muted: #5f5e5a;
+  --accent: #185fa5;
+  --accent-bg: #e6f1fb;
+  --warn-bg: #faeeda;
+  --warn-text: #854f0b;
+  --danger-bg: #fcebeb;
+  --danger-text: #a32d2d;
+  --ok-bg: #eaf3de;
+  --ok-text: #3b6d11;
+  --info-bg: #eeedfe;
+  --info-text: #534ab7;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  padding: 1.25rem;
+  max-width: 980px;
+  margin: 0 auto;
+}
+h1 { font-size: 22px; font-weight: 500; margin: 0 0 4px; }
+h2 { font-size: 15px; font-weight: 500; margin: 0 0 10px; display: flex; align-items: center; gap: 8px; }
+h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color: var(--muted); padding: 2px 8px; border-radius: 999px; }
+.subtitle { color: var(--muted); margin: 0 0 1.25rem; font-size: 13px; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.dot { width: 6px; height: 6px; border-radius: 50%; background: var(--muted); }
+.dot.live { background: #3b6d11; animation: pulse 2s ease-in-out infinite; }
+@keyframes pulse { 0%,100% {opacity:1;} 50% {opacity:.4;} }
+.stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 1.25rem; }
+@media (max-width: 720px) { .stats { grid-template-columns: repeat(2, 1fr); } }
+.stat { background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px; padding: 14px 16px; }
+.stat .label { font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.stat .value { font-size: 26px; font-weight: 500; line-height: 1.1; }
+.stat.warn .value { color: var(--warn-text); }
+.stat.danger .value { color: var(--danger-text); }
+.stat.ok .value { color: var(--ok-text); }
+.section { background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px; padding: 16px 18px; margin-bottom: 14px; }
+.row { display: flex; align-items: center; gap: 12px; padding: 10px 0; border-top: 0.5px solid var(--border); }
+.row:first-of-type { border-top: none; padding-top: 4px; }
+.row .info { flex: 1; min-width: 0; }
+.row .info .top { display: flex; gap: 8px; font-size: 13px; color: var(--muted); margin-bottom: 2px; align-items: center; }
+.row .info .from { font-weight: 500; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+.row .info .subject { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row .info .meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+.subject-link { text-decoration: none; color: inherit; display: block; }
+.subject-link:hover .subject { color: var(--accent); }
+.badge { display: inline-block; font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px; background: var(--accent-bg); color: var(--accent); white-space: nowrap; }
+.badge.warn { background: var(--warn-bg); color: var(--warn-text); }
+.badge.danger { background: var(--danger-bg); color: var(--danger-text); }
+.badge.ok { background: var(--ok-bg); color: var(--ok-text); }
+.badge.info { background: var(--info-bg); color: var(--info-text); }
+.actions { display: flex; gap: 6px; flex-shrink: 0; }
+.btn { background: var(--surface); border: 0.5px solid var(--border-strong); border-radius: 8px; padding: 6px 12px; font-size: 12px; font-weight: 500; color: var(--text); cursor: pointer; font-family: inherit; text-decoration: none; display: inline-block; transition: all .15s; }
+.btn:hover { background: var(--bg); border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: white; border-color: var(--accent); }
+.btn.primary:hover { background: #134e87; color: white; }
+.btn:disabled { opacity: .6; cursor: wait; }
+.empty { color: var(--muted); font-size: 13px; font-style: italic; padding: 8px 0; }
+.loading { color: var(--muted); font-size: 13px; padding: 8px 0; }
+.event-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 0.5px solid var(--border); }
+.event-row:first-of-type { border-top: none; }
+.event-row .when { font-size: 12px; font-weight: 500; color: var(--accent); min-width: 120px; }
+.event-row .title { flex: 1; font-size: 14px; }
+.event-row .loc { font-size: 12px; color: var(--muted); }
+.err { background: var(--danger-bg); color: var(--danger-text); padding: 10px 12px; border-radius: 8px; font-size: 12px; margin-bottom: 10px; white-space: pre-wrap; }
+.help { background: var(--accent-bg); color: var(--accent); padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5; }
+.help strong { color: #0c447c; }
+.signin { text-align: center; padding: 60px 20px; }
+.signin h2 { font-size: 20px; margin: 0 0 8px; justify-content: center; }
+.signin p { color: var(--muted); margin: 0 0 24px; }
+.signin .btn { font-size: 14px; padding: 10px 20px; }
+.config-warning { background: var(--warn-bg); color: var(--warn-text); padding: 14px 18px; border-radius: 12px; margin: 20px 0; font-size: 13px; line-height: 1.6; }
+.config-warning code { background: #fff; padding: 2px 6px; border-radius: 4px; font-size: 12px; }
+#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: #2c2c2a; color: #fff; padding: 10px 18px; border-radius: 8px; font-size: 13px; z-index: 9999; box-shadow: 0 4px 12px rgba(0,0,0,.15); max-width: 90%; display: none; }
+.header-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; gap: 12px; flex-wrap: wrap; }
+.header-actions { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
+.header-actions a { color: var(--accent); text-decoration: none; cursor: pointer; }
+.header-actions a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<div id="config-error" style="display:none">
+  <h1>Administratie</h1>
+  <div class="config-warning">
+    <strong>Eerst even instellen.</strong> Dit dashboard heeft een Microsoft Azure AD <em>Application (client) ID</em> nodig om in te kunnen loggen. Open <code>index.html</code> in een editor en vul je client-id in bij <code>CLIENT_ID</code> bovenaan in het <code>&lt;script&gt;</code>-blok. Zie <a href="README.md">README.md</a> voor 10-minuten setup-stappen.
+  </div>
+</div>
+
+<div id="signin" class="signin" style="display:none">
+  <h1>Administratie</h1>
+  <p>Log in met je Microsoft-account om je inbox en agenda te zien.</p>
+  <button class="btn primary" onclick="signIn()">Inloggen met Microsoft</button>
+</div>
+
+<div id="app" style="display:none">
+  <div class="header-row">
+    <div>
+      <h1>Administratie</h1>
+      <p class="subtitle">
+        <span id="today-line">Laden…</span>
+        <span class="dot live" id="status-dot"></span>
+        <span id="status-text" style="font-size:12px;">verbinden met Outlook</span>
+      </p>
+    </div>
+    <div class="header-actions">
+      <a onclick="loadAll()">Verversen</a>
+      <span>·</span>
+      <span id="user-label"></span>
+      <a onclick="signOut()">Uitloggen</a>
+    </div>
+  </div>
+
+  <div id="alert-area"></div>
+
+  <div class="stats">
+    <div class="stat warn"><div class="label">Te verwerken / betalen</div><div class="value" id="stat-invoices">–</div></div>
+    <div class="stat danger"><div class="label">Wacht op antwoord</div><div class="value" id="stat-reply">–</div></div>
+    <div class="stat"><div class="label">Komende deadlines</div><div class="value" id="stat-deadlines">–</div></div>
+    <div class="stat ok"><div class="label">Komende afspraken</div><div class="value" id="stat-events">–</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Te verwerken / te betalen <span class="count" id="invoices-count">0</span></h2>
+    <div id="invoices-list"><div class="loading">Laden…</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
+    <div id="reply-list"><div class="loading">Laden…</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Komende deadlines <span class="count" id="deadlines-count">0</span></h2>
+    <div id="deadlines-list"><div class="loading">Laden…</div></div>
+  </div>
+
+  <div class="section">
+    <h2>Komende 2 dagen <span class="count" id="events-count">0</span></h2>
+    <div id="events-list"><div class="loading">Laden…</div></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script src="https://alcdn.msauth.net/browser/3.10.0/js/msal-browser.min.js"
+  integrity="sha384-cnHpDhfsiqgGm54O3Lqgrh1qbCFhU/uA98qx5dh3VTjGECkA6+7T8oH/+rbBvShS"
+  crossorigin="anonymous"></script>
+<script>
+// ============================================================
+//  CONFIG — vul hier je Azure AD App (client) ID in.
+// ============================================================
+const CLIENT_ID = "866230d7-2236-4814-af6f-cffb47d3ab08";
+const TENANT = "common"; // 'common' = persoonlijke + organisatie-accounts
+const MONEYMONK_ADDRESS = "triplet-it@inkomend.moneymonk.nl";
+const PROCESSED_FOLDER_NAME = "MoneyMonk Verwerkt";
+const SCOPES = ["Mail.ReadWrite", "Calendars.Read", "User.Read"];
+// ============================================================
+
+const SELF_DOMAINS = ["triplet-it.nl"];
+const SELF_EMAILS = ["michavantuyl@gmail.com", "micha@triplet-it.nl"];
+
+let msalInstance = null;
+let account = null;
+
+const $ = (id) => document.getElementById(id);
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function showToast(text, kind) {
+  const bar = $("toast");
+  bar.textContent = text;
+  bar.style.background = kind === 'err' ? '#a32d2d' : (kind === 'ok' ? '#3b6d11' : '#2c2c2a');
+  bar.style.display = 'block';
+  bar.style.opacity = '1';
+  clearTimeout(window.__toastTimer);
+  window.__toastTimer = setTimeout(() => { bar.style.opacity = '0'; setTimeout(() => bar.style.display = 'none', 300); }, 2500);
+}
+
+function setStatus(text, live) {
+  $("status-text").textContent = text;
+  $("status-dot").className = "dot" + (live ? " live" : "");
+}
+
+function showError(msg) {
+  const el = document.createElement('div');
+  el.className = 'err';
+  el.textContent = '⚠ ' + msg;
+  $("alert-area").appendChild(el);
+}
+
+// ============================================================
+//  AUTH
+// ============================================================
+async function initAuth() {
+  if (!CLIENT_ID || CLIENT_ID === "PASTE_YOUR_CLIENT_ID_HERE") {
+    $("config-error").style.display = "block";
+    return false;
+  }
+
+  msalInstance = new msal.PublicClientApplication({
+    auth: {
+      clientId: CLIENT_ID,
+      authority: `https://login.microsoftonline.com/${TENANT}`,
+      redirectUri: window.location.origin + window.location.pathname
+    },
+    cache: { cacheLocation: "localStorage" }
+  });
+
+  await msalInstance.initialize();
+
+  // Handle redirect response if returning from sign-in
+  const resp = await msalInstance.handleRedirectPromise();
+  if (resp && resp.account) {
+    account = resp.account;
+  } else {
+    const accounts = msalInstance.getAllAccounts();
+    if (accounts.length > 0) account = accounts[0];
+  }
+
+  return true;
+}
+
+async function signIn() {
+  try {
+    const resp = await msalInstance.loginPopup({ scopes: SCOPES, prompt: "select_account" });
+    account = resp.account;
+    showApp();
+  } catch (e) {
+    showToast("Inloggen mislukt: " + (e.message || e), 'err');
+  }
+}
+
+function signOut() {
+  msalInstance.logoutPopup({ account: account });
+  account = null;
+  $("app").style.display = "none";
+  $("signin").style.display = "block";
+}
+
+async function getToken() {
+  try {
+    const resp = await msalInstance.acquireTokenSilent({ scopes: SCOPES, account: account });
+    return resp.accessToken;
+  } catch (e) {
+    if (e.errorCode === "consent_required" || e.errorCode === "interaction_required" || e.errorCode === "login_required") {
+      const resp = await msalInstance.acquireTokenPopup({ scopes: SCOPES, account: account });
+      return resp.accessToken;
+    }
+    throw e;
+  }
+}
+
+// ============================================================
+//  GRAPH API
+// ============================================================
+async function graph(method, path, body) {
+  const token = await getToken();
+  const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + path;
+  const opts = {
+    method,
+    headers: {
+      "Authorization": "Bearer " + token,
+      "Content-Type": "application/json",
+      "Prefer": "outlook.body-content-type=\"text\""
+    }
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(url, opts);
+  if (!res.ok) {
+    const errText = await res.text();
+    let err;
+    try { err = JSON.parse(errText); } catch (e) { err = { error: { message: errText } }; }
+    throw new Error((err.error && err.error.message) || ("HTTP " + res.status));
+  }
+  if (res.status === 204) return null;
+  return await res.json();
+}
+
+async function searchMessages(query, top) {
+  // $search returns up to N messages matching the query (subject + body + attachments)
+  const url = `/me/messages?$search="${encodeURIComponent(query)}"&$top=${top || 25}&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+  const r = await graph("GET", url);
+  return r.value || [];
+}
+
+async function listInbox(top) {
+  const url = `/me/mailFolders/Inbox/messages?$top=${top || 25}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+  const r = await graph("GET", url);
+  return r.value || [];
+}
+
+async function listEvents(daysAhead) {
+  const start = new Date().toISOString();
+  const end = new Date(Date.now() + (daysAhead || 2) * 86400000).toISOString();
+  const url = `/me/calendarView?startDateTime=${encodeURIComponent(start)}&endDateTime=${encodeURIComponent(end)}&$top=25&$orderby=start/dateTime&$select=id,subject,start,end,location,webLink,isCancelled`;
+  const r = await graph("GET", url);
+  return (r.value || []).filter(e => !e.isCancelled);
+}
+
+// Find folder ID by display name (walks the tree, caches result)
+async function findFolderId(name) {
+  const cacheKey = "folder_id_" + name;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) return cached;
+
+  // BFS through folder hierarchy
+  async function walk(parentId) {
+    const url = parentId
+      ? `/me/mailFolders/${parentId}/childFolders?$top=100&$select=id,displayName,childFolderCount`
+      : `/me/mailFolders?$top=100&$select=id,displayName,childFolderCount`;
+    const r = await graph("GET", url);
+    const folders = r.value || [];
+    for (const f of folders) {
+      if (f.displayName === name) return f.id;
+    }
+    for (const f of folders) {
+      if (f.childFolderCount > 0) {
+        const sub = await walk(f.id);
+        if (sub) return sub;
+      }
+    }
+    return null;
+  }
+  const id = await walk();
+  if (id) localStorage.setItem(cacheKey, id);
+  return id;
+}
+
+async function moveMessage(messageId, folderId) {
+  return graph("POST", `/me/messages/${messageId}/move`, { destinationId: folderId });
+}
+
+async function markRead(messageId) {
+  return graph("PATCH", `/me/messages/${messageId}`, { isRead: true });
+}
+
+// ============================================================
+//  HEURISTICS (replace AI classification)
+// ============================================================
+function senderEmail(e) {
+  return (e.from && e.from.emailAddress && e.from.emailAddress.address) || "";
+}
+function senderName(e) {
+  const a = (e.from && e.from.emailAddress) || {};
+  if (a.name) return a.name;
+  const addr = a.address || "";
+  const at = addr.indexOf("@");
+  return at > 0 ? addr.slice(0, at) : addr;
+}
+
+function isOwnInvoice(email) {
+  const s = senderEmail(email).toLowerCase();
+  if (SELF_EMAILS.includes(s)) return true;
+  return SELF_DOMAINS.some(d => s.endsWith("@" + d) || s.endsWith("." + d));
+}
+
+function looksLikeInvoice(email) {
+  const subj = (email.subject || "").toLowerCase();
+  const body = (email.bodyPreview || "").toLowerCase();
+  return /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov/.test(subj)
+    || /factuur|invoice|vervaldatum|te betalen|betaaldatum|betalingsherinnering/.test(body.slice(0, 300));
+}
+
+function looksLikePayment(email) {
+  const subj = (email.subject || "").toLowerCase();
+  return /betalingsherinnering|herinnering|premie|aanmaning|incasso|aov/.test(subj);
+}
+
+function looksAutomated(email) {
+  const s = senderEmail(email).toLowerCase();
+  const subj = (email.subject || "").toLowerCase();
+  return /(noreply|no-reply|donotreply|do-not-reply|newsletter|mailing|notification|notifications|mailchi|mcsv|sendgrid|amazonses|click\.|hubspot|info@retail|info@linkedin|news@|marketing@)/.test(s)
+    || /^(your |uw )?(weekly|monthly|daily) /i.test(subj)
+    || /nieuwsbrief|newsletter|wachtwoord/i.test(subj);
+}
+
+function needsReply(email) {
+  if (email.isRead) return false;
+  if (looksAutomated(email)) return false;
+  if (looksLikeInvoice(email)) return false;
+  if (isOwnInvoice(email)) return false;
+  // Skip pure delivery/confirmation patterns
+  const subj = (email.subject || "").toLowerCase();
+  if (/bezorgen|verzonden|bestelling|tracking|levering|payment received|betaling ontvangen/.test(subj)) return false;
+  return true;
+}
+
+// Date pattern extractor — handles Dutch date forms
+const MONTHS_NL = { jan: 1, feb: 2, mrt: 3, maart: 3, apr: 4, mei: 5, jun: 6, juni: 6, jul: 7, juli: 7, aug: 8, sep: 9, sept: 9, okt: 10, nov: 11, dec: 12, januari: 1, februari: 2, maart_: 3, april: 4, augustus: 8, september: 9, oktober: 10, november: 11, december: 12 };
+const MONTH_REGEX = "(jan|januari|feb|februari|mrt|maart|apr|april|mei|jun|juni|jul|juli|aug|augustus|sep|sept|september|okt|oktober|nov|november|dec|december)";
+
+function extractDeadlines(emails) {
+  const out = [];
+  const now = new Date();
+  const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+
+  for (const e of emails) {
+    const text = ((e.subject || "") + " " + (e.bodyPreview || "")).slice(0, 800);
+    // Look for "vervaldatum: 7 juni 2026" or "betalen voor 25 mei" or "5 mei 2026"
+    let match;
+
+    // Pattern 1: "vervaldatum/uiterlijk/voor [datum]"
+    const ctxRegex = new RegExp(`(?:vervaldatum|vervalt op|uiterlijk|voor|betalen voor|betaaldatum|te betalen voor)\\s*:?\\s*(\\d{1,2})\\s+${MONTH_REGEX}(?:\\s+(\\d{4}))?`, "gi");
+    while ((match = ctxRegex.exec(text)) !== null) {
+      const d = buildDate(match[1], match[2], match[3]);
+      if (d && d > cutoff) {
+        out.push({
+          what: shortSubject(e),
+          date: d.toISOString().slice(0, 10),
+          context: senderName(e),
+          amount: extractAmount(text),
+          email: e
+        });
+        break; // one per mail
+      }
+    }
+    if (out.find(x => x.email === e)) continue;
+
+    // Pattern 2: bare "DD month YYYY" in body
+    const bareRegex = new RegExp(`\\b(\\d{1,2})\\s+${MONTH_REGEX}\\s+(\\d{4})\\b`, "i");
+    match = bareRegex.exec(text);
+    if (match) {
+      const d = buildDate(match[1], match[2], match[3]);
+      // Only include if it's a future or recent past deadline AND looks like an invoice context
+      if (d && Math.abs(d - now) < 90 * 86400000 && (looksLikeInvoice(e) || looksLikePayment(e))) {
+        out.push({
+          what: shortSubject(e),
+          date: d.toISOString().slice(0, 10),
+          context: senderName(e),
+          amount: extractAmount(text),
+          email: e
+        });
+      }
+    }
+  }
+  // Sort ascending by date
+  out.sort((a, b) => new Date(a.date) - new Date(b.date));
+  return out.slice(0, 12);
+}
+
+function buildDate(day, monthStr, yearStr) {
+  const m = MONTHS_NL[monthStr.toLowerCase()];
+  if (!m) return null;
+  const d = parseInt(day, 10);
+  let y = parseInt(yearStr, 10);
+  if (!y) {
+    // Assume current or next year
+    const now = new Date();
+    y = now.getFullYear();
+    const candidate = new Date(y, m - 1, d);
+    if (candidate < now) y += 1;
+  }
+  const dateObj = new Date(y, m - 1, d);
+  return isNaN(dateObj) ? null : dateObj;
+}
+
+function shortSubject(e) {
+  let s = e.subject || "";
+  if (s.length > 60) s = s.slice(0, 57) + "…";
+  return s;
+}
+
+function extractAmount(text) {
+  const m = text.match(/€\s*([\d.,]+)/);
+  if (!m) return null;
+  return "€ " + m[1];
+}
+
+// ============================================================
+//  FORMATTING
+// ============================================================
+function fmtRelative(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const days = Math.floor((Date.now() - d.getTime()) / 86400000);
+  if (days < 1) return "vandaag";
+  if (days === 1) return "gisteren";
+  if (days < 7) return days + " dagen geleden";
+  if (days < 30) return Math.floor(days / 7) + " weken geleden";
+  return d.toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+}
+
+function fmtEventTime(iso, tz) {
+  if (!iso) return "";
+  // Graph returns local times in event.start.dateTime as "2026-06-05T07:00:00.0000000"
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const tomorrow = new Date(today.getTime() + 86400000);
+  const dayAfter = new Date(today.getTime() + 2 * 86400000);
+  const dayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const time = d.toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" });
+  if (dayStart.getTime() === today.getTime()) return "Vandaag " + time;
+  if (dayStart.getTime() === tomorrow.getTime()) return "Morgen " + time;
+  if (dayStart.getTime() === dayAfter.getTime()) return "Overmorgen " + time;
+  return d.toLocaleDateString("nl-NL", { weekday: "short", day: "numeric", month: "short" }) + " " + time;
+}
+
+// ============================================================
+//  RENDER
+// ============================================================
+function renderInvoices(emails) {
+  $("stat-invoices").textContent = emails.length;
+  $("invoices-count").textContent = emails.length;
+  const list = $("invoices-list");
+  if (emails.length === 0) {
+    list.innerHTML = '<div class="empty">Niets te verwerken of te betalen. ✓</div>';
+    return;
+  }
+  list.innerHTML = emails.map(e => {
+    const unreadBadge = !e.isRead ? '<span class="badge info">Nieuw</span>' : '';
+    const isPayment = looksLikePayment(e);
+    const typeBadge = isPayment
+      ? '<span class="badge danger">Betalen</span>'
+      : (e.hasAttachments ? '<span class="badge">PDF</span>' : '<span class="badge warn">geen bijlage</span>');
+    return `<div class="row" data-id="${escapeHtml(e.id)}">
+      <div class="info">
+        <div class="top">
+          <span class="from" title="${escapeHtml(senderEmail(e))}">${escapeHtml(senderName(e))}</span>
+          ${unreadBadge}
+          ${typeBadge}
+        </div>
+        <a href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener" class="subject-link">
+          <div class="subject">${escapeHtml(e.subject || '(geen onderwerp)')}</div>
+        </a>
+        <div class="meta">${escapeHtml(fmtRelative(e.receivedDateTime))} · ${escapeHtml(senderEmail(e))}</div>
+      </div>
+      <div class="actions">
+        <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Open</a>
+        <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" title="Verplaats naar ${PROCESSED_FOLDER_NAME}">Verwerkt ✓</button>
+      </div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll('[data-action="processed"]').forEach(btn => {
+    btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id));
+  });
+}
+
+function renderReply(emails) {
+  $("stat-reply").textContent = emails.length;
+  $("reply-count").textContent = emails.length;
+  const list = $("reply-list");
+  if (emails.length === 0) {
+    list.innerHTML = '<div class="empty">Geen mails die persoonlijk antwoord vragen. ✓</div>';
+    return;
+  }
+  list.innerHTML = emails.map(e => {
+    const rel = fmtRelative(e.receivedDateTime);
+    const ageMs = Date.now() - new Date(e.receivedDateTime).getTime();
+    const old = ageMs > 3 * 86400000;
+    const ageBadge = `<span class="badge ${old ? 'warn' : ''}">${escapeHtml(rel)}</span>`;
+    return `<div class="row" data-id="${escapeHtml(e.id)}">
+      <div class="info">
+        <div class="top">
+          <span class="from" title="${escapeHtml(senderEmail(e))}">${escapeHtml(senderName(e))}</span>
+          ${ageBadge}
+        </div>
+        <a href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener" class="subject-link">
+          <div class="subject">${escapeHtml(e.subject || '(geen onderwerp)')}</div>
+        </a>
+      </div>
+      <div class="actions">
+        <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Beantwoorden</a>
+        <button class="btn primary" data-action="handled" data-id="${escapeHtml(e.id)}" title="Markeer als gelezen">Klaar ✓</button>
+      </div>
+    </div>`;
+  }).join("");
+  list.querySelectorAll('[data-action="handled"]').forEach(btn => {
+    btn.addEventListener('click', () => markHandled(btn, btn.dataset.id));
+  });
+}
+
+function renderDeadlines(items) {
+  $("stat-deadlines").textContent = items.length;
+  $("deadlines-count").textContent = items.length;
+  const list = $("deadlines-list");
+  if (items.length === 0) {
+    list.innerHTML = '<div class="empty">Geen deadlines gedetecteerd in recente mails.</div>';
+    return;
+  }
+  list.innerHTML = items.map(d => {
+    const dateObj = new Date(d.date);
+    const days = Math.ceil((dateObj.getTime() - Date.now()) / 86400000);
+    let urgencyClass = '', urgencyLabel = '';
+    if (days < 0) { urgencyClass = 'danger'; urgencyLabel = Math.abs(days) + ' dagen te laat'; }
+    else if (days === 0) { urgencyClass = 'danger'; urgencyLabel = 'Vandaag'; }
+    else if (days <= 3) { urgencyClass = 'danger'; urgencyLabel = 'Over ' + days + ' dag' + (days === 1 ? '' : 'en'); }
+    else if (days <= 14) { urgencyClass = 'warn'; urgencyLabel = 'Over ' + days + ' dagen'; }
+    else { urgencyLabel = 'Over ' + days + ' dagen'; }
+    const datePretty = dateObj.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' });
+    return `<div class="row">
+      <div class="info">
+        <div class="top">
+          <span class="from">${escapeHtml(d.what)}</span>
+          <span class="badge ${urgencyClass}">${escapeHtml(urgencyLabel)}</span>
+        </div>
+        <a href="${escapeHtml((d.email && d.email.webLink) || '#')}" target="_blank" rel="noopener" class="subject-link">
+          <div class="subject">${escapeHtml(d.context || '')}</div>
+        </a>
+        <div class="meta">${escapeHtml(datePretty)}${d.amount ? ' · ' + escapeHtml(d.amount) : ''}</div>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+function renderEvents(events) {
+  $("stat-events").textContent = events.length;
+  $("events-count").textContent = events.length;
+  const list = $("events-list");
+  if (events.length === 0) {
+    list.innerHTML = '<div class="empty">Geen afspraken in de komende 2 dagen.</div>';
+    return;
+  }
+  list.innerHTML = events.map(e => {
+    const startIso = (e.start && e.start.dateTime) ? e.start.dateTime : null;
+    return `<div class="event-row">
+      <div class="when">${escapeHtml(fmtEventTime(startIso))}</div>
+      <div class="title">${escapeHtml(e.subject || '(geen titel)')} ${(e.location && e.location.displayName) ? '<span class="loc">· ' + escapeHtml(e.location.displayName) + '</span>' : ''}</div>
+    </div>`;
+  }).join("");
+}
+
+// ============================================================
+//  ACTIONS
+// ============================================================
+function fadeOutRow(rowEl, onDone) {
+  rowEl.style.transition = 'opacity .3s, transform .3s, max-height .4s, padding .3s, margin .3s';
+  rowEl.style.opacity = '0';
+  rowEl.style.transform = 'translateX(20px)';
+  rowEl.style.maxHeight = '100px';
+  setTimeout(() => {
+    rowEl.style.maxHeight = '0';
+    rowEl.style.padding = '0';
+    rowEl.style.margin = '0';
+    rowEl.style.overflow = 'hidden';
+  }, 200);
+  setTimeout(() => { rowEl.remove(); if (onDone) onDone(); }, 600);
+}
+
+function decrementCount(statId, countId, listId, emptyMsg) {
+  for (const id of [statId, countId]) {
+    const el = $(id);
+    if (el) {
+      const n = parseInt(el.textContent, 10);
+      if (!isNaN(n) && n > 0) el.textContent = n - 1;
+    }
+  }
+  const list = $(listId);
+  if (list && list.children.length === 0) {
+    list.innerHTML = `<div class="empty">${emptyMsg}</div>`;
+  }
+}
+
+async function markProcessed(btn, id) {
+  const row = btn.closest('.row');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Verplaatsen…';
+  try {
+    const folderId = await findFolderId(PROCESSED_FOLDER_NAME);
+    if (!folderId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" niet gevonden in je mailboxen.`);
+    await moveMessage(id, folderId);
+    showToast('Verplaatst naar ' + PROCESSED_FOLDER_NAME, 'ok');
+    fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = orig;
+    showToast('Verplaatsen mislukt: ' + (e.message || e), 'err');
+  }
+}
+
+async function markHandled(btn, id) {
+  const row = btn.closest('.row');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = 'Markeren…';
+  try {
+    await markRead(id);
+    showToast('Gemarkeerd als gelezen', 'ok');
+    fadeOutRow(row, () => decrementCount('stat-reply', 'reply-count', 'reply-list', 'Geen mails die persoonlijk antwoord vragen. ✓'));
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = orig;
+    showToast('Markeren mislukt: ' + (e.message || e), 'err');
+  }
+}
+
+// ============================================================
+//  MAIN LOAD
+// ============================================================
+async function loadAll() {
+  $("today-line").textContent = new Date().toLocaleDateString('nl-NL', {
+    weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
+  });
+  $("alert-area").innerHTML = `
+    <div class="help">
+      <strong>Workflow:</strong> klik <em>Open</em> om de mail door te sturen naar
+      <code style="background:#fff;padding:1px 6px;border-radius:4px;border:0.5px solid #c2d6ec;cursor:pointer"
+        onclick="navigator.clipboard.writeText('${MONEYMONK_ADDRESS}'); this.textContent='gekopieerd ✓'; setTimeout(()=>this.textContent='${MONEYMONK_ADDRESS}',1500)">${MONEYMONK_ADDRESS}</code>
+      (klik = kopiëren). Klik daarna <em>Verwerkt ✓</em>.
+    </div>`;
+  setStatus("data ophalen…", true);
+
+  try {
+    const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning"];
+    const [recents, ...invoiceResults] = await Promise.all([
+      listInbox(50).catch(e => { showError("Inbox: " + e.message); return []; }),
+      ...queries.map(q => searchMessages(q, 25).catch(() => []))
+    ]);
+    const events = await listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; });
+
+    // Merge invoice results + dedupe
+    const seen = new Set();
+    const invoiceCandidates = [];
+    for (const arr of invoiceResults) {
+      for (const m of arr) {
+        if (!m.id || seen.has(m.id)) continue;
+        seen.add(m.id);
+        invoiceCandidates.push(m);
+      }
+    }
+
+    // Find "MoneyMonk Verwerkt" folder ID to exclude already-processed
+    let processedFolderId = null;
+    try { processedFolderId = await findFolderId(PROCESSED_FOLDER_NAME); } catch (e) {}
+    const sixtyDaysAgo = Date.now() - 60 * 86400000;
+
+    const invoices = invoiceCandidates
+      .filter(e => looksLikeInvoice(e))
+      .filter(e => !isOwnInvoice(e))
+      .filter(e => !processedFolderId || e.parentFolderId !== processedFolderId)
+      .filter(e => {
+        const t = new Date(e.receivedDateTime).getTime();
+        return !isNaN(t) && t >= sixtyDaysAgo;
+      })
+      .sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+    renderInvoices(invoices);
+
+    // Reply candidates (from inbox)
+    const repliesNeeded = recents.filter(needsReply).slice(0, 8);
+    renderReply(repliesNeeded);
+
+    // Deadlines (from inbox + invoice candidates, dedupe by id)
+    const deadlinePool = [...recents];
+    for (const m of invoiceCandidates) if (!deadlinePool.find(x => x.id === m.id)) deadlinePool.push(m);
+    const deadlines = extractDeadlines(deadlinePool);
+    renderDeadlines(deadlines);
+
+    renderEvents(events);
+
+    setStatus("bijgewerkt " + new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' }), false);
+  } catch (e) {
+    showError("Algemeen: " + (e.message || e));
+    setStatus("fout bij laden", false);
+  }
+}
+
+// ============================================================
+//  ENTRY
+// ============================================================
+function showApp() {
+  $("signin").style.display = "none";
+  $("app").style.display = "block";
+  $("user-label").textContent = (account && (account.username || account.name)) || "";
+  loadAll();
+}
+
+(async function init() {
+  const ok = await initAuth();
+  if (!ok) return; // config error already shown
+  if (account) {
+    showApp();
+  } else {
+    $("signin").style.display = "block";
+  }
+})();
+</script>
+</body>
+</html>
