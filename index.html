@@ -212,7 +212,7 @@ function showError(msg) {
 //  AUTH
 // ============================================================
 async function initAuth() {
-  if (!CLIENT_ID || CLIENT_ID === "866230d7-2236-4814-af6f-cffb47d3ab08") {
+  if (!CLIENT_ID || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(CLIENT_ID)) {
     $("config-error").style.display = "block";
     return false;
   }
