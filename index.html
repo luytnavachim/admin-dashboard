@@ -333,7 +333,12 @@ async function findFolderId(mbox, name) {
     }
     return null;
   }
-  const id = await walk();
+  let id = await walk();
+  if (!id) {
+    // Niet gevonden → maak hem aan op het topniveau van deze mailbox
+    const created = await graph("POST", `${base}/mailFolders`, { displayName: name });
+    id = created && created.id;
+  }
   if (id) localStorage.setItem(cacheKey, id);
   return id;
 }
