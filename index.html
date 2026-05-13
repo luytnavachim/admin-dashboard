@@ -189,8 +189,13 @@ function showToast(text, kind) {
   bar.style.background = kind === 'err' ? '#a32d2d' : (kind === 'ok' ? '#3b6d11' : '#2c2c2a');
   bar.style.display = 'block';
   bar.style.opacity = '1';
+  bar.style.cursor = 'pointer';
+  bar.onclick = () => { bar.style.display = 'none'; };
   clearTimeout(window.__toastTimer);
-  window.__toastTimer = setTimeout(() => { bar.style.opacity = '0'; setTimeout(() => bar.style.display = 'none', 300); }, 2500);
+  // Errors blijven staan tot je ze wegklikt; success-meldingen verdwijnen na 2.5s
+  if (kind !== 'err') {
+    window.__toastTimer = setTimeout(() => { bar.style.opacity = '0'; setTimeout(() => bar.style.display = 'none', 300); }, 2500);
+  }
 }
 function setStatus(text, live) {
   $("status-text").textContent = text;
