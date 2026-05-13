@@ -347,6 +347,25 @@ async function findFolderId(mbox, name) {
   if (id) localStorage.setItem(cacheKey, id);
   return id;
 }
+async function findOrCreateSubfolder(mbox, parentId, name) {
+  const cacheKey = "subfolder_" + mbox.email + "_" + parentId + "_" + name;
+  const cached = localStorage.getItem(cacheKey);
+  if (cached) return cached;
+  const base = userPath(mbox);
+  const r = await graph("GET", `${base}/mailFolders/${parentId}/childFolders?$top=200&$select=id,displayName`);
+  for (const f of (r.value || [])) {
+    if (f.displayName === name) {
+      localStorage.setItem(cacheKey, f.id);
+      return f.id;
+    }
+  }
+  const created = await graph("POST", `${base}/mailFolders/${parentId}/childFolders`, { displayName: name });
+  if (created && created.id) {
+    localStorage.setItem(cacheKey, created.id);
+    return created.id;
+  }
+  return null;
+}
 async function moveMessage(mbox, messageId, folderId) {
   const base = userPath(mbox);
   return graph("POST", `${base}/messages/${messageId}/move`, { destinationId: folderId });
@@ -505,12 +524,12 @@ function renderInvoices(emails) {
       </div>
       <div class="actions">
         <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Open</a>
-        <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}">Verwerkt ✓</button>
+        <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" data-sender="${escapeHtml(senderEmail(e))}">Verwerkt ✓</button>
       </div>
     </div>`;
   }).join("");
   list.querySelectorAll('[data-action="processed"]').forEach(btn => {
-    btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id, btn.dataset.mbox));
+    btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id, btn.dataset.mbox, btn.dataset.sender));
   });
 }
 function renderReply(emails) {
@@ -611,17 +630,35 @@ function decrementCount(statId, countId, listId, emptyMsg) {
 }
 function findMbox(email) { return MAILBOXES.find(m => m.email.toLowerCase() === (email || "").toLowerCase()); }
 
-async function markProcessed(btn, id, mboxEmail) {
+function senderFolderName(emailAddr) {
+  const addr = (emailAddr || "").toLowerCase().trim();
+  const at = addr.indexOf("@");
+  if (at < 0) return "Onbekend";
+  let domain = addr.slice(at + 1);
+  // Strip cosmetische sub-prefixes
+  domain = domain.replace(/^(email|mail|m|news|notifications|notification|delivery|click|info|noreply|no-reply|service|reply|account|accounts)\./, "");
+  // Pak hoofddomein zonder TLD (mercedes-benz.com -> mercedes-benz)
+  const parts = domain.split(".");
+  if (parts.length > 1) parts.pop();
+  const name = parts.join(".");
+  if (!name) return "Onbekend";
+  return name.charAt(0).toUpperCase() + name.slice(1);
+}
+
+async function markProcessed(btn, id, mboxEmail, senderAddr) {
   const mbox = findMbox(mboxEmail);
   if (!mbox) { showToast("Onbekende mailbox", 'err'); return; }
   const row = btn.closest('.row');
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = 'Verplaatsen…';
   try {
-    const folderId = await findFolderId(mbox, PROCESSED_FOLDER_NAME);
-    if (!folderId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" niet gevonden in ${mbox.email}.`);
-    await moveMessage(mbox, id, folderId);
-    showToast(`Verplaatst (${mbox.label})`, 'ok');
+    const parentId = await findFolderId(mbox, PROCESSED_FOLDER_NAME);
+    if (!parentId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" kon niet gemaakt worden in ${mbox.email}.`);
+    const subName = senderFolderName(senderAddr);
+    const targetId = await findOrCreateSubfolder(mbox, parentId, subName);
+    if (!targetId) throw new Error(`Submap "${subName}" kon niet gemaakt worden in ${mbox.email}.`);
+    await moveMessage(mbox, id, targetId);
+    showToast(`→ ${PROCESSED_FOLDER_NAME}/${subName} (${mbox.label})`, 'ok');
     fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
   } catch (e) {
     btn.disabled = false; btn.textContent = orig;
