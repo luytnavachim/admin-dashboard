@@ -826,16 +826,18 @@ async function sendSelectedToInformer() {
       // Claude een contactpersoon op de factuur vond gebruiken we die; anders
       // placeholder-waardes zodat de POST door komt (gebruiker kan in Informer
       // UI later corrigeren).
-      // Informer weigert lege strings net zo hard als ontbrekende velden voor
-      // verplichte fields (zip, street, city, ...). Vul placeholders in
-      // wanneer Claude niets vond — gebruiker kan in Informer UI corrigeren.
+      // relation_type "0" = bedrijf, "1" = persoon (numeriek enum, niet
+      // "company"/"person" — bevestigd door GET op een bestaande relation).
+      // firstname/surname mogen leeg voor bedrijven. Placeholders waren een
+      // misvatting — Informer's eerdere 422 op "firstname required" was een
+      // gevolg van relation_type leeg laten, niet van firstname zelf.
       const fallback = (v, def) => (v && String(v).trim()) ? v : def;
       const newRelation = {
-        relation_type:        "company",
+        relation_type:        "0",
         company_name:         extracted.supplier_name,
-        firstname:            fallback(extracted.supplier_contact_firstname, "Algemeen"),
+        firstname:            extracted.supplier_contact_firstname || "",
         surname_prefix:       "",
-        surname:              fallback(extracted.supplier_contact_surname, "Onbekend"),
+        surname:              extracted.supplier_contact_surname || "",
         street:               fallback(extracted.supplier_street, "Onbekend"),
         house_number:         fallback(extracted.supplier_house_number, "0"),
         house_number_suffix:  "",
