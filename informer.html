@@ -923,16 +923,22 @@ async function sendSelectedToInformer() {
   }
 }
 
-async function findFolderRecursive(mbox, parentId, name) {
+async function findFolderRecursive(mbox, parentId, name, depth) {
   const base = userPath(mbox);
   const path = parentId
     ? `${base}/mailFolders/${parentId}/childFolders`
     : `${base}/mailFolders`;
   const r = await graph("GET", `${path}?$top=100&$select=id,displayName,childFolderCount`);
+  const indent = "  ".repeat(depth || 0);
+  console.log(`[folder lookup] ${indent}${parentId || "(root)"}: ${(r.value || []).length} kinderen — zoek "${name}"`);
   for (const f of (r.value || [])) {
-    if (f.displayName === name) return f.id;
+    console.log(`[folder lookup] ${indent}  - "${f.displayName}" (id ${f.id?.slice(0, 20)}..., children: ${f.childFolderCount})`);
+    if (f.displayName === name) {
+      console.log(`[folder lookup] ${indent}    → HIT, id=${f.id}`);
+      return f.id;
+    }
     if (f.childFolderCount > 0) {
-      const nested = await findFolderRecursive(mbox, f.id, name);
+      const nested = await findFolderRecursive(mbox, f.id, name, (depth || 0) + 1);
       if (nested) return nested;
     }
   }
@@ -942,8 +948,13 @@ async function findFolderRecursive(mbox, parentId, name) {
 async function findOrCreateFolder(mbox, name) {
   // Eerst recursief zoeken — gebruikers organiseren factuur-mappen vaak
   // genest onder Inbox of een ander parent.
-  const existing = await findFolderRecursive(mbox, null, name);
-  if (existing) return existing;
+  console.log(`[folder] Zoek "${name}" in mailbox`);
+  const existing = await findFolderRecursive(mbox, null, name, 0);
+  if (existing) {
+    console.log(`[folder] Bestaand gevonden: ${existing}`);
+    return existing;
+  }
+  console.log(`[folder] Niet gevonden — aanmaken onder Inbox`);
 
   // Niet gevonden → onder Inbox aanmaken (logischer dan root voor een
   // invoice-workflow map).
@@ -953,8 +964,13 @@ async function findOrCreateFolder(mbox, name) {
     headers: { Authorization: "Bearer " + await getMsToken(), "Content-Type": "application/json" },
     body: JSON.stringify({ displayName: name })
   });
-  if (!created.ok) throw new Error("Map maken mislukt: " + (await created.text()));
+  if (!created.ok) {
+    const errText = await created.text();
+    console.error("[folder] Aanmaken mislukt:", created.status, errText);
+    throw new Error("Map maken mislukt (" + created.status + "): " + errText);
+  }
   const body = await created.json();
+  console.log(`[folder] Aangemaakt:`, body);
   if (!body.id) throw new Error("Map aangemaakt maar geen ID teruggekregen: " + JSON.stringify(body).slice(0, 200));
   return body.id;
 }
