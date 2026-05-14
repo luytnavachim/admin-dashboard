@@ -101,9 +101,12 @@ details[open] summary { margin-bottom: 8px; }
   API-docs: <a href="https://api.informer.eu/docs/" target="_blank" rel="noopener">api.informer.eu/docs</a>.
 </p>
 
-<div class="warn">
-  <strong>Heads-up.</strong> Deze pagina draait pure in je browser. Je API-key komt in <code>localStorage</code> en wordt vanuit je browser naar Informer gestuurd.
-  Voor een trial met test-data is dat prima; voor productie raad ik een proxy aan (zie sectie 5 onderaan). Als Informer CORS niet toelaat zie je hieronder een <em>Failed to fetch</em>-fout — dan moeten we alsnog overstappen op de proxy-aanpak.
+<div class="help">
+  <strong>Werkt via een proxy.</strong> Informer staat geen directe browser-calls toe (CORS), dus we routeren via een Cloudflare Worker die de API-key server-side bewaart.
+  Setup-stappen staan bovenaan in <code>worker.js</code> in deze repo — ~5 minuten. Daarna:
+  <br>1. <strong>Base URL</strong> in sectie 1 = <code>https://&lt;jouw-worker&gt;.workers.dev/api</code>
+  <br>2. <strong>Auth-methode</strong> = "Geen (proxy regelt auth)"
+  <br>3. <strong>API-key</strong> in dit veld leeg laten — die zit veilig in de worker.
 </div>
 
 <!-- ============================================================ -->
@@ -119,6 +122,7 @@ details[open] summary { margin-bottom: 8px; }
     <div class="field">
       <label for="cfg-auth">Auth-header methode</label>
       <select id="cfg-auth">
+        <option value="none">Geen — proxy regelt auth (aanbevolen)</option>
         <option value="bearer">Authorization: Bearer &lt;key&gt;</option>
         <option value="basic-key">Authorization: Basic base64(key:)</option>
         <option value="basic-user">Authorization: Basic base64(user:pass)</option>
@@ -332,6 +336,7 @@ function applyConfigToForm() {
 //  INFORMER API CLIENT
 // ============================================================
 function authHeader() {
+  if (cfg.authMethod === "none") return null;
   const k = cfg.apiKey;
   if (!k) throw new Error("Geen API-key ingesteld. Vul 'm in sectie 1 in en sla op.");
   switch (cfg.authMethod) {
@@ -352,7 +357,7 @@ async function informerFetch(method, path, body) {
   };
   const auth = authHeader();
   if (cfg.authMethod === "x-api-key") headers["X-API-Key"] = cfg.apiKey;
-  else if (auth) headers["Authorization"] = auth;
+  else if (cfg.authMethod !== "none" && auth) headers["Authorization"] = auth;
 
   const opts = { method, headers };
   if (body !== undefined && body !== null) opts.body = typeof body === "string" ? body : JSON.stringify(body);
@@ -451,9 +456,14 @@ async function createPurchase() {
 
 function explainFetchError(e) {
   if (e instanceof TypeError && /fetch/i.test(e.message)) {
-    return "Network/CORS-fout: " + e.message + "\n\nDit betekent meestal dat Informer's API CORS niet toestaat vanuit de browser. " +
-      "We moeten dan een kleine proxy bouwen (Cloudflare Worker / Netlify Function) die de API-call server-side doet. " +
-      "Open de browser-console (F12) voor het exacte foutbericht.";
+    const usingProxy = /workers\.dev|netlify|vercel|cloudfunctions/i.test(cfg.baseUrl);
+    if (usingProxy) {
+      return "Network-fout: " + e.message + "\n\nKan de proxy niet bereiken. Check:\n" +
+        "1. Is de Base URL correct? (eindigt op /api?)\n" +
+        "2. Draait de worker? Probeer in browser: " + cfg.baseUrl.replace(/\/api$/, "/health") + "\n" +
+        "3. Heeft de worker ALLOWED_ORIGIN goed staan voor deze pagina?";
+    }
+    return "Network/CORS-fout: " + e.message + "\n\nInformer staat geen directe browser-calls toe. Zet de proxy op (zie worker.js bovenaan) en wissel in sectie 1 naar de worker-URL.";
   }
   if (e.status === 401 || e.status === 403) {
     return "Auth-fout (" + e.status + "): " + e.message + "\n\nProbeer een andere auth-methode in sectie 1 (Bearer / Basic / X-API-Key).";
