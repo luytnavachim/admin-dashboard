@@ -424,7 +424,7 @@ await run("/extract: forwards to Anthropic with the right shape and returns extr
 
     const sentBody = JSON.parse(typeof captured.body === "string" ? captured.body : new TextDecoder().decode(captured.body));
     assert(sentBody.model === "claude-opus-4-7", "model is opus-4-7");
-    assert(sentBody.thinking?.type === "adaptive", "adaptive thinking enabled");
+    assert(!sentBody.thinking, "thinking omitted (incompatible with forced tool_choice)");
     assert(sentBody.tool_choice?.name === "report_purchase_invoice", "tool_choice forces our tool");
     assert(sentBody.tools[0].cache_control?.type === "ephemeral", "tool def is cache-controlled");
     const userMsg = sentBody.messages[0];
