@@ -593,6 +593,7 @@ async function loadInvoiceEmails() {
       let processedFolderId = null;
       try { processedFolderId = await findFolderRecursive(m, null, PROCESSED_FOLDER_NAME, 0); }
       catch (e) { console.warn("Verwerkt-folder lookup mislukt voor " + m.email + ":", e.message); }
+      console.log(`[load] ${m.email}: processedFolderId=${processedFolderId}`);
 
       for (const q of queries) {
         const url = `${userPath(m)}/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
@@ -600,7 +601,10 @@ async function loadInvoiceEmails() {
         for (const msg of (r.value || [])) {
           if (!msg.hasAttachments) continue;
           if (new Date(msg.receivedDateTime) < new Date(sinceIso)) continue;
-          if (processedFolderId && msg.parentFolderId === processedFolderId) continue;
+          if (processedFolderId && msg.parentFolderId === processedFolderId) {
+            console.log(`[load] FILTERED (verwerkt): "${msg.subject?.slice(0, 50)}" parentFolderId=${msg.parentFolderId}`);
+            continue;
+          }
           if (invoiceEmails.find(x => x.id === msg.id)) continue;
           invoiceEmails.push({ ...msg, _mailbox: m });
         }
@@ -610,7 +614,34 @@ async function loadInvoiceEmails() {
     }
   }
   invoiceEmails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+  await annotateFolderNames();
   renderEmails();
+}
+
+// Resolve een folder displayName voor elke unique parentFolderId per mailbox
+// en zet 'm op email._folderName. Doet één GET per unieke folder-id.
+async function annotateFolderNames() {
+  const byMailbox = new Map();
+  for (const e of invoiceEmails) {
+    const key = e._mailbox.email;
+    if (!byMailbox.has(key)) byMailbox.set(key, { mailbox: e._mailbox, ids: new Set(), emails: [] });
+    const entry = byMailbox.get(key);
+    entry.emails.push(e);
+    if (e.parentFolderId) entry.ids.add(e.parentFolderId);
+  }
+  for (const { mailbox, ids, emails } of byMailbox.values()) {
+    const names = {};
+    for (const fid of ids) {
+      try {
+        const f = await graph("GET", `${userPath(mailbox)}/mailFolders/${encodeURIComponent(fid)}?$select=displayName`);
+        names[fid] = f.displayName || "?";
+      } catch (err) {
+        console.warn("Folder name lookup mislukt voor " + fid + ":", err.message);
+        names[fid] = "?";
+      }
+    }
+    for (const e of emails) e._folderName = names[e.parentFolderId] || "?";
+  }
 }
 
 function renderEmails() {
@@ -628,7 +659,7 @@ function renderEmails() {
       <div style="flex:1; min-width:0;">
         <div class="from">${escapeHtml(fromName)} <span class="muted" style="font-weight:normal;">(${escapeHtml(e._mailbox.label)})</span></div>
         <div class="subj" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(e.subject || "(geen onderwerp)")}</div>
-        <div class="muted" style="font-size:11px;">${when} &middot; ${escapeHtml(fromAddr)}</div>
+        <div class="muted" style="font-size:11px;">${when} &middot; ${escapeHtml(fromAddr)}${e._folderName ? ` &middot; <span style="color:var(--accent);">${escapeHtml(e._folderName)}</span>` : ""}</div>
       </div>
     </label>`;
   }).join("");
