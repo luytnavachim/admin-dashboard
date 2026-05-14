@@ -588,7 +588,7 @@ async function loadInvoiceEmails() {
   for (const m of MAILBOXES) {
     try {
       for (const q of queries) {
-        const url = `${userPath(m)}/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink`;
+        const url = `${userPath(m)}/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
         const r = await graph("GET", url);
         for (const msg of (r.value || [])) {
           if (!msg.hasAttachments) continue;
@@ -909,9 +909,14 @@ async function sendSelectedToInformer() {
     step5 = logStep("5/5 — Mail verplaatsen naar Verwerkt-map...");
     try {
       const folderId = await findOrCreateFolder(email._mailbox, PROCESSED_FOLDER_NAME);
-      await graph("POST", `${userPath(email._mailbox)}/messages/${email.id}/move`, { destinationId: folderId });
-      step5.className = "flow-step ok";
-      step5.textContent = "5/5 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
+      if (email.parentFolderId && email.parentFolderId === folderId) {
+        step5.className = "flow-step ok";
+        step5.textContent = `5/5 — Mail stond al in ${PROCESSED_FOLDER_NAME} (geen move nodig)`;
+      } else {
+        await graph("POST", `${userPath(email._mailbox)}/messages/${email.id}/move`, { destinationId: folderId });
+        step5.className = "flow-step ok";
+        step5.textContent = "5/5 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
+      }
     } catch (e) {
       step5.className = "flow-step err";
       step5.textContent = "5/5 — Verplaatsen mislukt (factuur is wel in Informer): " + e.message;
