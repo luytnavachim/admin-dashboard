@@ -810,15 +810,32 @@ async function sendSelectedToInformer() {
     let relationSource = "match";
     if (!match) {
       step3.textContent = `3/5 — Geen match voor "${extracted.supplier_name}" — aanmaken in Informer...`;
-      // POST /relation/ — body is best-effort: zoveel mogelijk uit Claude's
-      // extractie. Informer-fouten ("Required field: X") sturen ons naar de
-      // volgende iteratie als velden ontbreken. relation_type=company want
-      // forwarded invoices komen vrijwel altijd van bedrijven, niet personen.
-      // vat (niet vat_number — Informer's veldnaam per de 422 response).
+      // POST /relation/ — alle relation-velden die Informer kent, opgevuld
+      // uit Claude's PDF-extractie. Lege strings voor velden die niet op de
+      // factuur staan (firstname/surname/fax/iban/bic) — Informer accepteert
+      // dat liever dan onbekende velden. relation_type=company want forwarded
+      // invoices komen vrijwel altijd van bedrijven.
       const newRelation = {
-        relation_type: "company",
-        name: extracted.supplier_name,
-        ...(extracted.supplier_vat_number ? { vat: extracted.supplier_vat_number } : {})
+        relation_type:        "company",
+        name:                 extracted.supplier_name,
+        firstname:            "",
+        surname_prefix:       "",
+        surname:              "",
+        street:               extracted.supplier_street || "",
+        house_number:         extracted.supplier_house_number || "",
+        house_number_suffix:  "",
+        zip:                  extracted.supplier_zip || "",
+        city:                 extracted.supplier_city || "",
+        country:              extracted.supplier_country || "NL",
+        phone_number:         extracted.supplier_phone || "",
+        fax_number:           "",
+        web:                  extracted.supplier_website || "",
+        email:                extracted.supplier_email || "",
+        coc:                  extracted.supplier_kvk || "",
+        vat:                  extracted.supplier_vat_number || "",
+        iban:                 "",
+        bic:                  "",
+        email_invoice:        extracted.supplier_email || ""
       };
       const created = await informerFetch("POST", "/relation/", newRelation);
       // Antwoord-shape onbekend; pak de eerste plausibele id terug.
