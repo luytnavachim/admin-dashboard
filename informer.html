@@ -596,7 +596,11 @@ async function loadInvoiceEmails() {
       console.log(`[load] ${m.email}: processedFolderId=${processedFolderId}`);
 
       for (const q of queries) {
-        const url = `${userPath(m)}/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
+        // Scope op /mailFolders/inbox: alleen Inbox/Postvak IN doorzoeken,
+        // niet Sent Items / Drafts / Archive / etc. "inbox" is well-known
+        // folder name in Graph en werkt voor zowel Engelse als Nederlandse
+        // mailboxen.
+        const url = `${userPath(m)}/mailFolders/inbox/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
         const r = await graph("GET", url);
         for (const msg of (r.value || [])) {
           if (!msg.hasAttachments) continue;
