@@ -171,8 +171,11 @@ async function handleExtract(request, env, cors) {
 
   const anthropicReq = {
     model: "claude-opus-4-7",
-    max_tokens: 8192,
-    thinking: { type: "adaptive" },
+    max_tokens: 4096,
+    // Thinking deliberately omitted: Anthropic rejects thinking when
+    // tool_choice forces a specific tool. Extraction here is pattern
+    // matching on a structured document, not deliberation, so the loss is
+    // negligible.
     tools: [{ ...PURCHASE_INVOICE_TOOL, cache_control: { type: "ephemeral" } }],
     tool_choice: { type: "tool", name: "report_purchase_invoice" },
     messages: [{
