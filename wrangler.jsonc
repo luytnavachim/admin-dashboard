@@ -8,7 +8,7 @@
     "directory": "./"
   },
   "vars": {
-    "INFORMER_AUTH_METHOD": "bearer",
+    "INFORMER_AUTH_METHOD": "apikey",
     "INFORMER_BASE_URL": "https://api.informer.eu/v1",
     "ALLOWED_ORIGIN": "*"
   }

@@ -49,9 +49,10 @@ export default {
     const ct = request.headers.get("content-type");
     if (ct) headers.set("Content-Type", ct);
 
-    const method = (env.INFORMER_AUTH_METHOD || "bearer").toLowerCase();
+    const method = (env.INFORMER_AUTH_METHOD || "apikey").toLowerCase();
     const key = env.INFORMER_API_KEY;
-    if (method === "bearer") headers.set("Authorization", "Bearer " + key);
+    if (method === "apikey") headers.set("ApiKey", key);
+    else if (method === "bearer") headers.set("Authorization", "Bearer " + key);
     else if (method === "basic-key") headers.set("Authorization", "Basic " + btoa(key + ":"));
     else if (method === "basic-user") headers.set("Authorization", "Basic " + btoa(key));
     else if (method === "x-api-key") headers.set("X-API-Key", key);

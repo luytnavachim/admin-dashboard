@@ -123,6 +123,7 @@ details[open] summary { margin-bottom: 8px; }
       <label for="cfg-auth">Auth-header methode</label>
       <select id="cfg-auth">
         <option value="none">Geen — proxy regelt auth (aanbevolen)</option>
+        <option value="apikey">ApiKey: &lt;key&gt; (Informer)</option>
         <option value="bearer">Authorization: Bearer &lt;key&gt;</option>
         <option value="basic-key">Authorization: Basic base64(key:)</option>
         <option value="basic-user">Authorization: Basic base64(user:pass)</option>
@@ -344,6 +345,7 @@ function authHeader() {
     case "basic-key": return "Basic " + btoa(k + ":");
     case "basic-user": return "Basic " + btoa(k);
     case "x-api-key": return null;
+    case "apikey": return null;
     default: return "Bearer " + k;
   }
 }
@@ -357,6 +359,7 @@ async function informerFetch(method, path, body) {
   };
   const auth = authHeader();
   if (cfg.authMethod === "x-api-key") headers["X-API-Key"] = cfg.apiKey;
+  else if (cfg.authMethod === "apikey") headers["ApiKey"] = cfg.apiKey;
   else if (cfg.authMethod !== "none" && auth) headers["Authorization"] = auth;
 
   const opts = { method, headers };
