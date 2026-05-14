@@ -804,17 +804,33 @@ async function sendSelectedToInformer() {
       `2/5 — Geëxtraheerd via ${extractedVia}: ${extracted.supplier_name} — ` +
       `nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
 
-    // ---- 3/5: relation matchen op de geëxtraheerde leveranciersnaam
+    // ---- 3/5: relation matchen — bestaan? anders aanmaken via POST /relation/
     step3 = logStep(`3/5 — Leverancier matchen in Informer: "${extracted.supplier_name}"...`);
-    const match = await findRelationByName(extracted.supplier_name);
+    let match = await findRelationByName(extracted.supplier_name);
+    let relationSource = "match";
     if (!match) {
-      throw new Error(
-        `Geen relation gevonden voor "${extracted.supplier_name}" in Informer. ` +
-        `Maak deze leverancier eerst aan (via POST /relation/ of in de Informer UI) en probeer opnieuw.`
-      );
+      step3.textContent = `3/5 — Geen match voor "${extracted.supplier_name}" — aanmaken in Informer...`;
+      // POST /relation/ — body is best-effort: zoveel mogelijk uit Claude's
+      // extractie. Informer-fouten ("Required field is missing: X") sturen
+      // ons naar de volgende iteratie als de minimale body niet volstaat.
+      const newRelation = {
+        name: extracted.supplier_name,
+        ...(extracted.supplier_vat_number ? { vat_number: extracted.supplier_vat_number } : {})
+      };
+      const created = await informerFetch("POST", "/relation/", newRelation);
+      // Antwoord-shape onbekend; pak de eerste plausibele id terug.
+      const newId = created?.relation_id || created?.id ||
+                    (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) ||
+                    null;
+      if (!newId) {
+        throw new Error("Relation aangemaakt maar geen ID teruggekregen — response: " + JSON.stringify(created).slice(0, 300));
+      }
+      match = { id: newId, relation: { name: extracted.supplier_name } };
+      relationSource = "created";
     }
     step3.className = "flow-step ok";
-    step3.textContent = `3/5 — Match: relation_id ${match.id} — ${match.relation.name || match.relation.company}`;
+    const matchLabel = relationSource === "created" ? "Aangemaakt" : "Match";
+    step3.textContent = `3/5 — ${matchLabel}: relation_id ${match.id} — ${match.relation.name || match.relation.company || extracted.supplier_name}`;
 
     // ---- 4/5: factuur aanmaken met geëxtraheerde data
     step4 = logStep("4/5 — Factuur aanmaken in Informer...");
