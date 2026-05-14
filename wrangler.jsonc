@@ -1,0 +1,15 @@
+{
+  "$schema": "https://unpkg.com/wrangler/config-schema.json",
+  "name": "admin-dashboard",
+  "main": "worker.js",
+  "compatibility_date": "2026-05-14",
+  "compatibility_flags": ["nodejs_compat"],
+  "assets": {
+    "directory": "./"
+  },
+  "vars": {
+    "INFORMER_AUTH_METHOD": "bearer",
+    "INFORMER_BASE_URL": "https://api.informer.eu/v1",
+    "ALLOWED_ORIGIN": "*"
+  }
+}

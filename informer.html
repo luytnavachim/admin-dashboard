@@ -102,11 +102,11 @@ details[open] summary { margin-bottom: 8px; }
 </p>
 
 <div class="help">
-  <strong>Werkt via een proxy.</strong> Informer staat geen directe browser-calls toe (CORS), dus we routeren via een Cloudflare Worker die de API-key server-side bewaart.
-  Setup-stappen staan bovenaan in <code>worker.js</code> in deze repo — ~5 minuten. Daarna:
-  <br>1. <strong>Base URL</strong> in sectie 1 = <code>https://&lt;jouw-worker&gt;.workers.dev/api</code>
+  <strong>Werkt via een Cloudflare Worker.</strong> Informer staat geen directe browser-calls toe (CORS), dus we routeren via een Worker die de API-key server-side bewaart.
+  Setup-stappen staan bovenaan in <code>worker.js</code>; de Worker-config staat in <code>wrangler.jsonc</code>. Zelfde Cloudflare-deploy hoste deze pagina ook.
+  <br>1. <strong>Base URL</strong> in sectie 1 = <code>https://&lt;jouw-worker&gt;.workers.dev/api</code> &mdash; vaak gewoon <code>/api</code> (zelfde origin als deze pagina).
   <br>2. <strong>Auth-methode</strong> = "Geen (proxy regelt auth)"
-  <br>3. <strong>API-key</strong> in dit veld leeg laten — die zit veilig in de worker.
+  <br>3. <strong>API-key</strong> in dit veld leeg laten &mdash; die staat als Secret in de Worker.
 </div>
 
 <!-- ============================================================ -->
@@ -117,7 +117,7 @@ details[open] summary { margin-bottom: 8px; }
   <div class="grid-2">
     <div class="field">
       <label for="cfg-base">Base URL</label>
-      <input id="cfg-base" type="text" placeholder="https://api.informer.eu/v1" value="https://api.informer.eu/v1">
+      <input id="cfg-base" type="text" placeholder="/api  of  https://admin-dashboard.&lt;jou&gt;.workers.dev/api" value="/api">
     </div>
     <div class="field">
       <label for="cfg-auth">Auth-header methode</label>
@@ -290,8 +290,8 @@ function escapeHtml(s) {
 // ============================================================
 function defaultConfig() {
   return {
-    baseUrl: "https://api.informer.eu/v1",
-    authMethod: "bearer",
+    baseUrl: "/api",
+    authMethod: "none",
     apiKey: "",
     administrationId: "",
     purchasesPath: "/purchases"
