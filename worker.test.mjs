@@ -250,6 +250,98 @@ await run("CORS with disallowed origin falls back to first listed", async () => 
 });
 
 // ---------------------------------------------------------------------------
+// Informer-quirk: HTTP 200 with { error: ... } in body → translate to 422.
+
+await run("upstream 200 with error object → 422", async () => {
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({ error: { "3000101": "Required field is empty: relation_id" } }), {
+      status: 200, headers: { "content-type": "application/json" }
+    })
+  );
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/api/invoice/purchase/", { method: "POST" }), baseEnv);
+    assert(res.status === 422, "200-with-error object → 422, got " + res.status);
+    const body = await res.json();
+    assert(body.error?.["3000101"]?.includes("relation_id"), "error body still surfaced");
+  } finally { restore(); }
+});
+
+await run("upstream 200 with error array → 422", async () => {
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({ error: ["Request not found: purchases"] }), {
+      status: 200, headers: { "content-type": "application/json" }
+    })
+  );
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/api/purchases"), baseEnv);
+    assert(res.status === 422, "200-with-error array → 422");
+  } finally { restore(); }
+});
+
+await run("upstream 200 with error string → 422", async () => {
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({ error: "bad request" }), {
+      status: 200, headers: { "content-type": "application/json" }
+    })
+  );
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    assert(res.status === 422, "200-with-error string → 422");
+  } finally { restore(); }
+});
+
+await run("upstream 200 with empty error array stays 200", async () => {
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({ data: [], error: [] }), {
+      status: 200, headers: { "content-type": "application/json" }
+    })
+  );
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    assert(res.status === 200, "empty error → still 200");
+  } finally { restore(); }
+});
+
+await run("upstream 200 without error field stays 200", async () => {
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({ invoice_id: 16053831, invoice_url: "https://app.informer.eu/..." }), {
+      status: 200, headers: { "content-type": "application/json" }
+    })
+  );
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/api/invoice/purchase/", { method: "POST" }), baseEnv);
+    assert(res.status === 200, "success response stays 200");
+    const body = await res.json();
+    assert(body.invoice_id === 16053831, "body preserved");
+  } finally { restore(); }
+});
+
+await run("upstream 200 with non-JSON content stays 200", async () => {
+  const restore = mockUpstream(() =>
+    new Response("<html>error</html>", {
+      status: 200, headers: { "content-type": "text/html" }
+    })
+  );
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    assert(res.status === 200, "non-JSON → no rewrite");
+  } finally { restore(); }
+});
+
+await run("upstream non-200 with error field is not rewritten", async () => {
+  // Already passes-through 401/4xx; this guards we don't double-rewrite.
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({ error: "auth" }), {
+      status: 403, headers: { "content-type": "application/json" }
+    })
+  );
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    assert(res.status === 403, "403 stays 403");
+  } finally { restore(); }
+});
+
+// ---------------------------------------------------------------------------
 
 console.log(`\n${"=".repeat(60)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
