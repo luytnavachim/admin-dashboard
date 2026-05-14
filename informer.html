@@ -821,18 +821,22 @@ async function sendSelectedToInformer() {
       // Claude een contactpersoon op de factuur vond gebruiken we die; anders
       // placeholder-waardes zodat de POST door komt (gebruiker kan in Informer
       // UI later corrigeren).
+      // Informer weigert lege strings net zo hard als ontbrekende velden voor
+      // verplichte fields (zip, street, city, ...). Vul placeholders in
+      // wanneer Claude niets vond — gebruiker kan in Informer UI corrigeren.
+      const fallback = (v, def) => (v && String(v).trim()) ? v : def;
       const newRelation = {
         relation_type:        "company",
         company_name:         extracted.supplier_name,
-        firstname:            extracted.supplier_contact_firstname || "Algemeen",
+        firstname:            fallback(extracted.supplier_contact_firstname, "Algemeen"),
         surname_prefix:       "",
-        surname:              extracted.supplier_contact_surname || "Onbekend",
-        street:               extracted.supplier_street || "",
-        house_number:         extracted.supplier_house_number || "",
+        surname:              fallback(extracted.supplier_contact_surname, "Onbekend"),
+        street:               fallback(extracted.supplier_street, "Onbekend"),
+        house_number:         fallback(extracted.supplier_house_number, "0"),
         house_number_suffix:  "",
-        zip:                  extracted.supplier_zip || "",
-        city:                 extracted.supplier_city || "",
-        country:              extracted.supplier_country || "NL",
+        zip:                  fallback(extracted.supplier_zip, "0000XX"),
+        city:                 fallback(extracted.supplier_city, "Onbekend"),
+        country:              fallback(extracted.supplier_country, "NL"),
         phone_number:         extracted.supplier_phone || "",
         fax_number:           "",
         web:                  extracted.supplier_website || "",
