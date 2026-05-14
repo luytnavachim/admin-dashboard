@@ -434,29 +434,29 @@ async function listPurchases() {
 
 function defaultCreateBody() {
   const today = new Date().toISOString().slice(0, 10);
+  // Schema gevolgd van Informer's Swagger spec voor POST /invoice/purchase/.
   // IDs hieronder zijn ontdekt via GET /invoices/purchase/ op deze admin —
   // pas ze aan voor andere administraties via /relations/, /vat/, /ledgers/.
-  // 0 wordt door Informer als "empty" gezien, dus echte IDs zijn vereist.
-  // costs_id mag null zijn. Amounts berekent Informer NIET zelf — de som
-  // van line.amount + line.vat_amount over alle regels moet gelijk zijn
+  // costs_id = 0 betekent "geen kosten-categorie" — null wordt door
+  // Informer als ontbrekend gezien, 0 niet. Amounts berekent Informer
+  // NIET zelf; de som van line.amount + line.vat_amount moet gelijk zijn
   // aan invoice_total.
   return {
     relation_id: 4953029,
     number: "TEST-" + Date.now(),
     invoice_date: today,
     invoice_expiry_date: today,
-    currency: "EUR",
+    collect: 0,
     invoice_total: 121.00,
+    pdf: "",
     lines: [
       {
         description: "Testregel (proof of concept)",
-        quantity: 1,
-        unit_price: 100.00,
         amount: 100.00,
-        vat_id: 1478835,
         vat_amount: 21.00,
+        vat_id: 1478835,
         ledger_id: 15302498,
-        costs_id: null
+        costs_id: 0
       }
     ]
   };
