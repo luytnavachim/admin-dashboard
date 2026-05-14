@@ -811,11 +811,14 @@ async function sendSelectedToInformer() {
     if (!match) {
       step3.textContent = `3/5 — Geen match voor "${extracted.supplier_name}" — aanmaken in Informer...`;
       // POST /relation/ — body is best-effort: zoveel mogelijk uit Claude's
-      // extractie. Informer-fouten ("Required field is missing: X") sturen
-      // ons naar de volgende iteratie als de minimale body niet volstaat.
+      // extractie. Informer-fouten ("Required field: X") sturen ons naar de
+      // volgende iteratie als velden ontbreken. relation_type=company want
+      // forwarded invoices komen vrijwel altijd van bedrijven, niet personen.
+      // vat (niet vat_number — Informer's veldnaam per de 422 response).
       const newRelation = {
+        relation_type: "company",
         name: extracted.supplier_name,
-        ...(extracted.supplier_vat_number ? { vat_number: extracted.supplier_vat_number } : {})
+        ...(extracted.supplier_vat_number ? { vat: extracted.supplier_vat_number } : {})
       };
       const created = await informerFetch("POST", "/relation/", newRelation);
       // Antwoord-shape onbekend; pak de eerste plausibele id terug.
