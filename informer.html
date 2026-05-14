@@ -583,16 +583,24 @@ async function loadInvoiceEmails() {
   $("emails-list").innerHTML = '<p class="muted">Laden...</p>';
   invoiceEmails = [];
   const sinceIso = new Date(Date.now() - 14 * 86400000).toISOString();
-  const queries = ["factuur", "invoice"];
+  const queries = ["factuur", "invoice", "rekening", "incasso", "betaling"];
 
   for (const m of MAILBOXES) {
     try {
+      // Resolve processed folder ID once per mailbox so we can filter out
+      // already-processed mails. Falls back to null op fail — dan filteren
+      // we niet en zien gebruikers de mail nog wel.
+      let processedFolderId = null;
+      try { processedFolderId = await findFolderRecursive(m, null, PROCESSED_FOLDER_NAME, 0); }
+      catch (e) { console.warn("Verwerkt-folder lookup mislukt voor " + m.email + ":", e.message); }
+
       for (const q of queries) {
         const url = `${userPath(m)}/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
         const r = await graph("GET", url);
         for (const msg of (r.value || [])) {
           if (!msg.hasAttachments) continue;
           if (new Date(msg.receivedDateTime) < new Date(sinceIso)) continue;
+          if (processedFolderId && msg.parentFolderId === processedFolderId) continue;
           if (invoiceEmails.find(x => x.id === msg.id)) continue;
           invoiceEmails.push({ ...msg, _mailbox: m });
         }
