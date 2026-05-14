@@ -363,7 +363,14 @@ async function informerFetch(method, path, body) {
   if (body !== undefined && body !== null) opts.body = typeof body === "string" ? body : JSON.stringify(body);
 
   const debugReq = { method, url, headers: { ...headers, Authorization: headers.Authorization ? "<redacted>" : undefined }, body: body ? (typeof body === "string" ? body.slice(0, 500) : body) : undefined };
-  const res = await fetch(url, opts);
+  $("debug-log").textContent = JSON.stringify({ request: debugReq, response: "(in flight...)" }, null, 2);
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } catch (netErr) {
+    $("debug-log").textContent = JSON.stringify({ request: debugReq, network_error: netErr.message, hint: url.includes("api.informer.eu") ? "URL gaat direct naar Informer in plaats van je proxy. Update Base URL in sectie 1." : "Worker bereikbaar? Probeer " + cfg.baseUrl.replace(/\/api$/, "/health") }, null, 2);
+    throw netErr;
+  }
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); } catch (e) {}
