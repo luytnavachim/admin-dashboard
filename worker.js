@@ -5,8 +5,9 @@
  * 1. cloudflare.com → Workers & Pages → Create → Create Worker → Quick edit
  * 2. Paste this file as the only script, click Save and deploy.
  * 3. Worker → Settings → Variables → Add:
- *      INFORMER_API_KEY        = <jouw key>            (encrypt!)
- *      INFORMER_AUTH_METHOD    = bearer | basic-key | basic-user | x-api-key
+ *      INFORMER_API_KEY        = <jouw api key>        (Secret — encrypt!)
+ *      INFORMER_SECURITY_CODE  = <jouw security code>  (Secret — alleen als anders dan API key)
+ *      INFORMER_AUTH_METHOD    = apikey | bearer | basic-key | basic-user | x-api-key
  *      INFORMER_BASE_URL       = https://api.informer.eu/v1   (of v2, etc.)
  *      ALLOWED_ORIGIN          = *  of  https://jouwsite.github.io  (komma-gescheiden voor meerdere)
  * 4. Copy de worker-URL (eindigt op .workers.dev).
@@ -51,7 +52,10 @@ export default {
 
     const method = (env.INFORMER_AUTH_METHOD || "apikey").toLowerCase();
     const key = env.INFORMER_API_KEY;
-    if (method === "apikey") headers.set("ApiKey", key);
+    if (method === "apikey") {
+      headers.set("Apikey", key);
+      headers.set("Securitycode", env.INFORMER_SECURITY_CODE || key);
+    }
     else if (method === "bearer") headers.set("Authorization", "Bearer " + key);
     else if (method === "basic-key") headers.set("Authorization", "Basic " + btoa(key + ":"));
     else if (method === "basic-user") headers.set("Authorization", "Basic " + btoa(key));
