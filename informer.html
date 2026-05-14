@@ -744,17 +744,19 @@ async function findRelationByName(name) {
   const container = data?.relation || data?.relations || data;
   if (!container || typeof container !== "object") return null;
 
+  // Match op alle plausibele display-naam velden — Informer's GET-shape kan
+  // company_name (per Swagger), name, of company gebruiken afhankelijk van
+  // endpoint en relation_type.
+  const relName = (rel) => String(rel.company_name || rel.name || rel.company || "").toLowerCase().trim();
   const candidates = Object.entries(container)
-    .filter(([, v]) => v && typeof v === "object" && (v.name || v.company));
+    .filter(([, v]) => v && typeof v === "object" && relName(v));
 
   for (const [id, rel] of candidates) {
-    const relName = String(rel.name || rel.company || "").toLowerCase().trim();
-    if (relName === needle) return { id, relation: rel };
+    if (relName(rel) === needle) return { id, relation: rel };
   }
   for (const [id, rel] of candidates) {
-    const relName = String(rel.name || rel.company || "").toLowerCase().trim();
-    if (!relName) continue;
-    if (relName.includes(needle) || needle.includes(relName)) return { id, relation: rel };
+    const n = relName(rel);
+    if (n.includes(needle) || needle.includes(n)) return { id, relation: rel };
   }
   return null;
 }
@@ -821,8 +823,7 @@ async function sendSelectedToInformer() {
       // UI later corrigeren).
       const newRelation = {
         relation_type:        "company",
-        name:                 extracted.supplier_name,
-        company:              extracted.supplier_name,
+        company_name:         extracted.supplier_name,
         firstname:            extracted.supplier_contact_firstname || "Algemeen",
         surname_prefix:       "",
         surname:              extracted.supplier_contact_surname || "Onbekend",
@@ -855,7 +856,7 @@ async function sendSelectedToInformer() {
     }
     step3.className = "flow-step ok";
     const matchLabel = relationSource === "created" ? "Aangemaakt" : "Match";
-    step3.textContent = `3/5 — ${matchLabel}: relation_id ${match.id} — ${match.relation.name || match.relation.company || extracted.supplier_name}`;
+    step3.textContent = `3/5 — ${matchLabel}: relation_id ${match.id} — ${match.relation.company_name || match.relation.name || match.relation.company || extracted.supplier_name}`;
 
     // ---- 4/5: factuur aanmaken met geëxtraheerde data
     step4 = logStep("4/5 — Factuur aanmaken in Informer...");
