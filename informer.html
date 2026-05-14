@@ -141,8 +141,12 @@ details[open] summary { margin-bottom: 8px; }
       <input id="cfg-admin" type="text" placeholder="bv. 12345 — leeg laten als je 't nog niet weet">
     </div>
     <div class="field">
-      <label for="cfg-purchases-path">Endpoint inkoopfacturen</label>
-      <input id="cfg-purchases-path" type="text" placeholder="/purchases" value="/purchases">
+      <label for="cfg-list-path">Endpoint inkoopfacturen ophalen (GET)</label>
+      <input id="cfg-list-path" type="text" placeholder="/invoices/purchase/" value="/invoices/purchase/">
+    </div>
+    <div class="field">
+      <label for="cfg-create-path">Endpoint inkoopfactuur aanmaken (POST)</label>
+      <input id="cfg-create-path" type="text" placeholder="/invoice/purchase/" value="/invoice/purchase/">
     </div>
   </div>
   <div class="row-btns">
@@ -157,7 +161,7 @@ details[open] summary { margin-bottom: 8px; }
 <!-- ============================================================ -->
 <div class="section">
   <h2><span class="num">2</span> Verbinding testen + administratie ophalen</h2>
-  <p class="muted">Doet een GET op het opgegeven endpoint. Default <code>/administrations</code> — pas aan als Informer een andere naam gebruikt.</p>
+  <p class="muted">Doet een GET op het opgegeven endpoint. Default <code>/administration/</code> — geeft details van de administratie die bij je API-key hoort.</p>
   <div class="field">
     <label for="test-path">Endpoint</label>
     <input id="test-path" type="text" value="/administration/">
@@ -173,7 +177,7 @@ details[open] summary { margin-bottom: 8px; }
 <!-- ============================================================ -->
 <div class="section">
   <h2><span class="num">3</span> Bestaande inkoopfacturen ophalen</h2>
-  <p class="muted">GET op het inkoopfacturen-endpoint uit instellingen. Sommige API's vereisen administratie-ID in het pad (bv. <code>/administrations/12345/purchases</code>) — pas dan het pad in sectie 1 aan.</p>
+  <p class="muted">GET op het inkoopfacturen-endpoint uit instellingen (default <code>/invoices/purchase/</code>). De API-key bepaalt al welke administratie wordt geraakt.</p>
   <div class="row-btns">
     <button class="btn primary" onclick="listPurchases()">GET inkoopfacturen</button>
   </div>
@@ -295,7 +299,8 @@ function defaultConfig() {
     authMethod: "none",
     apiKey: "",
     administrationId: "",
-    purchasesPath: "/purchases"
+    listPath: "/invoices/purchase/",
+    createPath: "/invoice/purchase/"
   };
 }
 function loadConfig() {
@@ -311,7 +316,8 @@ function saveConfig() {
     authMethod: $("cfg-auth").value,
     apiKey: $("cfg-key").value,
     administrationId: $("cfg-admin").value.trim(),
-    purchasesPath: ($("cfg-purchases-path").value.trim() || "/purchases").replace(/^([^\/])/, "/$1")
+    listPath: ($("cfg-list-path").value.trim() || "/invoices/purchase/").replace(/^([^\/])/, "/$1"),
+    createPath: ($("cfg-create-path").value.trim() || "/invoice/purchase/").replace(/^([^\/])/, "/$1")
   };
   localStorage.setItem(LS_KEY, JSON.stringify(cfg));
   $("cfg-status").textContent = "Opgeslagen.";
@@ -330,7 +336,8 @@ function applyConfigToForm() {
   $("cfg-auth").value = cfg.authMethod;
   $("cfg-key").value = cfg.apiKey;
   $("cfg-admin").value = cfg.administrationId;
-  $("cfg-purchases-path").value = cfg.purchasesPath;
+  $("cfg-list-path").value = cfg.listPath;
+  $("cfg-create-path").value = cfg.createPath;
 }
 
 // ============================================================
@@ -400,7 +407,7 @@ function renderResponse(el, status, data) {
 //  ACTIONS — sections 2/3/4
 // ============================================================
 async function testConnection() {
-  const path = $("test-path").value.trim() || "/administrations";
+  const path = $("test-path").value.trim() || "/administration/";
   const el = $("test-response");
   el.style.display = "block";
   el.textContent = "Bezig...";
@@ -413,10 +420,7 @@ async function testConnection() {
 }
 
 async function listPurchases() {
-  let path = cfg.purchasesPath || "/purchases";
-  if (cfg.administrationId && !path.includes(cfg.administrationId)) {
-    path = `/administrations/${cfg.administrationId}${path.startsWith("/") ? path : "/" + path}`;
-  }
+  const path = cfg.listPath || "/invoices/purchase/";
   const el = $("list-response");
   el.style.display = "block";
   el.textContent = "Bezig...";
@@ -449,10 +453,7 @@ async function createPurchase() {
   try { body = JSON.parse($("create-body").value); }
   catch (e) { renderResponse($("create-response"), "err", "Ongeldige JSON: " + e.message); return; }
 
-  let path = cfg.purchasesPath || "/purchases";
-  if (cfg.administrationId && !path.includes(cfg.administrationId)) {
-    path = `/administrations/${cfg.administrationId}${path.startsWith("/") ? path : "/" + path}`;
-  }
+  const path = cfg.createPath || "/invoice/purchase/";
   const el = $("create-response");
   el.style.display = "block";
   el.textContent = "Bezig...";
@@ -654,10 +655,7 @@ async function sendSelectedToInformer() {
       attachment: { filename: pdf.name, content_base64: pdfB64, content_type: "application/pdf" }
     };
 
-    let path = cfg.purchasesPath || "/purchases";
-    if (cfg.administrationId && !path.includes(cfg.administrationId)) {
-      path = `/administrations/${cfg.administrationId}${path.startsWith("/") ? path : "/" + path}`;
-    }
+    const path = cfg.createPath || "/invoice/purchase/";
     const result = await informerFetch("POST", path, payload);
     step2.className = "flow-step ok";
     step2.textContent = "2/3 — Informer accepteerde de upload.";
