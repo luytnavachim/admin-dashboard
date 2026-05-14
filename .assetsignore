@@ -1,4 +1,5 @@
 worker.js
+worker.test.mjs
 wrangler.jsonc
 wrangler.toml
 .gitignore
