@@ -921,17 +921,40 @@ async function sendSelectedToInformer() {
   }
 }
 
-async function findOrCreateFolder(mbox, name) {
+async function findFolderRecursive(mbox, parentId, name) {
   const base = userPath(mbox);
-  const r = await graph("GET", `${base}/mailFolders?$top=100&$select=id,displayName`);
-  for (const f of (r.value || [])) if (f.displayName === name) return f.id;
-  const created = await fetch("https://graph.microsoft.com/v1.0" + base + "/mailFolders", {
+  const path = parentId
+    ? `${base}/mailFolders/${parentId}/childFolders`
+    : `${base}/mailFolders`;
+  const r = await graph("GET", `${path}?$top=100&$select=id,displayName,childFolderCount`);
+  for (const f of (r.value || [])) {
+    if (f.displayName === name) return f.id;
+    if (f.childFolderCount > 0) {
+      const nested = await findFolderRecursive(mbox, f.id, name);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+async function findOrCreateFolder(mbox, name) {
+  // Eerst recursief zoeken — gebruikers organiseren factuur-mappen vaak
+  // genest onder Inbox of een ander parent.
+  const existing = await findFolderRecursive(mbox, null, name);
+  if (existing) return existing;
+
+  // Niet gevonden → onder Inbox aanmaken (logischer dan root voor een
+  // invoice-workflow map).
+  const base = userPath(mbox);
+  const created = await fetch("https://graph.microsoft.com/v1.0" + base + "/mailFolders/inbox/childFolders", {
     method: "POST",
     headers: { Authorization: "Bearer " + await getMsToken(), "Content-Type": "application/json" },
     body: JSON.stringify({ displayName: name })
   });
   if (!created.ok) throw new Error("Map maken mislukt: " + (await created.text()));
-  return (await created.json()).id;
+  const body = await created.json();
+  if (!body.id) throw new Error("Map aangemaakt maar geen ID teruggekregen: " + JSON.stringify(body).slice(0, 200));
+  return body.id;
 }
 
 function arrayBufferToBase64(buf) {
