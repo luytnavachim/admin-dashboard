@@ -822,6 +822,7 @@ async function sendSelectedToInformer() {
       const newRelation = {
         relation_type:        "company",
         name:                 extracted.supplier_name,
+        company:              extracted.supplier_name,
         firstname:            extracted.supplier_contact_firstname || "Algemeen",
         surname_prefix:       "",
         surname:              extracted.supplier_contact_surname || "Onbekend",
