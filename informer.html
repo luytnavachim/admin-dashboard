@@ -721,8 +721,10 @@ async function extractInvoiceViaWorker(pdfBase64) {
   let body = null;
   try { body = JSON.parse(text); } catch (e) {}
   if (!res.ok) {
-    const msg = (body && body.error) || ("Extract " + res.status);
-    throw new Error("Claude extract: " + msg);
+    const main = (body && body.error) || ("HTTP " + res.status);
+    const upstream = body && body.body ? "\n\nUpstream: " + (typeof body.body === "string" ? body.body : JSON.stringify(body.body)).slice(0, 800) : "";
+    console.error("Claude extract failed:", body || text);
+    throw new Error("Claude extract: " + main + upstream);
   }
   if (!body || !body.extracted) {
     throw new Error("Extract gaf geen 'extracted' veld terug.");
