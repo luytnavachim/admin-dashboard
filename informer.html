@@ -229,6 +229,7 @@ details[open] summary { margin-bottom: 8px; }
 
     <div class="row-btns">
       <button class="btn primary" id="send-btn" onclick="sendSelectedToInformer()" disabled>Stuur naar Informer &rarr;</button>
+      <button class="btn" id="skip-btn" onclick="skipSelected()" disabled title="Verplaatst de mail naar Archive zonder factuur in Informer aan te maken">Negeren (geen factuur)</button>
     </div>
     <div id="flow-log" style="margin-top: 12px;"></div>
   </div>
@@ -596,7 +597,11 @@ async function loadInvoiceEmails() {
       console.log(`[load] ${m.email}: processedFolderId=${processedFolderId}`);
 
       for (const q of queries) {
-        const url = `${userPath(m)}/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
+        // Scope op /mailFolders/inbox: alleen Inbox/Postvak IN doorzoeken,
+        // niet Sent Items / Drafts / Archive / etc. "inbox" is well-known
+        // folder name in Graph en werkt voor zowel Engelse als Nederlandse
+        // mailboxen.
+        const url = `${userPath(m)}/mailFolders/inbox/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
         const r = await graph("GET", url);
         for (const msg of (r.value || [])) {
           if (!msg.hasAttachments) continue;
@@ -670,6 +675,41 @@ function selectEmail(id) {
     el.classList.toggle("selected", el.dataset.id === id);
   });
   $("send-btn").disabled = false;
+  $("skip-btn").disabled = false;
+}
+
+async function skipSelected() {
+  const email = invoiceEmails.find(e => e.id === selectedEmailId);
+  if (!email) { showToast("Geen mail geselecteerd", "err"); return; }
+  if (!confirm(`Mail "${(email.subject || "").slice(0, 60)}" verplaatsen naar Archive zonder een factuur in Informer aan te maken?`)) return;
+
+  const skipBtn = $("skip-btn");
+  const sendBtn = $("send-btn");
+  const origText = skipBtn.textContent;
+  skipBtn.disabled = true;
+  sendBtn.disabled = true;
+  skipBtn.textContent = "Bezig...";
+
+  try {
+    // 'archive' is een well-known folder in Graph — geen recursieve lookup
+    // nodig, en werkt voor zowel Engelse als Nederlandse mailboxen.
+    const archive = await graph("GET", `${userPath(email._mailbox)}/mailFolders/archive?$select=id,displayName`);
+    if (email.parentFolderId && email.parentFolderId === archive.id) {
+      showToast(`Stond al in ${archive.displayName || "Archive"}`, "ok");
+    } else {
+      await graph("POST", `${userPath(email._mailbox)}/messages/${email.id}/move`, { destinationId: archive.id });
+      showToast(`Verplaatst naar ${archive.displayName || "Archive"}`, "ok");
+    }
+    invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
+    selectedEmailId = null;
+    renderEmails();
+  } catch (e) {
+    showToast("Negeren mislukt: " + e.message, "err");
+    sendBtn.disabled = false;
+  } finally {
+    skipBtn.disabled = true;
+    skipBtn.textContent = origText;
+  }
 }
 
 function logStep(text, kind) {
