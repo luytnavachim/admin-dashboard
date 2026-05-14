@@ -552,10 +552,15 @@ async function getMsToken() {
     return r.accessToken;
   }
 }
-async function graph(method, path) {
+async function graph(method, path, body) {
   const token = await getMsToken();
   const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + path;
-  const res = await fetch(url, { method, headers: { Authorization: "Bearer " + token } });
+  const opts = { method, headers: { Authorization: "Bearer " + token } };
+  if (body !== undefined && body !== null) {
+    opts.headers["Content-Type"] = "application/json";
+    opts.body = JSON.stringify(body);
+  }
+  const res = await fetch(url, opts);
   if (!res.ok) throw new Error("Graph " + res.status + ": " + (await res.text()));
   if (res.status === 204) return null;
   return await res.json();
