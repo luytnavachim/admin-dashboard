@@ -434,16 +434,14 @@ async function listPurchases() {
 
 function defaultCreateBody() {
   const today = new Date().toISOString().slice(0, 10);
-  // Informer's POST /invoice/purchase/ requires references to existing records:
-  //   relation_id  — find via GET /relations/  (or POST /relation/ to create new)
-  //   vat_id       — find via GET /vat/
-  //   ledger_id    — find via GET /ledgers/
-  //   costs_id     — find via GET /costs/
-  // Use section 2 to GET each list and copy IDs in here. Amounts are NOT
-  // calculated by Informer — invoice_total must equal sum(lines.amount) +
-  // sum(lines.vat_amount).
+  // IDs hieronder zijn ontdekt via GET /invoices/purchase/ op deze admin —
+  // pas ze aan voor andere administraties via /relations/, /vat/, /ledgers/.
+  // 0 wordt door Informer als "empty" gezien, dus echte IDs zijn vereist.
+  // costs_id mag null zijn. Amounts berekent Informer NIET zelf — de som
+  // van line.amount + line.vat_amount over alle regels moet gelijk zijn
+  // aan invoice_total.
   return {
-    relation_id: 0,
+    relation_id: 4953029,
     number: "TEST-" + Date.now(),
     invoice_date: today,
     invoice_expiry_date: today,
@@ -455,10 +453,10 @@ function defaultCreateBody() {
         quantity: 1,
         unit_price: 100.00,
         amount: 100.00,
-        vat_id: 0,
+        vat_id: 1478835,
         vat_amount: 21.00,
-        ledger_id: 0,
-        costs_id: 0
+        ledger_id: 15302498,
+        costs_id: null
       }
     ]
   };
