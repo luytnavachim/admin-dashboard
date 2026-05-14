@@ -206,7 +206,7 @@ details[open] summary { margin-bottom: 8px; }
 <!-- ============================================================ -->
 <div class="section">
   <h2><span class="num">5</span> Outlook &rarr; Informer (de echte flow)</h2>
-  <p class="muted">Log in op Microsoft, kies een factuur-mail. Dashboard: (1) PDF zoeken, (2) leverancier matchen op afzendernaam via <code>GET /relations/</code>, (3) factuur aanmaken met de PDF als base64 in het <code>pdf</code>-veld, (4) mail verplaatsen naar <em>Verwerkt</em>. Bedragen blijven 0 — vul in Informer aan.</p>
+  <p class="muted">Log in op Microsoft, kies een factuur-mail. Dashboard: (1) bijlagen ophalen (PDF + eventueel UBL-XML), (2) factuurdata extraheren — UBL eerst, anders Claude leest de PDF via <code>POST /extract</code>, (3) leverancier matchen op de geëxtraheerde naam via <code>GET /relations/</code>, (4) factuur aanmaken in Informer met PDF als base64 + de geëxtraheerde regels/totalen, (5) mail verplaatsen naar <em>Verwerkt</em>.</p>
 
   <div id="ms-signin" style="margin-bottom: 12px;">
     <button class="btn primary" onclick="msSignIn()">Inloggen met Microsoft</button>
@@ -636,6 +636,100 @@ function logStep(text, kind) {
   return el;
 }
 
+// UBL 2.x namespaces — invoice XML uses these even when prefixes vary.
+const UBL_NS = {
+  cbc: "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+  cac: "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+};
+
+// Reads the first matching element via namespace + local name and returns its
+// trimmed text content. UBL prefixes (cbc:, cac:) are conventional, not
+// enforced — getElementsByTagNameNS handles either prefix mapping.
+function ublText(scope, ns, local) {
+  const el = scope.getElementsByTagNameNS(UBL_NS[ns], local)[0];
+  return el ? (el.textContent || "").trim() : "";
+}
+
+// Parses a UBL Invoice 2.x XML string into the same shape that Claude returns
+// from /extract. Returns null on parse failure or if required fields are
+// missing — caller falls back to LLM extraction.
+function tryParseUbl(xmlString) {
+  try {
+    const doc = new DOMParser().parseFromString(xmlString, "text/xml");
+    if (doc.getElementsByTagName("parsererror").length) return null;
+
+    const supplierParty = doc.getElementsByTagNameNS(UBL_NS.cac, "AccountingSupplierParty")[0];
+    if (!supplierParty) return null;
+    const supplierName =
+      ublText(supplierParty, "cbc", "RegistrationName") ||
+      ublText(supplierParty, "cbc", "Name");
+
+    const number = ublText(doc, "cbc", "ID");
+    const invoiceDate = ublText(doc, "cbc", "IssueDate");
+    const dueDate = ublText(doc, "cbc", "DueDate") || invoiceDate;
+    const currency = ublText(doc, "cbc", "DocumentCurrencyCode") || "EUR";
+
+    const total = doc.getElementsByTagNameNS(UBL_NS.cac, "LegalMonetaryTotal")[0];
+    const invoiceTotal = total
+      ? parseFloat(ublText(total, "cbc", "PayableAmount") || ublText(total, "cbc", "TaxInclusiveAmount") || "0")
+      : 0;
+
+    const lineEls = doc.getElementsByTagNameNS(UBL_NS.cac, "InvoiceLine");
+    const lines = [];
+    for (const ln of lineEls) {
+      const item = ln.getElementsByTagNameNS(UBL_NS.cac, "Item")[0];
+      const description = item ? ublText(item, "cbc", "Name") : "";
+      const amount = parseFloat(ublText(ln, "cbc", "LineExtensionAmount") || "0");
+      const taxTotal = ln.getElementsByTagNameNS(UBL_NS.cac, "TaxTotal")[0];
+      const vatAmount = taxTotal ? parseFloat(ublText(taxTotal, "cbc", "TaxAmount") || "0") : 0;
+      const taxCat = ln.getElementsByTagNameNS(UBL_NS.cac, "ClassifiedTaxCategory")[0];
+      const vatRate = taxCat ? parseFloat(ublText(taxCat, "cbc", "Percent") || "0") : 0;
+      lines.push({ description: description || "Regel", amount, vat_amount: vatAmount, vat_rate: vatRate });
+    }
+
+    if (!supplierName || !number || !invoiceDate) return null;
+    if (lines.length === 0) {
+      lines.push({ description: number, amount: invoiceTotal, vat_amount: 0, vat_rate: 0 });
+    }
+
+    return {
+      supplier_name: supplierName,
+      supplier_vat_number: "",
+      number,
+      invoice_date: invoiceDate,
+      invoice_expiry_date: dueDate,
+      currency,
+      invoice_total: invoiceTotal,
+      lines
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Calls the Worker's /extract endpoint, which proxies to Claude API and
+// returns the structured invoice via forced tool_use. cfg.baseUrl is
+// "/api"; the extract route lives at sibling "/extract".
+async function extractInvoiceViaWorker(pdfBase64) {
+  const extractUrl = cfg.baseUrl.replace(/\/api$/, "") + "/extract";
+  const res = await fetch(extractUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pdf_base64: pdfBase64 })
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch (e) {}
+  if (!res.ok) {
+    const msg = (body && body.error) || ("Extract " + res.status);
+    throw new Error("Claude extract: " + msg);
+  }
+  if (!body || !body.extracted) {
+    throw new Error("Extract gaf geen 'extracted' veld terug.");
+  }
+  return body.extracted;
+}
+
 // Zoekt een relation in Informer via GET /relations/ en matcht case-insensitive
 // op naam (eerst exact, dan substring). Returns { id, relation } of null.
 // Informer's GET /invoices/purchase/ retourneert { purchase: { "<id>": {...} } },
@@ -674,75 +768,98 @@ async function sendSelectedToInformer() {
   const origText = btn.textContent;
   btn.textContent = "Bezig...";
 
-  let step1 = null, step2 = null, step3 = null, step4 = null;
+  let step1 = null, step2 = null, step3 = null, step4 = null, step5 = null;
   try {
-    // ---- 1/4: PDF-bijlage zoeken in Outlook
-    step1 = logStep("1/4 — PDF-bijlage zoeken in Outlook...");
+    // ---- 1/5: bijlagen ophalen (PDF + eventueel UBL)
+    step1 = logStep("1/5 — Bijlagen zoeken in Outlook (PDF + UBL)...");
     const base = userPath(email._mailbox);
     const atts = await graph("GET", `${base}/messages/${email.id}/attachments?$select=id,name,contentType,size`);
-    const pdf = (atts.value || []).find(a => /\.pdf$/i.test(a.name || "") || a.contentType === "application/pdf");
+    const list = atts.value || [];
+    const pdf = list.find(a => /\.pdf$/i.test(a.name || "") || a.contentType === "application/pdf");
     if (!pdf) throw new Error("Geen PDF-bijlage gevonden in deze mail.");
+    const ubl = list.find(a => /\.(xml|ubl)$/i.test(a.name || "") || /xml/i.test(a.contentType || ""));
     step1.className = "flow-step ok";
-    step1.textContent = `1/4 — PDF gevonden: ${pdf.name} (${Math.round(pdf.size/1024)} KB)`;
+    step1.textContent = `1/5 — PDF: ${pdf.name} (${Math.round(pdf.size/1024)} KB)` + (ubl ? ` + UBL: ${ubl.name}` : "");
 
-    // ---- 2/4: leverancier matchen in Informer
-    const senderName = (email.from && email.from.emailAddress && email.from.emailAddress.name) || "";
-    if (!senderName) throw new Error("Geen afzendernaam in mail; kan geen leverancier matchen.");
-    step2 = logStep(`2/4 — Leverancier zoeken in Informer: "${senderName}"...`);
-    const match = await findRelationByName(senderName);
-    if (!match) {
-      throw new Error(
-        `Geen relation gevonden voor "${senderName}" in Informer. ` +
-        `Maak deze leverancier eerst aan in Informer en probeer opnieuw.`
-      );
+    // ---- 2/5: factuurdata extraheren — UBL eerst, anders Claude
+    step2 = logStep("2/5 — Factuurdata extraheren" + (ubl ? " uit UBL..." : " uit PDF via Claude..."));
+    let extracted = null;
+    let extractedVia = "";
+    if (ubl) {
+      const xmlBuf = await graphBinary(`${base}/messages/${email.id}/attachments/${ubl.id}/$value`);
+      const xmlText = new TextDecoder().decode(xmlBuf);
+      extracted = tryParseUbl(xmlText);
+      if (extracted) extractedVia = "UBL";
     }
-    step2.className = "flow-step ok";
-    step2.textContent = `2/4 — Match: relation_id ${match.id} — ${match.relation.name || match.relation.company}`;
-
-    // ---- 3/4: PDF downloaden + factuur aanmaken
-    step3 = logStep("3/4 — PDF downloaden + factuur aanmaken in Informer...");
     const pdfBuf = await graphBinary(`${base}/messages/${email.id}/attachments/${pdf.id}/$value`);
     const pdfB64 = arrayBufferToBase64(pdfBuf);
+    if (!extracted) {
+      extracted = await extractInvoiceViaWorker(pdfB64);
+      extractedVia = "Claude";
+    }
+    step2.className = "flow-step ok";
+    step2.textContent =
+      `2/5 — Geëxtraheerd via ${extractedVia}: ${extracted.supplier_name} — ` +
+      `nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
 
-    const today = new Date().toISOString().slice(0, 10);
-    const subject = (email.subject || "Inkoop via Outlook").slice(0, 80);
-    // Bedragen zijn 0 — Informer-gebruiker vult de regels en totalen in
-    // via de UI na ontvangst (we hebben geen amount uit de mail). vat_id,
-    // ledger_id, costs_id matchen de testpayload (dezelfde administratie).
+    // ---- 3/5: relation matchen op de geëxtraheerde leveranciersnaam
+    step3 = logStep(`3/5 — Leverancier matchen in Informer: "${extracted.supplier_name}"...`);
+    const match = await findRelationByName(extracted.supplier_name);
+    if (!match) {
+      throw new Error(
+        `Geen relation gevonden voor "${extracted.supplier_name}" in Informer. ` +
+        `Maak deze leverancier eerst aan (via POST /relation/ of in de Informer UI) en probeer opnieuw.`
+      );
+    }
+    step3.className = "flow-step ok";
+    step3.textContent = `3/5 — Match: relation_id ${match.id} — ${match.relation.name || match.relation.company}`;
+
+    // ---- 4/5: factuur aanmaken met geëxtraheerde data
+    step4 = logStep("4/5 — Factuur aanmaken in Informer...");
+    // vat_id, ledger_id, costs_id zijn admin-specifiek en hardcoded (matchen
+    // de testpayload). vat_rate uit extractie is alleen informatief — Informer
+    // wil de ID, niet het percentage. Eventueel later mappen.
+    const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
+      description: extracted.number || "Inkoopfactuur",
+      amount: extracted.invoice_total || 0,
+      vat_amount: 0,
+      vat_rate: 0
+    }]).map(ln => ({
+      description: (ln.description || "Regel").slice(0, 200),
+      amount: Number(ln.amount) || 0,
+      vat_amount: Number(ln.vat_amount) || 0,
+      vat_id: 1478835,
+      ledger_id: 15302498,
+      costs_id: 0
+    }));
+
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
-      number: `OUTLOOK-${Date.now()}`,
-      invoice_date: today,
-      invoice_expiry_date: today,
+      number: extracted.number || `OUTLOOK-${Date.now()}`,
+      invoice_date: extracted.invoice_date || new Date().toISOString().slice(0, 10),
+      invoice_expiry_date: extracted.invoice_expiry_date || extracted.invoice_date || new Date().toISOString().slice(0, 10),
       collect: 0,
-      invoice_total: 0,
+      invoice_total: Number(extracted.invoice_total) || 0,
       pdf: pdfB64,
-      lines: [{
-        description: subject,
-        amount: 0,
-        vat_amount: 0,
-        vat_id: 1478835,
-        ledger_id: 15302498,
-        costs_id: 0
-      }]
+      lines
     };
 
     const path = cfg.createPath || "/invoice/purchase/";
     const result = await informerFetch("POST", path, payload);
-    step3.className = "flow-step ok";
+    step4.className = "flow-step ok";
     const invoiceTail = result?.invoice_url ? ` — ${result.invoice_url}` : "";
-    step3.textContent = `3/4 — Factuur aangemaakt (id ${result?.invoice_id || "?"})${invoiceTail}`;
+    step4.textContent = `4/5 — Factuur aangemaakt (id ${result?.invoice_id || "?"})${invoiceTail}`;
 
-    // ---- 4/4: mail verplaatsen
-    step4 = logStep("4/4 — Mail verplaatsen naar Verwerkt-map...");
+    // ---- 5/5: mail verplaatsen
+    step5 = logStep("5/5 — Mail verplaatsen naar Verwerkt-map...");
     try {
       const folderId = await findOrCreateFolder(email._mailbox, PROCESSED_FOLDER_NAME);
       await graph("POST", `${userPath(email._mailbox)}/messages/${email.id}/move`, { destinationId: folderId });
-      step4.className = "flow-step ok";
-      step4.textContent = "4/4 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
+      step5.className = "flow-step ok";
+      step5.textContent = "5/5 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
     } catch (e) {
-      step4.className = "flow-step err";
-      step4.textContent = "4/4 — Verplaatsen mislukt (factuur is wel in Informer): " + e.message;
+      step5.className = "flow-step err";
+      step5.textContent = "5/5 — Verplaatsen mislukt (factuur is wel in Informer): " + e.message;
     }
 
     if (result?.invoice_url) {
@@ -752,7 +869,7 @@ async function sendSelectedToInformer() {
     }
     showToast("Verstuurd naar Informer", "ok");
   } catch (e) {
-    const failing = step4 || step3 || step2 || step1;
+    const failing = step5 || step4 || step3 || step2 || step1;
     if (failing) { failing.className = "flow-step err"; failing.textContent = (failing.textContent.split("—")[0]) + "— FOUT: " + e.message; }
     else logStep("Fout: " + e.message, "err");
     showToast("Mislukt: " + e.message, "err");

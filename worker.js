@@ -30,7 +30,11 @@ export default {
     }
 
     if (url.pathname === "/health" || url.pathname === "/") {
-      return json({ ok: true, hint: "POST/GET via /api/<path>" }, 200, cors);
+      return json({ ok: true, hint: "POST/GET via /api/<path>, POST /extract for PDF extraction" }, 200, cors);
+    }
+
+    if (url.pathname === "/extract") {
+      return await handleExtract(request, env, cors);
     }
 
     const prefix = "/api/";
@@ -105,6 +109,118 @@ export default {
     });
   }
 };
+
+// ---------------------------------------------------------------------------
+// /extract — PDF invoice extraction via Claude API (claude-opus-4-7).
+//
+// Input:  POST { pdf_base64: "..." }
+// Output: { extracted: { supplier_name, number, ... }, usage: {...} }
+//
+// Uses tool_choice to force a structured response matching the schema below.
+// Adaptive thinking + ephemeral cache on the tool definition so repeated
+// invocations within the cache window only pay for the PDF tokens.
+// ---------------------------------------------------------------------------
+
+const PURCHASE_INVOICE_TOOL = {
+  name: "report_purchase_invoice",
+  description: "Rapporteer de inkoopfactuur-velden zoals geëxtraheerd uit de PDF.",
+  input_schema: {
+    type: "object",
+    properties: {
+      supplier_name:       { type: "string", description: "Volledige bedrijfsnaam van de leverancier (de partij die de factuur stuurt). Geen e-mailadres, geen klantnaam." },
+      supplier_vat_number: { type: "string", description: "BTW-nummer van de leverancier (formaat zoals op factuur). Lege string als niet zichtbaar." },
+      number:              { type: "string", description: "Factuur- of referentienummer zoals op de factuur." },
+      invoice_date:        { type: "string", description: "Factuurdatum in YYYY-MM-DD." },
+      invoice_expiry_date: { type: "string", description: "Vervaldatum in YYYY-MM-DD. Als geen vervaldatum zichtbaar, gebruik dezelfde waarde als invoice_date." },
+      currency:            { type: "string", description: "ISO valuta-code (EUR, USD, GBP, ...). Default EUR als niet expliciet vermeld." },
+      invoice_total:       { type: "number", description: "Totaalbedrag inclusief BTW." },
+      lines: {
+        type: "array",
+        description: "Eén of meer factuurregels. Als de PDF geen specificatie geeft, één samenvattende regel met de totalen.",
+        items: {
+          type: "object",
+          properties: {
+            description: { type: "string", description: "Korte omschrijving van de regel." },
+            amount:      { type: "number", description: "Bedrag exclusief BTW." },
+            vat_amount:  { type: "number", description: "BTW-bedrag op deze regel." },
+            vat_rate:    { type: "number", description: "BTW-percentage (21, 9, 0, ...). 0 als BTW-vrij of buiten EU." }
+          },
+          required: ["description", "amount", "vat_amount", "vat_rate"]
+        }
+      }
+    },
+    required: ["supplier_name", "number", "invoice_date", "invoice_total", "lines"]
+  }
+};
+
+async function handleExtract(request, env, cors) {
+  if (request.method !== "POST") {
+    return json({ error: "POST only" }, 405, cors);
+  }
+  if (!env.ANTHROPIC_API_KEY) {
+    return json({ error: "Worker mist ANTHROPIC_API_KEY in Variables." }, 500, cors);
+  }
+
+  let body;
+  try { body = await request.json(); }
+  catch { return json({ error: "Body moet JSON zijn met { pdf_base64 }." }, 400, cors); }
+
+  if (!body || typeof body.pdf_base64 !== "string" || !body.pdf_base64) {
+    return json({ error: "Missing or empty pdf_base64 in body." }, 400, cors);
+  }
+
+  const anthropicReq = {
+    model: "claude-opus-4-7",
+    max_tokens: 8192,
+    thinking: { type: "adaptive" },
+    tools: [{ ...PURCHASE_INVOICE_TOOL, cache_control: { type: "ephemeral" } }],
+    tool_choice: { type: "tool", name: "report_purchase_invoice" },
+    messages: [{
+      role: "user",
+      content: [
+        {
+          type: "document",
+          source: { type: "base64", media_type: "application/pdf", data: body.pdf_base64 }
+        },
+        {
+          type: "text",
+          text: "Dit is een inkoopfactuur. Roep de report_purchase_invoice tool aan met de geëxtraheerde velden. Belangrijke regels: (1) supplier_name = de partij die de factuur stuurt (bedrijfsnaam, geen e-mail/persoonsnaam). (2) Datums in YYYY-MM-DD. (3) Bedragen als getal (geen valuta-symbool). (4) Als de PDF geen regel-specificatie geeft, één samenvattende lijn met de totalen."
+        }
+      ]
+    }]
+  };
+
+  let resp;
+  try {
+    resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": env.ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json"
+      },
+      body: JSON.stringify(anthropicReq)
+    });
+  } catch (e) {
+    return json({ error: "Anthropic fetch failed: " + e.message }, 502, cors);
+  }
+
+  const text = await resp.text();
+  if (!resp.ok) {
+    return json({ error: "Anthropic " + resp.status, body: text.slice(0, 4000) }, resp.status >= 500 ? 502 : resp.status, cors);
+  }
+
+  let data;
+  try { data = JSON.parse(text); }
+  catch { return json({ error: "Anthropic response not JSON", body: text.slice(0, 2000) }, 502, cors); }
+
+  const toolBlock = (data.content || []).find(b => b && b.type === "tool_use" && b.name === "report_purchase_invoice");
+  if (!toolBlock || !toolBlock.input) {
+    return json({ error: "No report_purchase_invoice tool_use in Claude response", raw: data }, 502, cors);
+  }
+
+  return json({ extracted: toolBlock.input, usage: data.usage || null }, 200, cors);
+}
 
 function hasErrorPayload(err) {
   if (typeof err === "string") return err.length > 0;

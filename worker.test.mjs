@@ -342,6 +342,137 @@ await run("upstream non-200 with error field is not rewritten", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// /extract — PDF invoice extraction via Claude API.
+
+await run("/extract requires POST", async () => {
+  const res = await worker.fetch(new Request("https://w.workers.dev/extract"), {
+    ...baseEnv, ANTHROPIC_API_KEY: "sk-test"
+  });
+  assert(res.status === 405, "GET /extract returns 405");
+});
+
+await run("/extract requires ANTHROPIC_API_KEY", async () => {
+  const res = await worker.fetch(
+    new Request("https://w.workers.dev/extract", {
+      method: "POST", body: JSON.stringify({ pdf_base64: "x" }),
+      headers: { "content-type": "application/json" }
+    }),
+    { ...baseEnv, ANTHROPIC_API_KEY: undefined }
+  );
+  assert(res.status === 500, "missing key → 500");
+  const body = await res.json();
+  assert(body.error?.includes("ANTHROPIC_API_KEY"), "error names the missing var");
+});
+
+await run("/extract rejects missing pdf_base64", async () => {
+  const res = await worker.fetch(
+    new Request("https://w.workers.dev/extract", {
+      method: "POST", body: "{}", headers: { "content-type": "application/json" }
+    }),
+    { ...baseEnv, ANTHROPIC_API_KEY: "sk-test" }
+  );
+  assert(res.status === 400, "no pdf_base64 → 400");
+});
+
+await run("/extract rejects non-JSON body", async () => {
+  const res = await worker.fetch(
+    new Request("https://w.workers.dev/extract", {
+      method: "POST", body: "not json", headers: { "content-type": "application/json" }
+    }),
+    { ...baseEnv, ANTHROPIC_API_KEY: "sk-test" }
+  );
+  assert(res.status === 400, "non-JSON → 400");
+});
+
+await run("/extract: forwards to Anthropic with the right shape and returns extracted JSON", async () => {
+  let captured;
+  const restore = mockUpstream(req => {
+    captured = req;
+    return new Response(JSON.stringify({
+      id: "msg_test", role: "assistant", model: "claude-opus-4-7",
+      content: [{
+        type: "tool_use", id: "toolu_1", name: "report_purchase_invoice",
+        input: {
+          supplier_name: "EasyPark", number: "4293049306362",
+          invoice_date: "2026-05-13", invoice_expiry_date: "2026-05-13",
+          currency: "EUR", invoice_total: 12.50,
+          lines: [{ description: "Parking", amount: 10.33, vat_amount: 2.17, vat_rate: 21 }]
+        }
+      }],
+      stop_reason: "tool_use",
+      usage: { input_tokens: 5000, output_tokens: 250 }
+    }), { status: 200, headers: { "content-type": "application/json" } });
+  });
+  try {
+    const res = await worker.fetch(
+      new Request("https://w.workers.dev/extract", {
+        method: "POST",
+        body: JSON.stringify({ pdf_base64: "JVBERi0xLjQK" }),
+        headers: { "content-type": "application/json" }
+      }),
+      { ...baseEnv, ANTHROPIC_API_KEY: "sk-test" }
+    );
+    assert(res.status === 200, "status 200, got " + res.status);
+    const body = await res.json();
+    assert(body.extracted?.supplier_name === "EasyPark", "supplier_name surfaced");
+    assert(body.extracted?.invoice_total === 12.50, "invoice_total surfaced");
+    assert(body.usage?.input_tokens === 5000, "usage surfaced");
+
+    assert(captured.url === "https://api.anthropic.com/v1/messages", "Anthropic endpoint hit");
+    assert(captured.headers["x-api-key"] === "sk-test", "x-api-key sent");
+    assert(captured.headers["anthropic-version"] === "2023-06-01", "anthropic-version sent");
+
+    const sentBody = JSON.parse(typeof captured.body === "string" ? captured.body : new TextDecoder().decode(captured.body));
+    assert(sentBody.model === "claude-opus-4-7", "model is opus-4-7");
+    assert(sentBody.thinking?.type === "adaptive", "adaptive thinking enabled");
+    assert(sentBody.tool_choice?.name === "report_purchase_invoice", "tool_choice forces our tool");
+    assert(sentBody.tools[0].cache_control?.type === "ephemeral", "tool def is cache-controlled");
+    const userMsg = sentBody.messages[0];
+    assert(userMsg.content[0].type === "document", "first content block is the PDF");
+    assert(userMsg.content[0].source.media_type === "application/pdf", "PDF media_type");
+    assert(userMsg.content[0].source.data === "JVBERi0xLjQK", "PDF base64 forwarded verbatim");
+  } finally { restore(); }
+});
+
+await run("/extract: Anthropic error is passed through", async () => {
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({ type: "error", error: { type: "invalid_request_error", message: "bad" } }),
+      { status: 400, headers: { "content-type": "application/json" } })
+  );
+  try {
+    const res = await worker.fetch(
+      new Request("https://w.workers.dev/extract", {
+        method: "POST",
+        body: JSON.stringify({ pdf_base64: "x" }),
+        headers: { "content-type": "application/json" }
+      }),
+      { ...baseEnv, ANTHROPIC_API_KEY: "sk-test" }
+    );
+    assert(res.status === 400, "400 surfaced, got " + res.status);
+  } finally { restore(); }
+});
+
+await run("/extract: 502 when response has no tool_use block", async () => {
+  const restore = mockUpstream(() =>
+    new Response(JSON.stringify({
+      content: [{ type: "text", text: "I cannot extract this." }],
+      stop_reason: "end_turn"
+    }), { status: 200, headers: { "content-type": "application/json" } })
+  );
+  try {
+    const res = await worker.fetch(
+      new Request("https://w.workers.dev/extract", {
+        method: "POST",
+        body: JSON.stringify({ pdf_base64: "x" }),
+        headers: { "content-type": "application/json" }
+      }),
+      { ...baseEnv, ANTHROPIC_API_KEY: "sk-test" }
+    );
+    assert(res.status === 502, "missing tool_use → 502");
+  } finally { restore(); }
+});
+
+// ---------------------------------------------------------------------------
 
 console.log(`\n${"=".repeat(60)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
