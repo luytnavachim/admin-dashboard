@@ -206,7 +206,7 @@ details[open] summary { margin-bottom: 8px; }
 <!-- ============================================================ -->
 <div class="section">
   <h2><span class="num">5</span> Outlook &rarr; Informer (de echte flow)</h2>
-  <p class="muted">Log in op Microsoft, kies een recente factuur-mail, dashboard haalt de PDF op en uploadt 'm naar Informer.</p>
+  <p class="muted">Log in op Microsoft, kies een factuur-mail. Dashboard: (1) PDF zoeken, (2) leverancier matchen op afzendernaam via <code>GET /relations/</code>, (3) factuur aanmaken met de PDF als base64 in het <code>pdf</code>-veld, (4) mail verplaatsen naar <em>Verwerkt</em>. Bedragen blijven 0 — vul in Informer aan.</p>
 
   <div id="ms-signin" style="margin-bottom: 12px;">
     <button class="btn primary" onclick="msSignIn()">Inloggen met Microsoft</button>
@@ -636,6 +636,33 @@ function logStep(text, kind) {
   return el;
 }
 
+// Zoekt een relation in Informer via GET /relations/ en matcht case-insensitive
+// op naam (eerst exact, dan substring). Returns { id, relation } of null.
+// Informer's GET /invoices/purchase/ retourneert { purchase: { "<id>": {...} } },
+// dus we verwachten { relation: { "<id>": {...} } } voor /relations/ —
+// fallback op { relations: ... } of de root als 't anders ligt.
+async function findRelationByName(name) {
+  if (!name) return null;
+  const needle = name.toLowerCase().trim();
+  const data = await informerFetch("GET", "/relations/");
+  const container = data?.relation || data?.relations || data;
+  if (!container || typeof container !== "object") return null;
+
+  const candidates = Object.entries(container)
+    .filter(([, v]) => v && typeof v === "object" && (v.name || v.company));
+
+  for (const [id, rel] of candidates) {
+    const relName = String(rel.name || rel.company || "").toLowerCase().trim();
+    if (relName === needle) return { id, relation: rel };
+  }
+  for (const [id, rel] of candidates) {
+    const relName = String(rel.name || rel.company || "").toLowerCase().trim();
+    if (!relName) continue;
+    if (relName.includes(needle) || needle.includes(relName)) return { id, relation: rel };
+  }
+  return null;
+}
+
 async function sendSelectedToInformer() {
   $("flow-log").innerHTML = "";
   const email = invoiceEmails.find(e => e.id === selectedEmailId);
@@ -647,50 +674,85 @@ async function sendSelectedToInformer() {
   const origText = btn.textContent;
   btn.textContent = "Bezig...";
 
-  let step1 = null, step2 = null, step3 = null;
+  let step1 = null, step2 = null, step3 = null, step4 = null;
   try {
-    step1 = logStep("1/3 — PDF-bijlage zoeken in Outlook...");
+    // ---- 1/4: PDF-bijlage zoeken in Outlook
+    step1 = logStep("1/4 — PDF-bijlage zoeken in Outlook...");
     const base = userPath(email._mailbox);
     const atts = await graph("GET", `${base}/messages/${email.id}/attachments?$select=id,name,contentType,size`);
     const pdf = (atts.value || []).find(a => /\.pdf$/i.test(a.name || "") || a.contentType === "application/pdf");
     if (!pdf) throw new Error("Geen PDF-bijlage gevonden in deze mail.");
     step1.className = "flow-step ok";
-    step1.textContent = `1/3 — PDF gevonden: ${pdf.name} (${Math.round(pdf.size/1024)} KB)`;
+    step1.textContent = `1/4 — PDF gevonden: ${pdf.name} (${Math.round(pdf.size/1024)} KB)`;
 
-    step2 = logStep("2/3 — PDF downloaden en naar Informer uploaden...");
+    // ---- 2/4: leverancier matchen in Informer
+    const senderName = (email.from && email.from.emailAddress && email.from.emailAddress.name) || "";
+    if (!senderName) throw new Error("Geen afzendernaam in mail; kan geen leverancier matchen.");
+    step2 = logStep(`2/4 — Leverancier zoeken in Informer: "${senderName}"...`);
+    const match = await findRelationByName(senderName);
+    if (!match) {
+      throw new Error(
+        `Geen relation gevonden voor "${senderName}" in Informer. ` +
+        `Maak deze leverancier eerst aan in Informer en probeer opnieuw.`
+      );
+    }
+    step2.className = "flow-step ok";
+    step2.textContent = `2/4 — Match: relation_id ${match.id} — ${match.relation.name || match.relation.company}`;
+
+    // ---- 3/4: PDF downloaden + factuur aanmaken
+    step3 = logStep("3/4 — PDF downloaden + factuur aanmaken in Informer...");
     const pdfBuf = await graphBinary(`${base}/messages/${email.id}/attachments/${pdf.id}/$value`);
     const pdfB64 = arrayBufferToBase64(pdfBuf);
 
-    const senderName = (email.from && email.from.emailAddress && email.from.emailAddress.name) || "Onbekende leverancier";
     const today = new Date().toISOString().slice(0, 10);
+    const subject = (email.subject || "Inkoop via Outlook").slice(0, 80);
+    // Bedragen zijn 0 — Informer-gebruiker vult de regels en totalen in
+    // via de UI na ontvangst (we hebben geen amount uit de mail). vat_id,
+    // ledger_id, costs_id matchen de testpayload (dezelfde administratie).
     const payload = {
-      supplier: { name: senderName },
+      relation_id: parseInt(match.id, 10) || match.id,
+      number: `OUTLOOK-${Date.now()}`,
       invoice_date: today,
-      due_date: today,
-      subject: email.subject || "",
-      attachment: { filename: pdf.name, content_base64: pdfB64, content_type: "application/pdf" }
+      invoice_expiry_date: today,
+      collect: 0,
+      invoice_total: 0,
+      pdf: pdfB64,
+      lines: [{
+        description: subject,
+        amount: 0,
+        vat_amount: 0,
+        vat_id: 1478835,
+        ledger_id: 15302498,
+        costs_id: 0
+      }]
     };
 
     const path = cfg.createPath || "/invoice/purchase/";
     const result = await informerFetch("POST", path, payload);
-    step2.className = "flow-step ok";
-    step2.textContent = "2/3 — Informer accepteerde de upload.";
+    step3.className = "flow-step ok";
+    const invoiceTail = result?.invoice_url ? ` — ${result.invoice_url}` : "";
+    step3.textContent = `3/4 — Factuur aangemaakt (id ${result?.invoice_id || "?"})${invoiceTail}`;
 
-    step3 = logStep("3/3 — Mail verplaatsen naar Verwerkt-map...");
+    // ---- 4/4: mail verplaatsen
+    step4 = logStep("4/4 — Mail verplaatsen naar Verwerkt-map...");
     try {
       const folderId = await findOrCreateFolder(email._mailbox, PROCESSED_FOLDER_NAME);
       await graph("POST", `${userPath(email._mailbox)}/messages/${email.id}/move`, { destinationId: folderId });
-      step3.className = "flow-step ok";
-      step3.textContent = "3/3 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
+      step4.className = "flow-step ok";
+      step4.textContent = "4/4 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
     } catch (e) {
-      step3.className = "flow-step err";
-      step3.textContent = "3/3 — Verplaatsen mislukt (factuur is wel in Informer): " + e.message;
+      step4.className = "flow-step err";
+      step4.textContent = "4/4 — Verplaatsen mislukt (factuur is wel in Informer): " + e.message;
     }
 
-    logStep("Klaar! Informer-response: " + JSON.stringify(result).slice(0, 200) + "...", "ok");
+    if (result?.invoice_url) {
+      logStep(`Klaar! Open in Informer: ${result.invoice_url}`, "ok");
+    } else {
+      logStep("Klaar! (geen invoice_url teruggekregen)", "ok");
+    }
     showToast("Verstuurd naar Informer", "ok");
   } catch (e) {
-    const failing = step3 || step2 || step1;
+    const failing = step4 || step3 || step2 || step1;
     if (failing) { failing.className = "flow-step err"; failing.textContent = (failing.textContent.split("—")[0]) + "— FOUT: " + e.message; }
     else logStep("Fout: " + e.message, "err");
     showToast("Mislukt: " + e.message, "err");

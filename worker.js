@@ -76,20 +76,42 @@ export default {
     }
 
     const out = new Headers();
-    const passthrough = ["content-type", "content-length", "etag", "cache-control"];
+    const passthrough = ["content-type", "etag", "cache-control"];
     for (const h of passthrough) {
       const v = upstream.headers.get(h);
       if (v) out.set(h, v);
     }
     for (const [k, v] of Object.entries(cors)) out.set(k, v);
 
-    return new Response(upstream.body, {
-      status: upstream.status,
+    // Informer returns HTTP 200 with { "error": ... } in the body for
+    // validation failures. Translate those into a real 4xx so the
+    // sandbox UI (and any other client) sees them as errors.
+    let status = upstream.status;
+    let bodyBytes = await upstream.arrayBuffer();
+    const upstreamCt = upstream.headers.get("content-type") || "";
+    if (status === 200 && upstreamCt.includes("application/json")) {
+      try {
+        const parsed = JSON.parse(new TextDecoder().decode(bodyBytes));
+        if (parsed && parsed.error != null && hasErrorPayload(parsed.error)) {
+          status = 422;
+        }
+      } catch { /* not JSON, leave status as-is */ }
+    }
+
+    return new Response(bodyBytes, {
+      status,
       statusText: upstream.statusText,
       headers: out
     });
   }
 };
+
+function hasErrorPayload(err) {
+  if (typeof err === "string") return err.length > 0;
+  if (Array.isArray(err)) return err.length > 0;
+  if (typeof err === "object") return Object.keys(err).length > 0;
+  return Boolean(err);
+}
 
 function buildCors(origin, env) {
   const allow = env.ALLOWED_ORIGIN || "*";
