@@ -189,7 +189,7 @@ details[open] summary { margin-bottom: 8px; }
 <!-- ============================================================ -->
 <div class="section">
   <h2><span class="num">4</span> Test-inkoopfactuur aanmaken</h2>
-  <p class="muted">POST met onderstaande JSON. Pas velden aan als Informer een ander schema verwacht (zie response-fout voor hints).</p>
+  <p class="muted">POST met onderstaande JSON. Vul eerst de placeholder-IDs (op <code>0</code>) in. Gebruik sectie 2 om <code>/relations/</code>, <code>/vat/</code>, <code>/ledgers/</code> en <code>/costs/</code> op te halen en kopieer de juiste IDs hierin. <code>invoice_total</code> moet gelijk zijn aan de som van <code>amount + vat_amount</code> over alle regels.</p>
   <div class="field">
     <label for="create-body">Request body (JSON)</label>
     <textarea id="create-body" spellcheck="false"></textarea>
@@ -434,14 +434,32 @@ async function listPurchases() {
 
 function defaultCreateBody() {
   const today = new Date().toISOString().slice(0, 10);
+  // Informer's POST /invoice/purchase/ requires references to existing records:
+  //   relation_id  — find via GET /relations/  (or POST /relation/ to create new)
+  //   vat_id       — find via GET /vat/
+  //   ledger_id    — find via GET /ledgers/
+  //   costs_id     — find via GET /costs/
+  // Use section 2 to GET each list and copy IDs in here. Amounts are NOT
+  // calculated by Informer — invoice_total must equal sum(lines.amount) +
+  // sum(lines.vat_amount).
   return {
-    supplier: { name: "Test Leverancier B.V." },
-    invoice_number: "TEST-" + Date.now(),
+    relation_id: 0,
+    number: "TEST-" + Date.now(),
     invoice_date: today,
-    due_date: today,
+    invoice_expiry_date: today,
     currency: "EUR",
+    invoice_total: 121.00,
     lines: [
-      { description: "Testregel (proof of concept)", quantity: 1, unit_price: 100.00, vat_rate: 21 }
+      {
+        description: "Testregel (proof of concept)",
+        quantity: 1,
+        unit_price: 100.00,
+        amount: 100.00,
+        vat_id: 0,
+        vat_amount: 21.00,
+        ledger_id: 0,
+        costs_id: 0
+      }
     ]
   };
 }
