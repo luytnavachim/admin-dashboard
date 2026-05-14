@@ -815,12 +815,16 @@ async function sendSelectedToInformer() {
       // factuur staan (firstname/surname/fax/iban/bic) — Informer accepteert
       // dat liever dan onbekende velden. relation_type=company want forwarded
       // invoices komen vrijwel altijd van bedrijven.
+      // Informer eist firstname + surname zelfs voor company-relations. Als
+      // Claude een contactpersoon op de factuur vond gebruiken we die; anders
+      // placeholder-waardes zodat de POST door komt (gebruiker kan in Informer
+      // UI later corrigeren).
       const newRelation = {
         relation_type:        "company",
         name:                 extracted.supplier_name,
-        firstname:            "",
+        firstname:            extracted.supplier_contact_firstname || "Algemeen",
         surname_prefix:       "",
-        surname:              "",
+        surname:              extracted.supplier_contact_surname || "Onbekend",
         street:               extracted.supplier_street || "",
         house_number:         extracted.supplier_house_number || "",
         house_number_suffix:  "",
