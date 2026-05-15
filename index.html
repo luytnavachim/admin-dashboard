@@ -94,6 +94,58 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
 .header-actions { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); }
 .header-actions a { color: var(--accent); text-decoration: none; cursor: pointer; }
 .header-actions a:hover { text-decoration: underline; }
+
+/* ============================================================
+   Tabs (Overzicht / Facturen / Instellingen / Geavanceerd)
+   ============================================================ */
+.tabs { display: flex; gap: 2px; margin: 0 0 14px; border-bottom: 0.5px solid var(--border); padding: 0; }
+.tab { background: transparent; border: 0; border-bottom: 2px solid transparent; padding: 8px 16px; font: inherit; font-size: 13px; color: var(--muted); cursor: pointer; }
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 500; }
+.tab-panel { display: none; }
+.tab-panel.active { display: block; }
+
+/* ============================================================
+   Informer-flow specifieke classes (gemigreerd uit informer.html)
+   ============================================================ */
+:root { --code-bg: #f4f3ee; }
+.field { display: flex; flex-direction: column; gap: 4px; margin-bottom: 10px; }
+.field label { font-size: 12px; color: var(--muted); font-weight: 500; }
+.field input, .field select, .field textarea {
+  font-family: inherit; font-size: 13px;
+  padding: 8px 10px;
+  border: 0.5px solid var(--border-strong);
+  border-radius: 8px;
+  background: var(--surface);
+  color: var(--text);
+}
+.field input:focus, .field select:focus, .field textarea:focus { outline: 2px solid var(--accent-bg); border-color: var(--accent); }
+.field textarea { font-family: "SF Mono", "Menlo", monospace; font-size: 12px; min-height: 100px; resize: vertical; }
+.grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+@media (max-width: 600px) { .grid-2 { grid-template-columns: 1fr; } }
+.row-btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 6px; }
+.btn.danger { color: var(--danger-text); border-color: var(--danger-text); }
+.response { margin-top: 10px; background: var(--code-bg); border: 0.5px solid var(--border); border-radius: 8px; padding: 10px 12px; font-family: "SF Mono", "Menlo", monospace; font-size: 12px; max-height: 320px; overflow: auto; white-space: pre-wrap; word-break: break-word; }
+.response.ok { border-color: #b9d495; background: #f0f6e6; }
+.response.err { border-color: #e6b8b8; background: #fbeded; color: var(--danger-text); }
+.status-pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; margin-right: 6px; }
+.status-pill.ok { background: var(--ok-bg); color: var(--ok-text); }
+.status-pill.err { background: var(--danger-bg); color: var(--danger-text); }
+.muted { color: var(--muted); font-size: 12px; }
+.warn-box { background: var(--warn-bg); color: var(--warn-text); padding: 10px 14px; border-radius: 8px; font-size: 12px; margin-bottom: 14px; line-height: 1.5; }
+.flow-step { padding: 8px 12px; border-left: 3px solid var(--border-strong); margin: 6px 0; font-size: 13px; }
+.flow-step.active { border-left-color: var(--accent); background: var(--accent-bg); }
+.flow-step.ok { border-left-color: #3b6d11; background: var(--ok-bg); color: var(--ok-text); }
+.flow-step.err { border-left-color: var(--danger-text); background: var(--danger-bg); color: var(--danger-text); }
+.email-pick { padding: 10px 12px; border: 0.5px solid var(--border); border-radius: 8px; margin: 6px 0; cursor: pointer; display: flex; gap: 10px; align-items: center; }
+.email-pick:hover { border-color: var(--accent); background: var(--accent-bg); }
+.email-pick.selected { border-color: var(--accent); background: var(--accent-bg); }
+.email-pick .from { font-weight: 500; }
+.email-pick .subj { color: var(--muted); font-size: 13px; }
+.email-pick input { margin: 0; }
+details summary { cursor: pointer; color: var(--muted); font-size: 12px; user-select: none; }
+details[open] summary { margin-bottom: 8px; }
+h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: white; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
 </style>
 </head>
 <body>
@@ -121,35 +173,164 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
     <div class="header-actions">
       <a onclick="loadAll()">Verversen</a>
       <span>·</span>
-      <a href="informer.html">Informer-sandbox</a>
-      <span>·</span>
       <span id="user-label"></span>
       <a onclick="signOut()">Uitloggen</a>
     </div>
   </div>
+
+  <nav class="tabs" role="tablist">
+    <button class="tab active" data-tab="overzicht">Overzicht</button>
+    <button class="tab" data-tab="facturen">Facturen verwerken</button>
+    <button class="tab" data-tab="instellingen">Instellingen</button>
+    <button class="tab" data-tab="geavanceerd">Geavanceerd</button>
+  </nav>
+
   <div id="alert-area"></div>
-  <div class="stats">
-    <div class="stat warn"><div class="label">Te verwerken / betalen</div><div class="value" id="stat-invoices">–</div></div>
-    <div class="stat danger"><div class="label">Wacht op antwoord</div><div class="value" id="stat-reply">–</div></div>
-    <div class="stat"><div class="label">Komende deadlines</div><div class="value" id="stat-deadlines">–</div></div>
-    <div class="stat ok"><div class="label">Komende afspraken</div><div class="value" id="stat-events">–</div></div>
-  </div>
-  <div class="section">
-    <h2>Te verwerken / te betalen <span class="count" id="invoices-count">0</span></h2>
-    <div id="invoices-list"><div class="loading">Laden…</div></div>
-  </div>
-  <div class="section">
-    <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
-    <div id="reply-list"><div class="loading">Laden…</div></div>
-  </div>
-  <div class="section">
-    <h2>Komende deadlines <span class="count" id="deadlines-count">0</span></h2>
-    <div id="deadlines-list"><div class="loading">Laden…</div></div>
-  </div>
-  <div class="section">
-    <h2>Komende 2 dagen <span class="count" id="events-count">0</span></h2>
-    <div id="events-list"><div class="loading">Laden…</div></div>
-  </div>
+
+  <!-- ====== TAB: Overzicht ====== -->
+  <section id="tab-overzicht" class="tab-panel active">
+    <div class="stats">
+      <div class="stat warn"><div class="label">Te verwerken / betalen</div><div class="value" id="stat-invoices">–</div></div>
+      <div class="stat danger"><div class="label">Wacht op antwoord</div><div class="value" id="stat-reply">–</div></div>
+      <div class="stat"><div class="label">Komende deadlines</div><div class="value" id="stat-deadlines">–</div></div>
+      <div class="stat ok"><div class="label">Komende afspraken</div><div class="value" id="stat-events">–</div></div>
+    </div>
+    <div class="section">
+      <h2>Te verwerken / te betalen <span class="count" id="invoices-count">0</span></h2>
+      <div id="invoices-list"><div class="loading">Laden…</div></div>
+    </div>
+    <div class="section">
+      <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
+      <div id="reply-list"><div class="loading">Laden…</div></div>
+    </div>
+    <div class="section">
+      <h2>Komende deadlines <span class="count" id="deadlines-count">0</span></h2>
+      <div id="deadlines-list"><div class="loading">Laden…</div></div>
+    </div>
+    <div class="section">
+      <h2>Komende 2 dagen <span class="count" id="events-count">0</span></h2>
+      <div id="events-list"><div class="loading">Laden…</div></div>
+    </div>
+  </section>
+
+  <!-- ====== TAB: Facturen verwerken (Outlook → Informer) ====== -->
+  <section id="tab-facturen" class="tab-panel">
+    <div class="section">
+      <h2>Facturen verwerken</h2>
+      <p class="muted">Kies een factuur-mail uit Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) maakt/koppelt de relation in Informer, (4) maakt de inkoopfactuur aan met PDF als bijlage, (5) verplaatst de mail naar <em>MoneyMonk Verwerkt</em>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur aan te maken.</p>
+
+      <div class="field">
+        <label>Recente factuur-mails (Inbox, laatste 14 dagen)</label>
+        <div class="row-btns" style="margin-bottom: 8px;">
+          <button class="btn" onclick="loadInvoiceEmails()">Verversen</button>
+        </div>
+        <div id="emails-list"><p class="muted">Klik "Verversen" om mails op te halen.</p></div>
+      </div>
+
+      <div class="row-btns">
+        <button class="btn primary" id="send-btn" onclick="sendSelectedToInformer()" disabled>Stuur naar Informer &rarr;</button>
+        <button class="btn" id="skip-btn" onclick="skipSelected()" disabled title="Verplaatst de mail naar Archive zonder factuur in Informer aan te maken">Negeren (geen factuur)</button>
+      </div>
+      <div id="flow-log" style="margin-top: 12px;"></div>
+    </div>
+  </section>
+
+  <!-- ====== TAB: Instellingen ====== -->
+  <section id="tab-instellingen" class="tab-panel">
+    <div class="section">
+      <h2>Informer-verbinding</h2>
+      <div class="warn-box">
+        <strong>Werkt via een Cloudflare Worker.</strong> Informer staat geen directe browser-calls toe (CORS), dus we routeren via een Worker die de API-key server-side bewaart. Setup-stappen staan in <code>worker.js</code>; deploy via de "Push" knop in je Deploy Dashboard.
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="cfg-base">Base URL</label>
+          <input id="cfg-base" type="text" placeholder="/api" value="/api">
+        </div>
+        <div class="field">
+          <label for="cfg-auth">Auth-header methode</label>
+          <select id="cfg-auth">
+            <option value="none">Geen — proxy regelt auth (aanbevolen)</option>
+            <option value="apikey">ApiKey: &lt;key&gt; (Informer)</option>
+            <option value="bearer">Authorization: Bearer &lt;key&gt;</option>
+            <option value="basic-key">Authorization: Basic base64(key:)</option>
+            <option value="basic-user">Authorization: Basic base64(user:pass)</option>
+            <option value="x-api-key">X-API-Key: &lt;key&gt;</option>
+          </select>
+        </div>
+      </div>
+      <div class="field">
+        <label for="cfg-key">API-key (alleen als auth-methode geen "Geen" is)</label>
+        <input id="cfg-key" type="password" autocomplete="off" placeholder="laat leeg als Worker auth regelt">
+      </div>
+      <div class="grid-2">
+        <div class="field">
+          <label for="cfg-admin">Administratie-ID (optioneel)</label>
+          <input id="cfg-admin" type="text" placeholder="bv. 12345 — leeg laten als je 't nog niet weet">
+        </div>
+        <div class="field">
+          <label for="cfg-list-path">Endpoint inkoopfacturen ophalen (GET)</label>
+          <input id="cfg-list-path" type="text" value="/invoices/purchase/">
+        </div>
+        <div class="field">
+          <label for="cfg-create-path">Endpoint inkoopfactuur aanmaken (POST)</label>
+          <input id="cfg-create-path" type="text" value="/invoice/purchase/">
+        </div>
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" onclick="saveConfig()">Opslaan</button>
+        <button class="btn danger" onclick="clearConfig()">Wissen</button>
+        <span class="muted" id="cfg-status" style="align-self:center;"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- ====== TAB: Geavanceerd (test endpoints + debug log) ====== -->
+  <section id="tab-geavanceerd" class="tab-panel">
+    <div class="section">
+      <h2>Verbinding testen</h2>
+      <p class="muted">Doet een GET op het opgegeven endpoint. Default <code>/administration/</code> — geeft details van de administratie die bij je API-key hoort.</p>
+      <div class="field">
+        <label for="test-path">Endpoint</label>
+        <input id="test-path" type="text" value="/administration/">
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" onclick="testConnection()">GET</button>
+      </div>
+      <div id="test-response" class="response" style="display:none;"></div>
+    </div>
+
+    <div class="section">
+      <h2>Bestaande inkoopfacturen ophalen</h2>
+      <p class="muted">GET op het inkoopfacturen-endpoint uit Instellingen.</p>
+      <div class="row-btns">
+        <button class="btn primary" onclick="listPurchases()">GET inkoopfacturen</button>
+      </div>
+      <div id="list-response" class="response" style="display:none;"></div>
+    </div>
+
+    <div class="section">
+      <h2>Test-inkoopfactuur aanmaken</h2>
+      <p class="muted">POST met onderstaande JSON. Pas IDs aan via <code>/relations/</code>, <code>/vat/</code>, <code>/ledgers/</code> en <code>/costs/</code>.</p>
+      <div class="field">
+        <label for="create-body">Request body (JSON)</label>
+        <textarea id="create-body" spellcheck="false"></textarea>
+      </div>
+      <div class="row-btns">
+        <button class="btn" onclick="resetCreateBody()">Standaard-payload</button>
+        <button class="btn primary" onclick="createPurchase()">POST inkoopfactuur</button>
+      </div>
+      <div id="create-response" class="response" style="display:none;"></div>
+    </div>
+
+    <div class="section">
+      <h2>Debug-log</h2>
+      <details>
+        <summary>Laatste Informer request/response</summary>
+        <pre id="debug-log" class="response" style="display:block; margin-top:8px;">Nog geen request gedaan.</pre>
+      </details>
+    </div>
+  </section>
 </div>
 <div id="toast"></div>
 <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
@@ -778,8 +959,515 @@ function showApp() {
   $("signin").style.display = "none";
   $("app").style.display = "block";
   $("user-label").textContent = (account && (account.username || account.name)) || "";
+  applyConfigToForm();
+  resetCreateBody();
   loadAll();
 }
+
+// ============================================================
+//  TAB SWITCHING
+// ============================================================
+let facturenLoaded = false;
+function switchTab(name) {
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
+  // Lazy-load invoice emails on first activation of the facturen tab
+  if (name === "facturen" && !facturenLoaded && account) {
+    facturenLoaded = true;
+    loadInvoiceEmails().catch(e => console.warn("loadInvoiceEmails:", e));
+  }
+}
+document.addEventListener("click", (ev) => {
+  const tab = ev.target.closest(".tab");
+  if (tab && tab.dataset.tab) switchTab(tab.dataset.tab);
+});
+
+// ============================================================
+//  INFORMER CONFIG (localStorage)
+// ============================================================
+const LS_KEY = "informer_cfg_v1";
+let cfg = loadConfig();
+let invoiceEmails = [];
+let selectedEmailId = null;
+
+function defaultConfig() {
+  return {
+    baseUrl: "/api",
+    authMethod: "none",
+    apiKey: "",
+    administrationId: "",
+    listPath: "/invoices/purchase/",
+    createPath: "/invoice/purchase/"
+  };
+}
+function loadConfig() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (!raw) return defaultConfig();
+    return { ...defaultConfig(), ...JSON.parse(raw) };
+  } catch (e) { return defaultConfig(); }
+}
+function saveConfig() {
+  cfg = {
+    baseUrl: $("cfg-base").value.trim().replace(/\/+$/, ""),
+    authMethod: $("cfg-auth").value,
+    apiKey: $("cfg-key").value,
+    administrationId: $("cfg-admin").value.trim(),
+    listPath: ($("cfg-list-path").value.trim() || "/invoices/purchase/").replace(/^([^\/])/, "/$1"),
+    createPath: ($("cfg-create-path").value.trim() || "/invoice/purchase/").replace(/^([^\/])/, "/$1")
+  };
+  localStorage.setItem(LS_KEY, JSON.stringify(cfg));
+  $("cfg-status").textContent = "Opgeslagen.";
+  setTimeout(() => $("cfg-status").textContent = "", 2000);
+  showToast("Instellingen opgeslagen", "ok");
+}
+function clearConfig() {
+  if (!confirm("Alle Informer-instellingen wissen?")) return;
+  localStorage.removeItem(LS_KEY);
+  cfg = defaultConfig();
+  applyConfigToForm();
+  showToast("Gewist", "ok");
+}
+function applyConfigToForm() {
+  if (!$("cfg-base")) return; // before tab DOM is built
+  $("cfg-base").value = cfg.baseUrl;
+  $("cfg-auth").value = cfg.authMethod;
+  $("cfg-key").value = cfg.apiKey;
+  $("cfg-admin").value = cfg.administrationId;
+  $("cfg-list-path").value = cfg.listPath;
+  $("cfg-create-path").value = cfg.createPath;
+}
+
+// ============================================================
+//  INFORMER API CLIENT
+// ============================================================
+function authHeader() {
+  if (cfg.authMethod === "none") return null;
+  const k = cfg.apiKey;
+  if (!k) throw new Error("Geen API-key ingesteld. Vul 'm in Instellingen in en sla op.");
+  switch (cfg.authMethod) {
+    case "bearer": return "Bearer " + k;
+    case "basic-key": return "Basic " + btoa(k + ":");
+    case "basic-user": return "Basic " + btoa(k);
+    case "x-api-key": return null;
+    case "apikey": return null;
+    default: return "Bearer " + k;
+  }
+}
+
+async function informerFetch(method, path, body) {
+  if (!cfg.baseUrl) throw new Error("Geen base URL ingesteld.");
+  const url = cfg.baseUrl + (path.startsWith("/") ? path : "/" + path);
+  const headers = { "Accept": "application/json", "Content-Type": "application/json" };
+  const auth = authHeader();
+  if (cfg.authMethod === "x-api-key") headers["X-API-Key"] = cfg.apiKey;
+  else if (cfg.authMethod === "apikey") headers["ApiKey"] = cfg.apiKey;
+  else if (cfg.authMethod !== "none" && auth) headers["Authorization"] = auth;
+
+  const opts = { method, headers };
+  if (body !== undefined && body !== null) opts.body = typeof body === "string" ? body : JSON.stringify(body);
+
+  const debugReq = { method, url, headers: { ...headers, Authorization: headers.Authorization ? "<redacted>" : undefined }, body: body ? (typeof body === "string" ? body.slice(0, 500) : body) : undefined };
+  if ($("debug-log")) $("debug-log").textContent = JSON.stringify({ request: debugReq, response: "(in flight...)" }, null, 2);
+  let res;
+  try {
+    res = await fetch(url, opts);
+  } catch (netErr) {
+    if ($("debug-log")) $("debug-log").textContent = JSON.stringify({ request: debugReq, network_error: netErr.message }, null, 2);
+    throw netErr;
+  }
+  const text = await res.text();
+  let json = null;
+  try { json = JSON.parse(text); } catch (e) {}
+  if ($("debug-log")) $("debug-log").textContent = JSON.stringify({ request: debugReq, response: { status: res.status, statusText: res.statusText, body: json ?? text } }, null, 2);
+  if (!res.ok) {
+    const errMsg = (json && (json.message || json.error || JSON.stringify(json))) || text || ("HTTP " + res.status);
+    const err = new Error(errMsg);
+    err.status = res.status;
+    err.body = json ?? text;
+    throw err;
+  }
+  return json ?? text;
+}
+
+function renderResponse(el, status, data) {
+  el.style.display = "block";
+  el.classList.remove("ok", "err");
+  el.classList.add(status === "ok" ? "ok" : "err");
+  const pill = `<span class="status-pill ${status}">${status === "ok" ? "OK" : "Fout"}</span>`;
+  el.innerHTML = pill + (typeof data === "string" ? escapeHtml(data) : escapeHtml(JSON.stringify(data, null, 2)));
+}
+function explainFetchError(e) {
+  if (e instanceof TypeError && /fetch/i.test(e.message)) return "Network-fout: " + e.message;
+  if (e.status === 401 || e.status === 403) return "Auth-fout (" + e.status + "): " + e.message;
+  if (e.status === 404) return "404 — endpoint bestaat niet op dit pad.\n\n" + (typeof e.body === "string" ? e.body : JSON.stringify(e.body, null, 2));
+  return (e.status ? "HTTP " + e.status + " — " : "") + e.message;
+}
+
+// ============================================================
+//  GEAVANCEERD — test endpoints
+// ============================================================
+async function testConnection() {
+  const path = $("test-path").value.trim() || "/administration/";
+  const el = $("test-response");
+  el.style.display = "block"; el.textContent = "Bezig...";
+  try { renderResponse(el, "ok", await informerFetch("GET", path)); }
+  catch (e) { renderResponse(el, "err", explainFetchError(e)); }
+}
+async function listPurchases() {
+  const path = cfg.listPath || "/invoices/purchase/";
+  const el = $("list-response");
+  el.style.display = "block"; el.textContent = "Bezig...";
+  try { renderResponse(el, "ok", await informerFetch("GET", path)); }
+  catch (e) { renderResponse(el, "err", explainFetchError(e)); }
+}
+function defaultCreateBody() {
+  const today = new Date().toISOString().slice(0, 10);
+  return {
+    relation_id: 4953029, number: "TEST-" + Date.now(),
+    invoice_date: today, invoice_expiry_date: today,
+    collect: 0, invoice_total: 121.00, pdf: "",
+    lines: [{ description: "Testregel (proof of concept)", amount: 100.00, vat_amount: 21.00, vat_id: 1478835, ledger_id: 15302498, costs_id: 0 }]
+  };
+}
+function resetCreateBody() { if ($("create-body")) $("create-body").value = JSON.stringify(defaultCreateBody(), null, 2); }
+async function createPurchase() {
+  let body;
+  try { body = JSON.parse($("create-body").value); }
+  catch (e) { renderResponse($("create-response"), "err", "Ongeldige JSON: " + e.message); return; }
+  const path = cfg.createPath || "/invoice/purchase/";
+  const el = $("create-response");
+  el.style.display = "block"; el.textContent = "Bezig...";
+  try { renderResponse(el, "ok", await informerFetch("POST", path, body)); }
+  catch (e) { renderResponse(el, "err", explainFetchError(e)); }
+}
+
+// ============================================================
+//  OUTLOOK INVOICE PICKER + INFORMER UPLOAD
+// ============================================================
+async function graphBinary(path) {
+  const token = await getToken();
+  const res = await fetch("https://graph.microsoft.com/v1.0" + path, { headers: { Authorization: "Bearer " + token } });
+  if (!res.ok) throw new Error("Graph " + res.status + ": " + (await res.text()));
+  return await res.arrayBuffer();
+}
+function arrayBufferToBase64(buf) {
+  let binary = "";
+  const bytes = new Uint8Array(buf);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) binary += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  return btoa(binary);
+}
+
+async function loadInvoiceEmails() {
+  if (!$("emails-list")) return;
+  $("emails-list").innerHTML = '<p class="muted">Laden...</p>';
+  invoiceEmails = [];
+  const sinceIso = new Date(Date.now() - 14 * 86400000).toISOString();
+  const queries = ["factuur", "invoice", "rekening", "incasso", "betaling"];
+  for (const m of MAILBOXES) {
+    try {
+      let processedFolderId = null;
+      try { processedFolderId = await findFolderId(m, PROCESSED_FOLDER_NAME); } catch (e) {}
+      for (const q of queries) {
+        const url = `${userPath(m)}/mailFolders/inbox/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
+        const r = await graph("GET", url);
+        for (const msg of (r.value || [])) {
+          if (!msg.hasAttachments) continue;
+          if (new Date(msg.receivedDateTime) < new Date(sinceIso)) continue;
+          if (processedFolderId && msg.parentFolderId === processedFolderId) continue;
+          if (invoiceEmails.find(x => x.id === msg.id)) continue;
+          invoiceEmails.push({ ...msg, _mailbox: m });
+        }
+      }
+    } catch (e) { console.warn("Mailbox " + m.email + ": " + e.message); }
+  }
+  invoiceEmails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+  await annotateFolderNames();
+  renderEmails();
+}
+
+async function annotateFolderNames() {
+  const byMailbox = new Map();
+  for (const e of invoiceEmails) {
+    const key = e._mailbox.email;
+    if (!byMailbox.has(key)) byMailbox.set(key, { mailbox: e._mailbox, ids: new Set(), emails: [] });
+    const entry = byMailbox.get(key);
+    entry.emails.push(e);
+    if (e.parentFolderId) entry.ids.add(e.parentFolderId);
+  }
+  for (const { mailbox, ids, emails } of byMailbox.values()) {
+    const names = {};
+    for (const fid of ids) {
+      try {
+        const f = await graph("GET", `${userPath(mailbox)}/mailFolders/${encodeURIComponent(fid)}?$select=displayName`);
+        names[fid] = f.displayName || "?";
+      } catch (err) { names[fid] = "?"; }
+    }
+    for (const e of emails) e._folderName = names[e.parentFolderId] || "?";
+  }
+}
+
+function renderEmails() {
+  const list = $("emails-list");
+  if (!list) return;
+  if (invoiceEmails.length === 0) {
+    list.innerHTML = '<p class="muted">Geen mails met bijlage gevonden in de laatste 14 dagen.</p>';
+    return;
+  }
+  list.innerHTML = invoiceEmails.slice(0, 20).map((e) => {
+    const fromAddr = (e.from && e.from.emailAddress && e.from.emailAddress.address) || "";
+    const fromName = (e.from && e.from.emailAddress && e.from.emailAddress.name) || fromAddr;
+    const when = new Date(e.receivedDateTime).toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+    return `<label class="email-pick" data-id="${escapeHtml(e.id)}">
+      <input type="radio" name="email-pick" value="${escapeHtml(e.id)}" onchange="selectEmail('${escapeHtml(e.id)}')">
+      <div style="flex:1; min-width:0;">
+        <div class="from">${escapeHtml(fromName)} <span class="muted" style="font-weight:normal;">(${escapeHtml(e._mailbox.label)})</span></div>
+        <div class="subj" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(e.subject || "(geen onderwerp)")}</div>
+        <div class="muted" style="font-size:11px;">${when} &middot; ${escapeHtml(fromAddr)}${e._folderName ? ` &middot; <span style="color:var(--accent);">${escapeHtml(e._folderName)}</span>` : ""}</div>
+      </div>
+    </label>`;
+  }).join("");
+}
+function selectEmail(id) {
+  selectedEmailId = id;
+  document.querySelectorAll(".email-pick").forEach(el => el.classList.toggle("selected", el.dataset.id === id));
+  $("send-btn").disabled = false;
+  $("skip-btn").disabled = false;
+}
+
+function logStep(text, kind) {
+  const el = document.createElement("div");
+  el.className = "flow-step " + (kind || "active");
+  el.textContent = text;
+  $("flow-log").appendChild(el);
+  return el;
+}
+
+// UBL 2.x parser
+const UBL_NS = {
+  cbc: "urn:oasis:names:specification:ubl:schema:xsd:CommonBasicComponents-2",
+  cac: "urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
+};
+function ublText(scope, ns, local) {
+  const el = scope.getElementsByTagNameNS(UBL_NS[ns], local)[0];
+  return el ? (el.textContent || "").trim() : "";
+}
+function tryParseUbl(xmlString) {
+  try {
+    const doc = new DOMParser().parseFromString(xmlString, "text/xml");
+    if (doc.getElementsByTagName("parsererror").length) return null;
+    const supplierParty = doc.getElementsByTagNameNS(UBL_NS.cac, "AccountingSupplierParty")[0];
+    if (!supplierParty) return null;
+    const supplierName = ublText(supplierParty, "cbc", "RegistrationName") || ublText(supplierParty, "cbc", "Name");
+    const number = ublText(doc, "cbc", "ID");
+    const invoiceDate = ublText(doc, "cbc", "IssueDate");
+    const dueDate = ublText(doc, "cbc", "DueDate") || invoiceDate;
+    const currency = ublText(doc, "cbc", "DocumentCurrencyCode") || "EUR";
+    const total = doc.getElementsByTagNameNS(UBL_NS.cac, "LegalMonetaryTotal")[0];
+    const invoiceTotal = total ? parseFloat(ublText(total, "cbc", "PayableAmount") || ublText(total, "cbc", "TaxInclusiveAmount") || "0") : 0;
+    const lineEls = doc.getElementsByTagNameNS(UBL_NS.cac, "InvoiceLine");
+    const lines = [];
+    for (const ln of lineEls) {
+      const item = ln.getElementsByTagNameNS(UBL_NS.cac, "Item")[0];
+      const description = item ? ublText(item, "cbc", "Name") : "";
+      const amount = parseFloat(ublText(ln, "cbc", "LineExtensionAmount") || "0");
+      const taxTotal = ln.getElementsByTagNameNS(UBL_NS.cac, "TaxTotal")[0];
+      const vatAmount = taxTotal ? parseFloat(ublText(taxTotal, "cbc", "TaxAmount") || "0") : 0;
+      const taxCat = ln.getElementsByTagNameNS(UBL_NS.cac, "ClassifiedTaxCategory")[0];
+      const vatRate = taxCat ? parseFloat(ublText(taxCat, "cbc", "Percent") || "0") : 0;
+      lines.push({ description: description || "Regel", amount, vat_amount: vatAmount, vat_rate: vatRate });
+    }
+    if (!supplierName || !number || !invoiceDate) return null;
+    if (lines.length === 0) lines.push({ description: number, amount: invoiceTotal, vat_amount: 0, vat_rate: 0 });
+    return { supplier_name: supplierName, supplier_vat_number: "", number, invoice_date: invoiceDate, invoice_expiry_date: dueDate, currency, invoice_total: invoiceTotal, lines };
+  } catch (e) { return null; }
+}
+
+async function extractInvoiceViaWorker(pdfBase64) {
+  const extractUrl = cfg.baseUrl.replace(/\/api$/, "") + "/extract";
+  const res = await fetch(extractUrl, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ pdf_base64: pdfBase64 })
+  });
+  const text = await res.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch (e) {}
+  if (!res.ok) {
+    const main = (body && body.error) || ("HTTP " + res.status);
+    const upstream = body && body.body ? "\n\nUpstream: " + (typeof body.body === "string" ? body.body : JSON.stringify(body.body)).slice(0, 800) : "";
+    console.error("Claude extract failed:", body || text);
+    throw new Error("Claude extract: " + main + upstream);
+  }
+  if (!body || !body.extracted) throw new Error("Extract gaf geen 'extracted' veld terug.");
+  return body.extracted;
+}
+
+async function findRelationByName(name) {
+  if (!name) return null;
+  const needle = name.toLowerCase().trim();
+  const data = await informerFetch("GET", "/relations/");
+  const container = data?.relation || data?.relations || data;
+  if (!container || typeof container !== "object") return null;
+  const relName = (rel) => String(rel.company_name || rel.name || rel.company || "").toLowerCase().trim();
+  const candidates = Object.entries(container).filter(([, v]) => v && typeof v === "object" && relName(v));
+  for (const [id, rel] of candidates) if (relName(rel) === needle) return { id, relation: rel };
+  for (const [id, rel] of candidates) {
+    const n = relName(rel);
+    if (n.includes(needle) || needle.includes(n)) return { id, relation: rel };
+  }
+  return null;
+}
+
+async function sendSelectedToInformer() {
+  $("flow-log").innerHTML = "";
+  const email = invoiceEmails.find(e => e.id === selectedEmailId);
+  if (!email) { showToast("Geen mail geselecteerd", "err"); return; }
+
+  const btn = $("send-btn");
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = "Bezig...";
+
+  let step1 = null, step2 = null, step3 = null, step4 = null, step5 = null;
+  try {
+    step1 = logStep("1/5 — Bijlagen zoeken in Outlook (PDF + UBL)...");
+    const base = userPath(email._mailbox);
+    const atts = await graph("GET", `${base}/messages/${email.id}/attachments?$select=id,name,contentType,size`);
+    const list = atts.value || [];
+    const pdf = list.find(a => /\.pdf$/i.test(a.name || "") || a.contentType === "application/pdf");
+    if (!pdf) throw new Error("Geen PDF-bijlage gevonden in deze mail.");
+    const ubl = list.find(a => /\.(xml|ubl)$/i.test(a.name || "") || /xml/i.test(a.contentType || ""));
+    step1.className = "flow-step ok";
+    step1.textContent = `1/5 — PDF: ${pdf.name} (${Math.round(pdf.size/1024)} KB)` + (ubl ? ` + UBL: ${ubl.name}` : "");
+
+    step2 = logStep("2/5 — Factuurdata extraheren" + (ubl ? " uit UBL..." : " uit PDF via Claude..."));
+    let extracted = null, extractedVia = "";
+    if (ubl) {
+      const xmlBuf = await graphBinary(`${base}/messages/${email.id}/attachments/${ubl.id}/$value`);
+      extracted = tryParseUbl(new TextDecoder().decode(xmlBuf));
+      if (extracted) extractedVia = "UBL";
+    }
+    const pdfBuf = await graphBinary(`${base}/messages/${email.id}/attachments/${pdf.id}/$value`);
+    const pdfB64 = arrayBufferToBase64(pdfBuf);
+    if (!extracted) {
+      extracted = await extractInvoiceViaWorker(pdfB64);
+      extractedVia = "Claude";
+    }
+    step2.className = "flow-step ok";
+    step2.textContent = `2/5 — Geëxtraheerd via ${extractedVia}: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
+
+    step3 = logStep(`3/5 — Leverancier matchen in Informer: "${extracted.supplier_name}"...`);
+    let match = await findRelationByName(extracted.supplier_name);
+    let relationSource = "match";
+    if (!match) {
+      step3.textContent = `3/5 — Geen match voor "${extracted.supplier_name}" — aanmaken in Informer...`;
+      const fb = (v, def) => (v && String(v).trim()) ? v : def;
+      const newRelation = {
+        relation_type:"0", company_name: extracted.supplier_name,
+        firstname: extracted.supplier_contact_firstname || "", surname_prefix:"", surname: extracted.supplier_contact_surname || "",
+        street: fb(extracted.supplier_street, "Onbekend"), house_number: fb(extracted.supplier_house_number, "0"), house_number_suffix:"",
+        zip: fb(extracted.supplier_zip, "0000XX"), city: fb(extracted.supplier_city, "Onbekend"), country: fb(extracted.supplier_country, "NL"),
+        phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
+        coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
+      };
+      const created = await informerFetch("POST", "/relation/", newRelation);
+      const newId = created?.relation_id || created?.id || (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) || null;
+      if (!newId) throw new Error("Relation aangemaakt maar geen ID teruggekregen — response: " + JSON.stringify(created).slice(0, 300));
+      match = { id: newId, relation: { name: extracted.supplier_name } };
+      relationSource = "created";
+    }
+    step3.className = "flow-step ok";
+    const matchLabel = relationSource === "created" ? "Aangemaakt" : "Match";
+    step3.textContent = `3/5 — ${matchLabel}: relation_id ${match.id} — ${match.relation.company_name || match.relation.name || match.relation.company || extracted.supplier_name}`;
+
+    step4 = logStep("4/5 — Factuur aanmaken in Informer...");
+    const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
+      description: extracted.number || "Inkoopfactuur",
+      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 0
+    }]).map(ln => ({
+      description: (ln.description || "Regel").slice(0, 200),
+      amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
+      vat_id: 1478835, ledger_id: 15302498, costs_id: 0
+    }));
+    const payload = {
+      relation_id: parseInt(match.id, 10) || match.id,
+      number: extracted.number || `OUTLOOK-${Date.now()}`,
+      invoice_date: extracted.invoice_date || new Date().toISOString().slice(0, 10),
+      invoice_expiry_date: extracted.invoice_expiry_date || extracted.invoice_date || new Date().toISOString().slice(0, 10),
+      collect: 0, invoice_total: Number(extracted.invoice_total) || 0, pdf: pdfB64, lines
+    };
+    const path = cfg.createPath || "/invoice/purchase/";
+    const result = await informerFetch("POST", path, payload);
+    step4.className = "flow-step ok";
+    const invoiceTail = result?.invoice_url ? ` — ${result.invoice_url}` : "";
+    step4.textContent = `4/5 — Factuur aangemaakt (id ${result?.invoice_id || "?"})${invoiceTail}`;
+
+    step5 = logStep("5/5 — Mail verplaatsen naar Verwerkt-map...");
+    try {
+      const folderId = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
+      if (email.parentFolderId && email.parentFolderId === folderId) {
+        step5.className = "flow-step ok";
+        step5.textContent = `5/5 — Mail stond al in ${PROCESSED_FOLDER_NAME} (geen move nodig)`;
+      } else {
+        await moveMessage(email._mailbox, email.id, folderId);
+        step5.className = "flow-step ok";
+        step5.textContent = "5/5 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
+      }
+    } catch (e) {
+      step5.className = "flow-step err";
+      step5.textContent = "5/5 — Verplaatsen mislukt (factuur is wel in Informer): " + e.message;
+    }
+
+    if (result?.invoice_url) logStep(`Klaar! Open in Informer: ${result.invoice_url}`, "ok");
+    else logStep("Klaar! (geen invoice_url teruggekregen)", "ok");
+    showToast("Verstuurd naar Informer", "ok");
+
+    // Verwijder uit lokale lijst zodat 'ie niet meer verschijnt zonder refresh
+    invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
+    selectedEmailId = null;
+    renderEmails();
+  } catch (e) {
+    const failing = step5 || step4 || step3 || step2 || step1;
+    if (failing) { failing.className = "flow-step err"; failing.textContent = (failing.textContent.split("—")[0]) + "— FOUT: " + e.message; }
+    else logStep("Fout: " + e.message, "err");
+    showToast("Mislukt: " + e.message, "err");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+async function skipSelected() {
+  const email = invoiceEmails.find(e => e.id === selectedEmailId);
+  if (!email) { showToast("Geen mail geselecteerd", "err"); return; }
+  if (!confirm(`Mail "${(email.subject || "").slice(0, 60)}" verplaatsen naar Archive zonder een factuur in Informer aan te maken?`)) return;
+  const skipBtn = $("skip-btn"), sendBtn = $("send-btn");
+  const origText = skipBtn.textContent;
+  skipBtn.disabled = true; sendBtn.disabled = true; skipBtn.textContent = "Bezig...";
+  try {
+    const archive = await graph("GET", `${userPath(email._mailbox)}/mailFolders/archive?$select=id,displayName`);
+    if (email.parentFolderId && email.parentFolderId === archive.id) {
+      showToast(`Stond al in ${archive.displayName || "Archive"}`, "ok");
+    } else {
+      await moveMessage(email._mailbox, email.id, archive.id);
+      showToast(`Verplaatst naar ${archive.displayName || "Archive"}`, "ok");
+    }
+    invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
+    selectedEmailId = null;
+    renderEmails();
+  } catch (e) {
+    showToast("Negeren mislukt: " + e.message, "err");
+    sendBtn.disabled = false;
+  } finally {
+    skipBtn.disabled = true; skipBtn.textContent = origText;
+  }
+}
+
+// ============================================================
+//  INIT
+// ============================================================
 (async function init() {
   const ok = await initAuth();
   if (!ok) return;
