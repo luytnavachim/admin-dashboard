@@ -1108,6 +1108,22 @@ function authHeader() {
   }
 }
 
+// Informer geeft errors als string OF als {"<code>": "msg", ...} object.
+// Zonder deze helper kreeg je "[object Object]" in de UI.
+function formatInformerError(json) {
+  if (!json) return null;
+  const e = json.error ?? json.errors ?? json.message;
+  if (!e) return null;
+  if (typeof e === "string") return e;
+  if (Array.isArray(e)) return e.map(String).join("; ");
+  if (typeof e === "object") {
+    return Object.entries(e)
+      .map(([k, v]) => typeof v === "string" ? v : `${k}: ${JSON.stringify(v)}`)
+      .join("; ");
+  }
+  return String(e);
+}
+
 // Informer geeft bij validatie-fouten soms HTTP 200 terug met een
 // gemengde body: een JSON-error blob gevolgd door een PHP var_dump.
 // JSON.parse op het geheel faalt. Deze helper haalt 't eerste balanced
@@ -1162,22 +1178,19 @@ async function informerFetch(method, path, body) {
   catch (e) { json = tryParseJsonPrefix(text); }
   if ($("debug-log")) $("debug-log").textContent = JSON.stringify({ request: debugReq, response: { status: res.status, statusText: res.statusText, body: json ?? text } }, null, 2);
 
-  // Informer's 200-met-error-in-body patroon. Behandel als fout zodat
-  // de POST-flow niet als "Klaar!" eindigt terwijl er niets is aangemaakt.
-  if (res.ok && json && (json.error || json.errors)) {
-    const e = json.error || json.errors;
-    const msg = typeof e === "string"
-      ? e
-      : Object.entries(e).map(([k, v]) => typeof v === "string" ? v : `${k}: ${JSON.stringify(v)}`).join("; ");
-    const err = new Error("Informer: " + msg);
+  // Informer's 200-met-error-in-body patroon én normale 4xx/5xx errors
+  // via dezelfde formatter — anders krijg je "[object Object]" als de
+  // error een gestructureerd object is i.p.v. een string.
+  const errFromBody = formatInformerError(json);
+  if (res.ok && errFromBody) {
+    const err = new Error("Informer: " + errFromBody);
     err.status = res.status;
     err.body = json;
     throw err;
   }
-
   if (!res.ok) {
-    const errMsg = (json && (json.message || json.error || JSON.stringify(json))) || text || ("HTTP " + res.status);
-    const err = new Error(errMsg);
+    const errMsg = errFromBody || text || ("HTTP " + res.status);
+    const err = new Error("Informer (" + res.status + "): " + errMsg);
     err.status = res.status;
     err.body = json ?? text;
     throw err;
@@ -1517,18 +1530,24 @@ async function sendSelectedToInformer() {
       amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
       vat_id: 1478835, ledger_id: 15302498, costs_id: 0
     }));
-    // Zie upload-flow voor uitleg: clamp expiry >= invoice_date zodat
-    // Informer's "expiry must be lower then invoice_date" validatie
-    // (zelf typfout: zij bedoelen later) niet aanslaat.
+    // Zie upload-flow voor uitleg: clamp expiry >= invoice_date en
+    // herbereken invoice_total uit de regels zodat Informer's
+    // consistentie-checks niet aanslaan.
     const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
     let _expDate = extracted.invoice_expiry_date || _invDate;
     if (_expDate < _invDate) _expDate = _invDate;
+    const _lineSum = lines.reduce((s, ln) => s + (Number(ln.amount) || 0) + (Number(ln.vat_amount) || 0), 0);
+    const _invoiceTotal = Math.round(_lineSum * 100) / 100;
+    const _extractedTotal = Number(extracted.invoice_total) || 0;
+    if (_extractedTotal && Math.abs(_invoiceTotal - _extractedTotal) > 0.01) {
+      logStep(`(totaal aangepast: €${_extractedTotal.toFixed(2)} → €${_invoiceTotal.toFixed(2)} om bij regels te kloppen)`, "ok");
+    }
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `OUTLOOK-${Date.now()}`,
       invoice_date: _invDate,
       invoice_expiry_date: _expDate,
-      collect: 0, invoice_total: Number(extracted.invoice_total) || 0, pdf: pdfB64, lines
+      collect: 0, invoice_total: _invoiceTotal, pdf: pdfB64, lines
     };
     const path = cfg.createPath || "/invoice/purchase/";
     const result = await informerFetch("POST", path, payload);
@@ -1668,12 +1687,23 @@ async function sendUploadedPdfToInformer() {
     const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
     let _expDate = extracted.invoice_expiry_date || _invDate;
     if (_expDate < _invDate) _expDate = _invDate;
+    // Informer eist sum(amount + vat_amount over lines) === invoice_total.
+    // Claude geeft soms inconsistente bedragen tussen 't apart geëxtraheerde
+    // totaal en de regelitems. Trust de regels (itemized data is
+    // betrouwbaarder), herbereken het totaal en rond op 2 decimalen
+    // tegen floating point drift.
+    const _lineSum = lines.reduce((s, ln) => s + (Number(ln.amount) || 0) + (Number(ln.vat_amount) || 0), 0);
+    const _invoiceTotal = Math.round(_lineSum * 100) / 100;
+    const _extractedTotal = Number(extracted.invoice_total) || 0;
+    if (_extractedTotal && Math.abs(_invoiceTotal - _extractedTotal) > 0.01) {
+      logStep(`(totaal aangepast: €${_extractedTotal.toFixed(2)} → €${_invoiceTotal.toFixed(2)} om bij regels te kloppen)`, "ok", "upload-log");
+    }
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `UPLOAD-${Date.now()}`,
       invoice_date: _invDate,
       invoice_expiry_date: _expDate,
-      collect: 0, invoice_total: Number(extracted.invoice_total) || 0, pdf: pdfB64, lines
+      collect: 0, invoice_total: _invoiceTotal, pdf: pdfB64, lines
     };
     const path = cfg.createPath || "/invoice/purchase/";
     const result = await informerFetch("POST", path, payload);
