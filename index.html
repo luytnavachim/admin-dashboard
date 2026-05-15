@@ -220,7 +220,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       <p class="muted">Kies een factuur-mail uit Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) maakt/koppelt de relation in Informer, (4) maakt de inkoopfactuur aan met PDF als bijlage, (5) verplaatst de mail naar <em>MoneyMonk Verwerkt</em>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur aan te maken.</p>
 
       <div class="field">
-        <label>Recente factuur-mails (Inbox, laatste 14 dagen)</label>
+        <label>Onverwerkte facturen in Inbox (zelfde lijst als Overzicht, alleen die met PDF)</label>
         <div class="row-btns" style="margin-bottom: 8px;">
           <button class="btn" onclick="loadInvoiceEmails()">Verversen</button>
         </div>
@@ -1180,21 +1180,34 @@ async function loadInvoiceEmails() {
   if (!$("emails-list")) return;
   $("emails-list").innerHTML = '<p class="muted">Laden...</p>';
   invoiceEmails = [];
-  const sinceIso = new Date(Date.now() - 14 * 86400000).toISOString();
-  const queries = ["factuur", "invoice", "rekening", "incasso", "betaling"];
+  // Zelfde filters als Overzicht's "Te verwerken" zodat de twee lijsten
+  // overeenkomen — alleen extra filter op hasAttachments (PDF-flow heeft
+  // bijlage nodig).
+  const sinceMs = Date.now() - 60 * 86400000;
+  const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning"];
+
+  // Resolve processed-folder ids parallel — redundant met inbox-scope
+  // (Verwerkt zit buiten inbox) maar defensief.
+  const processedIds = {};
+  await Promise.all(MAILBOXES.map(async m => {
+    try { processedIds[m.email] = await findFolderId(m, PROCESSED_FOLDER_NAME); }
+    catch (e) { processedIds[m.email] = null; }
+  }));
+
   for (const m of MAILBOXES) {
     try {
-      let processedFolderId = null;
-      try { processedFolderId = await findFolderId(m, PROCESSED_FOLDER_NAME); } catch (e) {}
       for (const q of queries) {
-        const url = `${userPath(m)}/mailFolders/inbox/messages?$search="${encodeURIComponent(q)}"&$top=15&$select=id,subject,from,receivedDateTime,hasAttachments,webLink,parentFolderId`;
-        const r = await graph("GET", url);
-        for (const msg of (r.value || [])) {
-          if (!msg.hasAttachments) continue;
-          if (new Date(msg.receivedDateTime) < new Date(sinceIso)) continue;
-          if (processedFolderId && msg.parentFolderId === processedFolderId) continue;
+        let results = [];
+        try { results = await searchMessages(m, q, 25); } catch (e) { continue; }
+        for (const msg of results) {
           if (invoiceEmails.find(x => x.id === msg.id)) continue;
-          invoiceEmails.push({ ...msg, _mailbox: m });
+          if (!msg.hasAttachments) continue;
+          if (new Date(msg.receivedDateTime).getTime() < sinceMs) continue;
+          const pid = processedIds[m.email];
+          if (pid && msg.parentFolderId === pid) continue;
+          if (!looksLikeInvoice(msg)) continue;
+          if (isOwnInvoice(msg)) continue;
+          invoiceEmails.push(msg);
         }
       }
     } catch (e) { console.warn("Mailbox " + m.email + ": " + e.message); }
