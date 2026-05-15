@@ -498,8 +498,12 @@ function userPath(mbox) {
 }
 
 async function searchMessages(mbox, query, top) {
+  // Scope op /mailFolders/inbox/ — anders zoekt Graph in alle folders
+  // (Sent Items, Drafts, Archive, ...) en komen verzonden Fw:-doorstuurmails
+  // en MoneyMonk-imports terug als "te verwerken". Inbox is een well-known
+  // folder-name die ook werkt voor Nederlandstalige mailboxen (Postvak IN).
   const base = userPath(mbox);
-  const url = `${base}/messages?$search="${encodeURIComponent(query)}"&$top=${top || 25}&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+  const url = `${base}/mailFolders/inbox/messages?$search="${encodeURIComponent(query)}"&$top=${top || 25}&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
   const r = await graph("GET", url);
   return (r.value || []).map(m => ({ ...m, _mailbox: mbox }));
 }
@@ -1299,11 +1303,29 @@ function tryParseUbl(xmlString) {
 
 async function extractInvoiceViaWorker(pdfBase64) {
   const extractUrl = cfg.baseUrl.replace(/\/api$/, "") + "/extract";
-  const res = await fetch(extractUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ pdf_base64: pdfBase64 })
-  });
+  // Base64 inflates ~33% — payload size is what matters for CF Worker
+  // limits (100MB) en browser body-handling.
+  const payloadKB = Math.round(pdfBase64.length / 1024);
+  let res;
+  try {
+    res = await fetch(extractUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdf_base64: pdfBase64 })
+    });
+  } catch (netErr) {
+    // TypeError "Failed to fetch" landt hier. Geen HTTP-status, dus de
+    // request kwam niet door / kreeg geen antwoord. Geef de user iets
+    // bruikbaars om te debuggen i.p.v. één regel zonder context.
+    const isAbsolute = /^https?:\/\//i.test(extractUrl);
+    const hints = [];
+    hints.push(`URL: ${extractUrl}`);
+    hints.push(`Payload: ~${payloadKB} KB base64`);
+    if (payloadKB > 5000) hints.push("→ PDF is groot. CF Worker accepteert tot ~100MB body, maar Claude kan op zo'n PDF wel 30-60s nemen — browser kan request afkappen.");
+    if (isAbsolute) hints.push("→ Cross-origin: check ALLOWED_ORIGIN in Worker variables (komma-gescheiden voor meerdere origins).");
+    else hints.push("→ Same-origin call. Check de browser DevTools Network-tab voor de echte fout (CORS, 502, timeout).");
+    throw new Error(`Network-fout: ${netErr.message}\n${hints.join("\n")}`);
+  }
   const text = await res.text();
   let body = null;
   try { body = JSON.parse(text); } catch (e) {}
