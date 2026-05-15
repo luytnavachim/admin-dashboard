@@ -2307,18 +2307,21 @@ async function processSalesPdf(idx) {
     // Admin-specifieke IDs uit Settings — Informer's POST /invoice/sales/
     // verlangt: template_id, payment_condition_id, currency_id,
     // vat_option, ledger_id (per line), costs_id (per line).
-    // Sales-POST accepteert geen 'pdf' (Informer maakt zelf op basis van
-    // template) en geen 'invoice_total' (berekent zelf uit qty × amount
-    // × vat_percentage). Stuur minimaal — alleen wat Informer beschouwt
-    // als input.
+    // Sales POST-schema (uit Informer docs): relation_id, contact_name,
+    // reference, invoice_date, payment_condition_id, currency_id,
+    // vat_option, template_id, comment, footer, lines[].
+    // Niet toegestaan: pdf (template genereert), invoice_total
+    // (berekent uit lines), invoice_expiry_date (uit payment_condition_id
+    // expiry_days), number (Informer auto-nummert).
+    // Originele MoneyMonk-factuurnummer gaat in `reference` zodat je
+    // in Informer alsnog kan zoeken op je oude nummer.
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
-      number: extracted.number || `MIGRATIE-${Date.now()}`,
+      reference: extracted.number || "",
       invoice_date: _invDate,
-      invoice_expiry_date: _expDate,
-      template_id: cfg.salesTemplateId || undefined,
-      payment_condition_id: cfg.salesPaymentConditionId || undefined,
-      currency_id: cfg.salesCurrencyId || "126106",
+      template_id: parseInt(cfg.salesTemplateId, 10) || undefined,
+      payment_condition_id: parseInt(cfg.salesPaymentConditionId, 10) || undefined,
+      currency_id: parseInt(cfg.salesCurrencyId, 10) || 126106,
       vat_option: cfg.salesVatOption || "excl",
       lines
     };
