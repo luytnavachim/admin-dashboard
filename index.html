@@ -633,21 +633,15 @@ function normalizePurchaseInvoices(data) {
   return [];
 }
 
-// True als de factuur nog niet (volledig) betaald is. Informer-shapes
-// die ik tegengekomen ben verschillen — we kijken naar meerdere
-// signalen en accepteren onbetaald als geen enkel "wel betaald"-signaal
-// matcht. Bedragen worden naar Number gecast voor de vergelijking
-// (Informer geeft soms strings terug).
+// True als de factuur nog niet (volledig) betaald is. Informer's GET
+// /invoices/purchase/ shape (per inspectie): bedragen als string,
+// `paid` is betaald-bedrag, `total_price_incl_vat` is totaal incl. BTW,
+// `payment_date` is "0000-00-00" zolang er nog niet betaald is.
 function isUnpaidInvoice(inv) {
-  if (inv.is_paid === true || inv.is_paid === 1 || inv.is_paid === "1") return false;
-  if (inv.paid === true || inv.paid_date || inv.paid_at) return false;
-  if (typeof inv.status === "string") {
-    const s = inv.status.toLowerCase();
-    if (s === "paid" || s === "betaald" || s === "closed" || s === "gesloten") return false;
-  }
-  const total = Number(inv.invoice_total ?? inv.total ?? 0);
-  const paidAmt = Number(inv.paid_total ?? inv.amount_paid ?? 0);
-  if (total > 0 && paidAmt >= total) return false;
+  const total = Number(inv.total_price_incl_vat ?? 0);
+  const paid = Number(inv.paid ?? 0);
+  if (total <= 0) return false;
+  if (paid >= total) return false;
   return true;
 }
 
@@ -747,7 +741,7 @@ function renderReply(emails) {
     btn.addEventListener('click', () => markHandled(btn, btn.dataset.id, btn.dataset.mbox));
   });
 }
-function renderOpenInvoices(invoices) {
+function renderOpenInvoices(invoices, relationNames) {
   $("stat-deadlines").textContent = invoices.length;
   $("deadlines-count").textContent = invoices.length;
   const list = $("deadlines-list");
@@ -756,23 +750,25 @@ function renderOpenInvoices(invoices) {
     return;
   }
   list.innerHTML = invoices.map(inv => {
-    const expiry = inv.invoice_expiry_date || inv.expiry_date || inv.due_date || inv.invoice_date;
+    // Informer's "0000-00-00" zero-date negeren, anders krijg je 1970-rare dates.
+    const isRealDate = (s) => s && s !== "0000-00-00";
+    const expiry = isRealDate(inv.expiry_date) ? inv.expiry_date : (isRealDate(inv.date) ? inv.date : null);
     const dateObj = expiry ? new Date(expiry) : null;
     const days = dateObj && !isNaN(dateObj) ? Math.ceil((dateObj.getTime() - Date.now()) / 86400000) : null;
     let urgencyClass = '', urgencyLabel = '';
-    if (days === null) { urgencyLabel = 'Geen vervaldatum'; }
+    if (days === null) urgencyLabel = 'Geen vervaldatum';
     else if (days < 0) { urgencyClass = 'danger'; urgencyLabel = Math.abs(days) + ' dagen te laat'; }
     else if (days === 0) { urgencyClass = 'danger'; urgencyLabel = 'Vervalt vandaag'; }
     else if (days <= 3) { urgencyClass = 'danger'; urgencyLabel = 'Over ' + days + ' dag' + (days === 1 ? '' : 'en'); }
     else if (days <= 14) { urgencyClass = 'warn'; urgencyLabel = 'Over ' + days + ' dagen'; }
     else { urgencyLabel = 'Over ' + days + ' dagen'; }
     const datePretty = dateObj && !isNaN(dateObj) ? dateObj.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : '–';
-    const total = Number(inv.invoice_total ?? inv.total ?? 0);
-    const paid = Number(inv.paid_total ?? inv.amount_paid ?? 0);
-    const outstanding = total - paid;
-    const supplier = inv.relation_name || inv.supplier_name || inv.relation?.name || inv.relation?.company_name || '(onbekende leverancier)';
-    const number = inv.number || inv.invoice_number || '?';
-    const link = inv.invoice_url || inv.url || null;
+    const total = Number(inv.total_price_incl_vat ?? 0);
+    const paid = Number(inv.paid ?? 0);
+    const outstanding = Math.max(0, total - paid);
+    const supplier = (relationNames && relationNames[String(inv.relation_id)]) || `Leverancier #${inv.relation_id || '?'}`;
+    const number = inv.number || '?';
+    const link = inv.invoice_url || null;
     const subjectHtml = `<div class="subject">${escapeHtml('Factuur ' + number)}</div>`;
     const subjectBlock = link
       ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="subject-link">${subjectHtml}</a>`
@@ -798,16 +794,33 @@ async function loadOpenInvoices() {
   if (!list) return;
   list.innerHTML = '<div class="loading">Laden uit Informer…</div>';
   try {
-    const data = await informerFetch("GET", cfg.listPath || "/invoices/purchase/");
-    const all = normalizePurchaseInvoices(data);
+    // Parallel: facturen + relaties (om relation_id → leveranciersnaam te resolven).
+    // /relations/ faalt mag — dan tonen we "Leverancier #<id>" als fallback.
+    const [invoiceData, relationsData] = await Promise.all([
+      informerFetch("GET", cfg.listPath || "/invoices/purchase/"),
+      informerFetch("GET", "/relations/").catch(() => null)
+    ]);
+    const all = normalizePurchaseInvoices(invoiceData);
     const unpaid = all.filter(isUnpaidInvoice);
-    // Vroegste vervaldatum eerst (= meest urgent / al te laat).
     unpaid.sort((a, b) => {
-      const ad = new Date(a.invoice_expiry_date || a.expiry_date || a.due_date || a.invoice_date || 0).getTime();
-      const bd = new Date(b.invoice_expiry_date || b.expiry_date || b.due_date || b.invoice_date || 0).getTime();
+      const ad = new Date(a.expiry_date || a.date || 0).getTime();
+      const bd = new Date(b.expiry_date || b.date || 0).getTime();
       return ad - bd;
     });
-    renderOpenInvoices(unpaid.slice(0, 20));
+
+    const relationNames = {};
+    if (relationsData) {
+      const relContainer = relationsData?.relation || relationsData?.relations || relationsData;
+      if (relContainer && typeof relContainer === "object") {
+        for (const [id, rel] of Object.entries(relContainer)) {
+          if (!rel || typeof rel !== "object") continue;
+          const name = String(rel.company_name || rel.name || rel.company || "").trim();
+          if (name) relationNames[id] = name;
+        }
+      }
+    }
+
+    renderOpenInvoices(unpaid.slice(0, 20), relationNames);
   } catch (e) {
     $("stat-deadlines").textContent = "–";
     $("deadlines-count").textContent = "0";
@@ -1095,6 +1108,33 @@ function authHeader() {
   }
 }
 
+// Informer geeft bij validatie-fouten soms HTTP 200 terug met een
+// gemengde body: een JSON-error blob gevolgd door een PHP var_dump.
+// JSON.parse op het geheel faalt. Deze helper haalt 't eerste balanced
+// {...} blok eruit zodat we de echte error alsnog kunnen lezen.
+function tryParseJsonPrefix(text) {
+  if (typeof text !== "string" || text.length === 0) return null;
+  const start = text.indexOf("{");
+  if (start < 0) return null;
+  let depth = 0, inString = false, escape = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (escape) { escape = false; continue; }
+    if (c === "\\") { escape = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === "{") depth++;
+    else if (c === "}") {
+      depth--;
+      if (depth === 0) {
+        try { return JSON.parse(text.slice(start, i + 1)); }
+        catch { return null; }
+      }
+    }
+  }
+  return null;
+}
+
 async function informerFetch(method, path, body) {
   if (!cfg.baseUrl) throw new Error("Geen base URL ingesteld.");
   const url = cfg.baseUrl + (path.startsWith("/") ? path : "/" + path);
@@ -1118,8 +1158,23 @@ async function informerFetch(method, path, body) {
   }
   const text = await res.text();
   let json = null;
-  try { json = JSON.parse(text); } catch (e) {}
+  try { json = JSON.parse(text); }
+  catch (e) { json = tryParseJsonPrefix(text); }
   if ($("debug-log")) $("debug-log").textContent = JSON.stringify({ request: debugReq, response: { status: res.status, statusText: res.statusText, body: json ?? text } }, null, 2);
+
+  // Informer's 200-met-error-in-body patroon. Behandel als fout zodat
+  // de POST-flow niet als "Klaar!" eindigt terwijl er niets is aangemaakt.
+  if (res.ok && json && (json.error || json.errors)) {
+    const e = json.error || json.errors;
+    const msg = typeof e === "string"
+      ? e
+      : Object.entries(e).map(([k, v]) => typeof v === "string" ? v : `${k}: ${JSON.stringify(v)}`).join("; ");
+    const err = new Error("Informer: " + msg);
+    err.status = res.status;
+    err.body = json;
+    throw err;
+  }
+
   if (!res.ok) {
     const errMsg = (json && (json.message || json.error || JSON.stringify(json))) || text || ("HTTP " + res.status);
     const err = new Error(errMsg);
@@ -1462,11 +1517,17 @@ async function sendSelectedToInformer() {
       amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
       vat_id: 1478835, ledger_id: 15302498, costs_id: 0
     }));
+    // Zie upload-flow voor uitleg: clamp expiry >= invoice_date zodat
+    // Informer's "expiry must be lower then invoice_date" validatie
+    // (zelf typfout: zij bedoelen later) niet aanslaat.
+    const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
+    let _expDate = extracted.invoice_expiry_date || _invDate;
+    if (_expDate < _invDate) _expDate = _invDate;
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `OUTLOOK-${Date.now()}`,
-      invoice_date: extracted.invoice_date || new Date().toISOString().slice(0, 10),
-      invoice_expiry_date: extracted.invoice_expiry_date || extracted.invoice_date || new Date().toISOString().slice(0, 10),
+      invoice_date: _invDate,
+      invoice_expiry_date: _expDate,
       collect: 0, invoice_total: Number(extracted.invoice_total) || 0, pdf: pdfB64, lines
     };
     const path = cfg.createPath || "/invoice/purchase/";
@@ -1600,11 +1661,18 @@ async function sendUploadedPdfToInformer() {
       amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
       vat_id: 1478835, ledger_id: 15302498, costs_id: 0
     }));
+    // Informer eist invoice_expiry_date >= invoice_date. Claude haalt
+    // dat soms net niet (Bambulab-PDF: factuurdatum 15 mei, expiry 14
+    // mei → 422). Clamp expiry naar invoice_date i.p.v. de POST laten
+    // mislukken; YYYY-MM-DD string-compare werkt voor de check.
+    const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
+    let _expDate = extracted.invoice_expiry_date || _invDate;
+    if (_expDate < _invDate) _expDate = _invDate;
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `UPLOAD-${Date.now()}`,
-      invoice_date: extracted.invoice_date || new Date().toISOString().slice(0, 10),
-      invoice_expiry_date: extracted.invoice_expiry_date || extracted.invoice_date || new Date().toISOString().slice(0, 10),
+      invoice_date: _invDate,
+      invoice_expiry_date: _expDate,
       collect: 0, invoice_total: Number(extracted.invoice_total) || 0, pdf: pdfB64, lines
     };
     const path = cfg.createPath || "/invoice/purchase/";
