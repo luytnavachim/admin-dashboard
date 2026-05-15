@@ -181,6 +181,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="overzicht">Overzicht</button>
     <button class="tab" data-tab="facturen">Facturen verwerken</button>
+    <button class="tab" data-tab="migratie">Verkoop migreren</button>
     <button class="tab" data-tab="instellingen">Instellingen</button>
     <button class="tab" data-tab="geavanceerd">Geavanceerd</button>
   </nav>
@@ -248,6 +249,26 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
     </div>
   </section>
 
+  <!-- ====== TAB: Verkoop migreren (MoneyMonk PDF → Informer sales) ====== -->
+  <section id="tab-migratie" class="tab-panel">
+    <div class="section">
+      <h2>Verkoopfacturen migreren naar Informer</h2>
+      <p class="muted">Bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Informer. Per PDF: (1) Claude extraheert klant + bedragen, (2) klant matchen of aanmaken in Informer relations, (3) POST naar het verkoop-endpoint. Doorloopt alle bestanden serieel; errors blijven in beeld zodat je ze daarna kan oppakken.</p>
+      <div class="warn-box" id="migratie-config-warn" style="display:none">
+        <strong>Eerst even Instellingen invullen.</strong> Sales endpoint en ledger-ID staan leeg — vul ze in onder de Instellingen-tab en kom terug.
+      </div>
+      <div class="field">
+        <label for="sales-upload">Selecteer PDF-bestanden (meerdere mag)</label>
+        <input id="sales-upload" type="file" accept="application/pdf,.pdf" multiple onchange="onSalesFilesPicked()">
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" id="migratie-start-btn" onclick="startSalesMigration()" disabled>Start migratie &rarr;</button>
+        <span class="muted" id="migratie-summary" style="align-self:center;"></span>
+      </div>
+      <div id="migratie-list" style="margin-top: 12px;"></div>
+    </div>
+  </section>
+
   <!-- ====== TAB: Instellingen ====== -->
   <section id="tab-instellingen" class="tab-panel">
     <div class="section">
@@ -288,6 +309,14 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         <div class="field">
           <label for="cfg-create-path">Endpoint inkoopfactuur aanmaken (POST)</label>
           <input id="cfg-create-path" type="text" value="/invoice/purchase/">
+        </div>
+        <div class="field">
+          <label for="cfg-sales-create-path">Endpoint verkoopfactuur aanmaken (POST)</label>
+          <input id="cfg-sales-create-path" type="text" value="/invoice/sales/" placeholder="/invoice/sales/">
+        </div>
+        <div class="field">
+          <label for="cfg-sales-ledger-id">Ledger-ID verkoop (income-grootboekrekening)</label>
+          <input id="cfg-sales-ledger-id" type="text" placeholder="bv. 8000-iets — anders dan inkoop">
         </div>
       </div>
       <div class="row-btns">
@@ -1056,7 +1085,9 @@ function defaultConfig() {
     apiKey: "",
     administrationId: "",
     listPath: "/invoices/purchase/",
-    createPath: "/invoice/purchase/"
+    createPath: "/invoice/purchase/",
+    salesCreatePath: "/invoice/sales/",
+    salesLedgerId: ""
   };
 }
 function loadConfig() {
@@ -1073,12 +1104,15 @@ function saveConfig() {
     apiKey: $("cfg-key").value,
     administrationId: $("cfg-admin").value.trim(),
     listPath: ($("cfg-list-path").value.trim() || "/invoices/purchase/").replace(/^([^\/])/, "/$1"),
-    createPath: ($("cfg-create-path").value.trim() || "/invoice/purchase/").replace(/^([^\/])/, "/$1")
+    createPath: ($("cfg-create-path").value.trim() || "/invoice/purchase/").replace(/^([^\/])/, "/$1"),
+    salesCreatePath: ($("cfg-sales-create-path").value.trim() || "/invoice/sales/").replace(/^([^\/])/, "/$1"),
+    salesLedgerId: $("cfg-sales-ledger-id").value.trim()
   };
   localStorage.setItem(LS_KEY, JSON.stringify(cfg));
   $("cfg-status").textContent = "Opgeslagen.";
   setTimeout(() => $("cfg-status").textContent = "", 2000);
   showToast("Instellingen opgeslagen", "ok");
+  refreshSalesConfigWarn();
 }
 function clearConfig() {
   if (!confirm("Alle Informer-instellingen wissen?")) return;
@@ -1095,6 +1129,15 @@ function applyConfigToForm() {
   $("cfg-admin").value = cfg.administrationId;
   $("cfg-list-path").value = cfg.listPath;
   $("cfg-create-path").value = cfg.createPath;
+  $("cfg-sales-create-path").value = cfg.salesCreatePath || "/invoice/sales/";
+  $("cfg-sales-ledger-id").value = cfg.salesLedgerId || "";
+  refreshSalesConfigWarn();
+}
+
+function refreshSalesConfigWarn() {
+  const warn = $("migratie-config-warn");
+  if (!warn) return;
+  warn.style.display = (cfg.salesCreatePath && cfg.salesLedgerId) ? "none" : "block";
 }
 
 // ============================================================
@@ -1733,6 +1776,195 @@ async function sendUploadedPdfToInformer() {
   } finally {
     btn.textContent = orig;
   }
+}
+
+// ============================================================
+//  VERKOOP MIGRATIE — MoneyMonk PDF bulk → Informer sales
+// ============================================================
+let salesQueue = [];           // [{file, status, message, link}]
+let salesMigrating = false;    // mutex om dubbele klik te negeren
+
+function onSalesFilesPicked() {
+  const files = Array.from($("sales-upload").files || []);
+  salesQueue = files.map(f => ({ file: f, status: "queued", message: "Wacht op start...", link: null }));
+  renderSalesQueue();
+  $("migratie-start-btn").disabled = files.length === 0 || salesMigrating;
+}
+
+function salesStatusClass(s) {
+  if (s === "ok") return "ok";
+  if (s === "error") return "err";
+  if (s === "skipped") return "warn";
+  if (s === "queued") return "";
+  return "active"; // running states (extracting/matching/creating)
+}
+
+function renderSalesQueue() {
+  const list = $("migratie-list");
+  if (!list) return;
+  if (salesQueue.length === 0) {
+    list.innerHTML = '<p class="muted">Nog geen bestanden geselecteerd.</p>';
+    $("migratie-summary").textContent = "";
+    return;
+  }
+  const counts = { ok: 0, error: 0, skipped: 0, queued: 0 };
+  for (const e of salesQueue) counts[e.status] = (counts[e.status] || 0) + 1;
+  const inflight = salesQueue.length - counts.ok - counts.error - counts.skipped - counts.queued;
+  $("migratie-summary").textContent =
+    `${salesQueue.length} bestanden · ${counts.ok || 0} ok · ${counts.error || 0} fout · ${counts.skipped || 0} skipped` +
+    (inflight ? ` · ${inflight} bezig` : "");
+  list.innerHTML = salesQueue.map(e => {
+    const cls = salesStatusClass(e.status);
+    const label = e.link ? `<a href="${escapeHtml(e.link)}" target="_blank" rel="noopener" style="color:inherit;text-decoration:underline">${escapeHtml(e.message)}</a>` : escapeHtml(e.message);
+    return `<div class="flow-step ${cls}"><strong>${escapeHtml(e.file.name)}</strong> · ${label}</div>`;
+  }).join("");
+}
+
+function salesSetState(idx, status, message, link) {
+  salesQueue[idx].status = status;
+  salesQueue[idx].message = message;
+  if (link !== undefined) salesQueue[idx].link = link;
+  renderSalesQueue();
+}
+
+// Helper for the worker's /extract-sales endpoint. Mirrors
+// extractInvoiceViaWorker but hits a different path and trusts the
+// returned schema's customer_* fields.
+async function extractSalesInvoiceViaWorker(pdfBase64) {
+  const extractUrl = cfg.baseUrl.replace(/\/api$/, "") + "/extract-sales";
+  let res;
+  try {
+    res = await fetch(extractUrl, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdf_base64: pdfBase64 })
+    });
+  } catch (netErr) {
+    throw new Error(`Network-fout bij ${extractUrl}: ${netErr.message}`);
+  }
+  const text = await res.text();
+  let body = null;
+  try { body = JSON.parse(text); } catch (e) {}
+  if (!res.ok) {
+    const main = (body && body.error) || ("HTTP " + res.status);
+    throw new Error("Claude extract: " + main);
+  }
+  if (!body || !body.extracted) throw new Error("Extract gaf geen 'extracted' veld terug.");
+  return body.extracted;
+}
+
+// Build a relation-create payload from extracted customer fields.
+// Mirrors the purchase-flow shape so Informer accepts it.
+function customerToRelationPayload(extracted) {
+  const fb = (v, def) => (v && String(v).trim()) ? v : def;
+  return {
+    relation_type:        "0",
+    company_name:         extracted.customer_name,
+    firstname:            extracted.customer_contact_firstname || "",
+    surname_prefix:       "",
+    surname:              extracted.customer_contact_surname || "",
+    street:               fb(extracted.customer_street, "Onbekend"),
+    house_number:         fb(extracted.customer_house_number, "0"),
+    house_number_suffix:  "",
+    zip:                  fb(extracted.customer_zip, "0000XX"),
+    city:                 fb(extracted.customer_city, "Onbekend"),
+    country:              fb(extracted.customer_country, "NL"),
+    phone_number:         extracted.customer_phone || "",
+    fax_number:           "",
+    web:                  extracted.customer_website || "",
+    email:                extracted.customer_email || "",
+    coc:                  extracted.customer_kvk || "",
+    vat:                  extracted.customer_vat_number || "",
+    iban:                 "",
+    bic:                  "",
+    email_invoice:        extracted.customer_email || ""
+  };
+}
+
+async function processSalesPdf(idx) {
+  const entry = salesQueue[idx];
+  const file = entry.file;
+  try {
+    salesSetState(idx, "reading", "1/4 — PDF lezen...");
+    const buf = await file.arrayBuffer();
+    const pdfB64 = arrayBufferToBase64(buf);
+
+    salesSetState(idx, "extracting", "2/4 — Extractie via Claude...");
+    const extracted = await extractSalesInvoiceViaWorker(pdfB64);
+    if (!extracted.customer_name) throw new Error("Claude vond geen klantnaam.");
+
+    salesSetState(idx, "matching", `3/4 — Klant matchen/aanmaken: "${extracted.customer_name}"...`);
+    let match = await findRelationByName(extracted.customer_name);
+    let relationSource = "match";
+    if (!match) {
+      const created = await informerFetch("POST", "/relation/", customerToRelationPayload(extracted));
+      const newId = created?.relation_id || created?.id ||
+                    (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) ||
+                    null;
+      if (!newId) throw new Error("Klant aangemaakt maar geen ID teruggekregen: " + JSON.stringify(created).slice(0, 300));
+      match = { id: newId, relation: { name: extracted.customer_name } };
+      relationSource = "created";
+    }
+
+    salesSetState(idx, "creating", `4/4 — Verkoopfactuur aanmaken in Informer (klant ${relationSource === "created" ? "aangemaakt" : "gematched"})...`);
+    // Zelfde clamp + line-sum normalisatie als bij inkoop.
+    const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
+    let _expDate = extracted.invoice_expiry_date || _invDate;
+    if (_expDate < _invDate) _expDate = _invDate;
+    const ledgerId = Number(cfg.salesLedgerId) || 0;
+    const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
+      description: extracted.number || "Verkoopfactuur",
+      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 0
+    }]).map(ln => ({
+      description: (ln.description || "Regel").slice(0, 200),
+      amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
+      vat_id: 1478835, ledger_id: ledgerId, costs_id: 0
+    }));
+    const lineSum = lines.reduce((s, ln) => s + (Number(ln.amount) || 0) + (Number(ln.vat_amount) || 0), 0);
+    const invoiceTotal = Math.round(lineSum * 100) / 100;
+    const payload = {
+      relation_id: parseInt(match.id, 10) || match.id,
+      number: extracted.number || `MIGRATIE-${Date.now()}`,
+      invoice_date: _invDate,
+      invoice_expiry_date: _expDate,
+      collect: 0,
+      invoice_total: invoiceTotal,
+      pdf: pdfB64,
+      lines
+    };
+    const path = cfg.salesCreatePath || "/invoice/sales/";
+    const result = await informerFetch("POST", path, payload);
+    const invId = result?.invoice_id || "?";
+    const invUrl = result?.invoice_url || null;
+    salesSetState(idx, "ok",
+      `Aangemaakt (id ${invId}) — ${extracted.customer_name} · nr ${extracted.number} · €${invoiceTotal.toFixed(2)}`,
+      invUrl);
+  } catch (e) {
+    salesSetState(idx, "error", e.message || String(e));
+  }
+}
+
+async function startSalesMigration() {
+  if (salesMigrating) return;
+  if (!cfg.salesCreatePath || !cfg.salesLedgerId) {
+    showToast("Vul eerst sales endpoint + ledger-ID in onder Instellingen", "err");
+    return;
+  }
+  if (salesQueue.length === 0) return;
+  salesMigrating = true;
+  const startBtn = $("migratie-start-btn");
+  const origText = startBtn.textContent;
+  startBtn.disabled = true;
+  startBtn.textContent = "Bezig...";
+  for (let i = 0; i < salesQueue.length; i++) {
+    if (salesQueue[i].status === "ok" || salesQueue[i].status === "skipped") continue;
+    await processSalesPdf(i);
+  }
+  salesMigrating = false;
+  startBtn.disabled = false;
+  startBtn.textContent = origText;
+  const okCount = salesQueue.filter(e => e.status === "ok").length;
+  showToast(`Migratie klaar: ${okCount}/${salesQueue.length} succesvol`, okCount === salesQueue.length ? "ok" : "err");
 }
 
 // ============================================================

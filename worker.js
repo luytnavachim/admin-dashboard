@@ -34,7 +34,11 @@ export default {
     }
 
     if (url.pathname === "/extract") {
-      return await handleExtract(request, env, cors);
+      return await handleExtract(request, env, cors, "purchase");
+    }
+
+    if (url.pathname === "/extract-sales") {
+      return await handleExtract(request, env, cors, "sales");
     }
 
     const prefix = "/api/";
@@ -164,7 +168,56 @@ const PURCHASE_INVOICE_TOOL = {
   }
 };
 
-async function handleExtract(request, env, cors) {
+// ---------------------------------------------------------------------------
+// SALES_INVOICE_TOOL — verkoopfactuur (factuur die WIJ aan een klant
+// hebben verstuurd, gemigreerd vanuit MoneyMonk PDF-exports). Customer-
+// velden ipv supplier-velden om Claude bij sales-prompts niet onze
+// eigen bedrijfsinfo te laten extraheren.
+// ---------------------------------------------------------------------------
+const SALES_INVOICE_TOOL = {
+  name: "report_sales_invoice",
+  description: "Rapporteer de verkoopfactuur-velden uit de PDF. Dit is een factuur die WIJ aan een klant hebben verstuurd.",
+  input_schema: {
+    type: "object",
+    properties: {
+      customer_name:           { type: "string", description: "Volledige bedrijfsnaam van de klant (de partij die de factuur ontvangt). Geen e-mailadres, geen onze eigen bedrijfsnaam." },
+      customer_vat_number:     { type: "string", description: "BTW-nummer van de klant. Lege string als niet zichtbaar." },
+      customer_kvk:            { type: "string", description: "KvK-nummer van de klant. Lege string als niet zichtbaar." },
+      customer_email:          { type: "string", description: "Contact-emailadres van de klant. Lege string als niet zichtbaar." },
+      customer_phone:          { type: "string", description: "Telefoonnummer van de klant. Lege string als niet zichtbaar." },
+      customer_website:        { type: "string", description: "Website van de klant. Lege string als niet zichtbaar." },
+      customer_street:         { type: "string", description: "Straatnaam van het klantadres (zonder huisnummer). Lege string als niet zichtbaar." },
+      customer_house_number:   { type: "string", description: "Huisnummer van het klantadres (alleen het cijfer). Lege string als niet zichtbaar." },
+      customer_zip:            { type: "string", description: "Postcode van het klantadres. Lege string als niet zichtbaar." },
+      customer_city:           { type: "string", description: "Plaats van het klantadres. Lege string als niet zichtbaar." },
+      customer_country:        { type: "string", description: "Landcode ISO-3166 alpha-2 (NL, BE, DE, FR, ...). Default NL als alleen 'Nederland' staat." },
+      customer_contact_firstname: { type: "string", description: "Voornaam van een contactpersoon bij de klant ALS die expliciet op de factuur staat. Lege string als niet zichtbaar." },
+      customer_contact_surname:   { type: "string", description: "Achternaam van een contactpersoon bij de klant. Lege string als niet zichtbaar." },
+      number:                  { type: "string", description: "Factuurnummer zoals op de factuur." },
+      invoice_date:            { type: "string", description: "Factuurdatum in YYYY-MM-DD." },
+      invoice_expiry_date:     { type: "string", description: "Vervaldatum in YYYY-MM-DD. Als geen vervaldatum zichtbaar, gebruik invoice_date." },
+      currency:                { type: "string", description: "ISO valuta-code. Default EUR." },
+      invoice_total:           { type: "number", description: "Totaalbedrag inclusief BTW." },
+      lines: {
+        type: "array",
+        description: "Eén of meer factuurregels. Eén samenvattende regel als de PDF geen specificatie geeft.",
+        items: {
+          type: "object",
+          properties: {
+            description: { type: "string", description: "Korte omschrijving van de regel." },
+            amount:      { type: "number", description: "Bedrag exclusief BTW." },
+            vat_amount:  { type: "number", description: "BTW-bedrag op deze regel." },
+            vat_rate:    { type: "number", description: "BTW-percentage (21, 9, 0, ...)." }
+          },
+          required: ["description", "amount", "vat_amount", "vat_rate"]
+        }
+      }
+    },
+    required: ["customer_name", "number", "invoice_date", "invoice_total", "lines"]
+  }
+};
+
+async function handleExtract(request, env, cors, kind) {
   if (request.method !== "POST") {
     return json({ error: "POST only" }, 405, cors);
   }
@@ -180,6 +233,12 @@ async function handleExtract(request, env, cors) {
     return json({ error: "Missing or empty pdf_base64 in body." }, 400, cors);
   }
 
+  const isSales = kind === "sales";
+  const tool = isSales ? SALES_INVOICE_TOOL : PURCHASE_INVOICE_TOOL;
+  const userPrompt = isSales
+    ? "Dit is een VERKOOPfactuur (sales invoice) — een factuur die WIJ aan een klant hebben verstuurd. Roep de report_sales_invoice tool aan. Belangrijke regels: (1) customer_name = de partij die de factuur ONTVANGT (de klant) — NIET onze eigen bedrijfsnaam die als afzender op de factuur staat. (2) Datums in YYYY-MM-DD. (3) Bedragen als getal, geen valuta-symbool. (4) Eén samenvattende regel als de PDF geen specificatie geeft."
+    : "Dit is een inkoopfactuur. Roep de report_purchase_invoice tool aan met de geëxtraheerde velden. Belangrijke regels: (1) supplier_name = de partij die de factuur stuurt (bedrijfsnaam, geen e-mail/persoonsnaam). (2) Datums in YYYY-MM-DD. (3) Bedragen als getal (geen valuta-symbool). (4) Als de PDF geen regel-specificatie geeft, één samenvattende lijn met de totalen.";
+
   const anthropicReq = {
     model: "claude-opus-4-7",
     max_tokens: 4096,
@@ -187,19 +246,13 @@ async function handleExtract(request, env, cors) {
     // tool_choice forces a specific tool. Extraction here is pattern
     // matching on a structured document, not deliberation, so the loss is
     // negligible.
-    tools: [{ ...PURCHASE_INVOICE_TOOL, cache_control: { type: "ephemeral" } }],
-    tool_choice: { type: "tool", name: "report_purchase_invoice" },
+    tools: [{ ...tool, cache_control: { type: "ephemeral" } }],
+    tool_choice: { type: "tool", name: tool.name },
     messages: [{
       role: "user",
       content: [
-        {
-          type: "document",
-          source: { type: "base64", media_type: "application/pdf", data: body.pdf_base64 }
-        },
-        {
-          type: "text",
-          text: "Dit is een inkoopfactuur. Roep de report_purchase_invoice tool aan met de geëxtraheerde velden. Belangrijke regels: (1) supplier_name = de partij die de factuur stuurt (bedrijfsnaam, geen e-mail/persoonsnaam). (2) Datums in YYYY-MM-DD. (3) Bedragen als getal (geen valuta-symbool). (4) Als de PDF geen regel-specificatie geeft, één samenvattende lijn met de totalen."
-        }
+        { type: "document", source: { type: "base64", media_type: "application/pdf", data: body.pdf_base64 } },
+        { type: "text", text: userPrompt }
       ]
     }]
   };
@@ -228,9 +281,9 @@ async function handleExtract(request, env, cors) {
   try { data = JSON.parse(text); }
   catch { return json({ error: "Anthropic response not JSON", body: text.slice(0, 2000) }, 502, cors); }
 
-  const toolBlock = (data.content || []).find(b => b && b.type === "tool_use" && b.name === "report_purchase_invoice");
+  const toolBlock = (data.content || []).find(b => b && b.type === "tool_use" && b.name === tool.name);
   if (!toolBlock || !toolBlock.input) {
-    return json({ error: "No report_purchase_invoice tool_use in Claude response", raw: data }, 502, cors);
+    return json({ error: "No " + tool.name + " tool_use in Claude response", raw: data }, 502, cors);
   }
 
   return json({ extracted: toolBlock.input, usage: data.usage || null }, 200, cors);
