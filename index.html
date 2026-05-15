@@ -1164,7 +1164,7 @@ function applyConfigToForm() {
 function refreshSalesConfigWarn() {
   const warn = $("migratie-config-warn");
   if (!warn) return;
-  warn.style.display = (cfg.salesCreatePath && cfg.salesLedgerId) ? "none" : "block";
+  warn.style.display = cfg.salesCreatePath ? "none" : "block";
 }
 
 // ============================================================
@@ -2045,7 +2045,6 @@ async function processSalesPdf(idx) {
     const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
     let _expDate = extracted.invoice_expiry_date || _invDate;
     if (_expDate < _invDate) _expDate = _invDate;
-    const ledgerId = Number(cfg.salesLedgerId) || 0;
     const SALES_VAT_ID_21 = 1478830;
     const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
       description: extracted.number || "Verkoopfactuur",
@@ -2057,9 +2056,13 @@ async function processSalesPdf(idx) {
         qty: 1,
         amount: amt,
         vat_id: SALES_VAT_ID_21,
-        // Informer's POST gebruikt ledger_id + costs_id (zoals bij
-        // inkoop) ook al heet 't veld in GET-responses ledger_account_id.
-        ledger_id: ledgerId,
+        // ledger_id = 0 → Informer kiest de omzet-ledger zelf op basis
+        // van de vat_id (matcht de v2 GET-sales response shape die ook
+        // ledger_id 0 retourneert). Eerder stuurden we expliciet
+        // cfg.salesLedgerId, maar v2 weigert (15302629, 1478830) met
+        // "vat_id and ledger_id are not a valid combination" — ook al
+        // is dat conceptueel de juiste "Omzet hoge BTW"-ledger.
+        ledger_id: 0,
         costs_id: 0,
         discount: 0
       };
@@ -2105,8 +2108,8 @@ async function processSalesPdf(idx) {
 
 async function startSalesMigration() {
   if (salesMigrating) return;
-  if (!cfg.salesCreatePath || !cfg.salesLedgerId) {
-    showToast("Vul eerst sales endpoint + ledger-ID in onder Instellingen", "err");
+  if (!cfg.salesCreatePath) {
+    showToast("Vul eerst sales endpoint in onder Instellingen", "err");
     return;
   }
   if (salesQueue.length === 0) return;
