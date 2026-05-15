@@ -181,7 +181,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <nav class="tabs" role="tablist">
     <button class="tab active" data-tab="overzicht">Overzicht</button>
     <button class="tab" data-tab="facturen">Facturen verwerken</button>
-    <button class="tab" data-tab="uren">Uren</button>
     <button class="tab" data-tab="migratie">Verkoop migreren</button>
     <button class="tab" data-tab="instellingen">Instellingen</button>
     <button class="tab" data-tab="geavanceerd">Geavanceerd</button>
@@ -247,49 +246,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         <button class="btn primary" id="upload-btn" onclick="sendUploadedPdfToInformer()" disabled>Stuur naar Informer &rarr;</button>
       </div>
       <div id="upload-log" style="margin-top: 12px;"></div>
-    </div>
-  </section>
-
-  <!-- ====== TAB: Uren (Informer timesheets) ====== -->
-  <section id="tab-uren" class="tab-panel">
-    <div class="section">
-      <h2>Uren boeken</h2>
-      <p class="muted">Direct naar Informer. Datum, klant uit je relaties, uren als 2.5 of 2:30. Druk Enter in 't omschrijving-veld om snel te boeken.</p>
-      <div class="warn-box" id="uren-config-warn" style="display:none">
-        <strong>Uren-endpoint niet ingesteld.</strong> Check Instellingen → "Endpoint uren". Default <code>/webapp/timetracking/basic/page/</code> (POST) en <code>/list/</code> (GET) — Worker routeert <code>/webapp/*</code> naar Informer's interne app-API.
-      </div>
-      <div class="grid-2">
-        <div class="field">
-          <label for="time-date">Datum</label>
-          <input id="time-date" type="date">
-        </div>
-        <div class="field">
-          <label for="time-hours">Uren</label>
-          <input id="time-hours" type="text" placeholder="2.5 of 2:30" inputmode="decimal" autocomplete="off">
-        </div>
-      </div>
-      <div class="field">
-        <label for="time-customer">Klant</label>
-        <input id="time-customer" type="text" list="time-customer-list" placeholder="Begin te typen (uit Informer relations)..." autocomplete="off">
-        <datalist id="time-customer-list"></datalist>
-      </div>
-      <div class="field">
-        <label for="time-description">Omschrijving</label>
-        <textarea id="time-description" rows="2" placeholder="bv. Klantmeeting + actiepunten verwerken"></textarea>
-      </div>
-      <div class="row-btns">
-        <button class="btn primary" id="time-submit-btn" onclick="submitTimeEntry()">Boek uren</button>
-        <span class="muted" id="time-status" style="align-self:center;"></span>
-      </div>
-    </div>
-
-    <div class="section">
-      <h2>Vandaag <span class="count" id="time-today-count">0</span></h2>
-      <div class="row-btns" style="margin-bottom: 8px;">
-        <button class="btn" onclick="loadTodayTimeEntries()">Verversen</button>
-        <span class="muted" id="time-today-total" style="align-self:center;"></span>
-      </div>
-      <div id="time-entries-list"><p class="muted">Eerste keer in deze tab? Vul één uur in en de lijst laadt vanzelf.</p></div>
     </div>
   </section>
 
@@ -380,14 +336,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
             <option value="excl">excl (bedragen exclusief BTW)</option>
             <option value="incl">incl (bedragen inclusief BTW)</option>
           </select>
-        </div>
-        <div class="field">
-          <label for="cfg-timesheet-create-path">Endpoint uur boeken (POST)</label>
-          <input id="cfg-timesheet-create-path" type="text" value="/webapp/timetracking/basic/page/" placeholder="/webapp/timetracking/basic/page/">
-        </div>
-        <div class="field">
-          <label for="cfg-timesheet-list-path">Endpoint uren ophalen (GET)</label>
-          <input id="cfg-timesheet-list-path" type="text" value="/webapp/timetracking/basic/list/" placeholder="/webapp/timetracking/basic/list/">
         </div>
       </div>
       <div class="row-btns">
@@ -899,8 +847,7 @@ async function loadOpenInvoices() {
   if (!list) return;
   list.innerHTML = '<div class="loading">Laden uit Informer…</div>';
   try {
-    // Parallel: facturen + relaties (laatste via gedeelde cache zodat
-    // de Uren-tab niet hoeft te dubbelfetchen).
+    // Parallel: facturen + relaties (cache wordt gevuld voor leveranciersnamen).
     const [invoiceData] = await Promise.all([
       informerFetch("GET", cfg.listPath || "/invoices/purchase/"),
       loadRelationsCache().catch(() => null)
@@ -1119,7 +1066,6 @@ function showApp() {
 //  TAB SWITCHING
 // ============================================================
 let facturenLoaded = false;
-let urenLoaded = false;
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
@@ -1127,15 +1073,6 @@ function switchTab(name) {
   if (name === "facturen" && !facturenLoaded && account) {
     facturenLoaded = true;
     loadInvoiceEmails().catch(e => console.warn("loadInvoiceEmails:", e));
-  }
-  // Uren tab: prefetch relations voor datalist + vandaag's entries.
-  // Customer-veld focussen voor snelle invoer.
-  if (name === "uren") {
-    if (!urenLoaded) {
-      urenLoaded = true;
-      initUrenTab().catch(e => console.warn("initUrenTab:", e));
-    }
-    setTimeout(() => { const el = $("time-hours"); if (el) el.focus(); }, 50);
   }
 }
 document.addEventListener("click", (ev) => {
@@ -1169,21 +1106,14 @@ function defaultConfig() {
     salesTemplateId: "544633",
     salesPaymentConditionId: "704820",
     salesCurrencyId: "126106",
-    salesVatOption: "excl",
-    timesheetCreatePath: "/webapp/timetracking/basic/page/",
-    timesheetListPath: "/webapp/timetracking/basic/list/"
+    salesVatOption: "excl"
   };
 }
 function loadConfig() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return defaultConfig();
-    const merged = { ...defaultConfig(), ...JSON.parse(raw) };
-    // Migratie: oudere defaults → Informer's echte webapp-endpoints.
-    const oldUrenPaths = new Set(["/timesheet/", "/timesheets/", "/timetracking/basic/"]);
-    if (oldUrenPaths.has(merged.timesheetCreatePath)) merged.timesheetCreatePath = "/webapp/timetracking/basic/page/";
-    if (oldUrenPaths.has(merged.timesheetListPath)) merged.timesheetListPath = "/webapp/timetracking/basic/list/";
-    return merged;
+    return { ...defaultConfig(), ...JSON.parse(raw) };
   } catch (e) { return defaultConfig(); }
 }
 function saveConfig() {
@@ -1199,9 +1129,7 @@ function saveConfig() {
     salesTemplateId: $("cfg-sales-template-id").value.trim(),
     salesPaymentConditionId: $("cfg-sales-payment-condition-id").value.trim(),
     salesCurrencyId: $("cfg-sales-currency-id").value.trim() || "126106",
-    salesVatOption: $("cfg-sales-vat-option").value || "excl",
-    timesheetCreatePath: ($("cfg-timesheet-create-path").value.trim() || "/webapp/timetracking/basic/page/").replace(/^([^\/])/, "/$1"),
-    timesheetListPath: ($("cfg-timesheet-list-path").value.trim() || "/webapp/timetracking/basic/list/").replace(/^([^\/])/, "/$1")
+    salesVatOption: $("cfg-sales-vat-option").value || "excl"
   };
   localStorage.setItem(LS_KEY, JSON.stringify(cfg));
   $("cfg-status").textContent = "Opgeslagen.";
@@ -1230,22 +1158,13 @@ function applyConfigToForm() {
   $("cfg-sales-payment-condition-id").value = cfg.salesPaymentConditionId || "";
   $("cfg-sales-currency-id").value = cfg.salesCurrencyId || "126106";
   $("cfg-sales-vat-option").value = cfg.salesVatOption || "excl";
-  $("cfg-timesheet-create-path").value = cfg.timesheetCreatePath || "/webapp/timetracking/basic/page/";
-  $("cfg-timesheet-list-path").value = cfg.timesheetListPath || "/webapp/timetracking/basic/list/";
   refreshSalesConfigWarn();
-  refreshUrenConfigWarn();
 }
 
 function refreshSalesConfigWarn() {
   const warn = $("migratie-config-warn");
   if (!warn) return;
   warn.style.display = (cfg.salesCreatePath && cfg.salesLedgerId) ? "none" : "block";
-}
-
-function refreshUrenConfigWarn() {
-  const warn = $("uren-config-warn");
-  if (!warn) return;
-  warn.style.display = cfg.timesheetCreatePath ? "none" : "block";
 }
 
 // ============================================================
@@ -1887,11 +1806,9 @@ async function sendUploadedPdfToInformer() {
 }
 
 // ============================================================
-//  UREN — Informer timesheet entries
+//  RELATIES CACHE — wordt door openstaand-render gebruikt
+//  voor leveranciersnamen.
 // ============================================================
-// Relations-cache wordt door zowel Uren (klant-datalist) als
-// Overzicht (deadlines leveranciersnamen) gebruikt; één fetch hier
-// is dus dubbel handig.
 let relationsCache = null;
 
 async function loadRelationsCache(force) {
@@ -1908,165 +1825,6 @@ async function loadRelationsCache(force) {
   }
   relationsCache = map;
   return map;
-}
-
-function buildCustomerDatalist() {
-  const dl = $("time-customer-list");
-  if (!dl || !relationsCache) return;
-  // Alfabetisch zodat browser-suggesties consistent zijn.
-  const sorted = Object.values(relationsCache).sort((a, b) => a.name.localeCompare(b.name, "nl"));
-  dl.innerHTML = sorted.map(r => `<option value="${escapeHtml(r.name)}"></option>`).join("");
-}
-
-function resolveCustomerId(name) {
-  if (!relationsCache || !name) return null;
-  const needle = name.toLowerCase().trim();
-  for (const r of Object.values(relationsCache)) {
-    if (r.name.toLowerCase().trim() === needle) return r.id;
-  }
-  for (const r of Object.values(relationsCache)) {
-    const n = r.name.toLowerCase().trim();
-    if (n.includes(needle) || needle.includes(n)) return r.id;
-  }
-  return null;
-}
-
-// Parseert zowel "2.5", "2,5" als "2:30" naar decimale uren.
-function parseHours(input) {
-  const s = String(input || "").trim().replace(",", ".");
-  if (!s) return null;
-  if (s.includes(":")) {
-    const [hStr, mStr] = s.split(":");
-    const h = parseInt(hStr, 10);
-    const m = parseInt(mStr, 10);
-    if (isNaN(h) || isNaN(m) || m < 0 || m >= 60) return null;
-    return Math.round((h + m / 60) * 100) / 100;
-  }
-  const n = parseFloat(s);
-  return isNaN(n) ? null : Math.round(n * 100) / 100;
-}
-
-function todayIso() { return new Date().toISOString().slice(0, 10); }
-
-async function initUrenTab() {
-  $("time-date").value = todayIso();
-  $("time-status").textContent = "Relaties laden...";
-  try {
-    await loadRelationsCache();
-    buildCustomerDatalist();
-    $("time-status").textContent = `${Object.keys(relationsCache).length} klanten geladen`;
-    setTimeout(() => $("time-status").textContent = "", 3000);
-  } catch (e) {
-    $("time-status").textContent = "Klanten laden mislukt: " + (e.message || e);
-  }
-  // Enter in description = submit (sneller dan klikken)
-  const desc = $("time-description");
-  if (desc && !desc._urenEnterBound) {
-    desc.addEventListener("keydown", (ev) => {
-      if ((ev.ctrlKey || ev.metaKey) && ev.key === "Enter") { ev.preventDefault(); submitTimeEntry(); }
-    });
-    desc._urenEnterBound = true;
-  }
-  loadTodayTimeEntries();
-}
-
-async function submitTimeEntry() {
-  if (!cfg.timesheetCreatePath) { showToast("Uren-endpoint niet ingesteld (Instellingen)", "err"); return; }
-  const date = $("time-date").value;
-  const hours = parseHours($("time-hours").value);
-  const customerName = $("time-customer").value.trim();
-  const description = $("time-description").value.trim();
-
-  if (!date) { showToast("Datum verplicht", "err"); $("time-date").focus(); return; }
-  if (!hours || hours <= 0) { showToast("Geldige uren invullen (bv. 2.5 of 2:30)", "err"); $("time-hours").focus(); return; }
-  if (!customerName) { showToast("Klant verplicht", "err"); $("time-customer").focus(); return; }
-  const customerId = resolveCustomerId(customerName);
-  if (!customerId) {
-    showToast(`Klant "${customerName}" niet gevonden in Informer relations`, "err");
-    $("time-customer").focus();
-    return;
-  }
-
-  const btn = $("time-submit-btn");
-  const orig = btn.textContent;
-  btn.disabled = true; btn.textContent = "Boeken...";
-  $("time-status").textContent = "";
-  try {
-    // Veel Informer-endpoints accepteren extra velden zonder klagen, dus
-    // we sturen meerdere mogelijke veld-namen tegelijk (duration/hours/
-    // time). Mocht Informer strenger zijn, krijgen we 'n duidelijke
-    // foutmelding terug en passen we aan.
-    const payload = {
-      relation_id: parseInt(customerId, 10) || customerId,
-      date: date,
-      hours: hours,
-      duration: hours,
-      description: description || ""
-    };
-    const res = await informerFetch("POST", cfg.timesheetCreatePath, payload);
-    showToast("Uren geboekt", "ok");
-    $("time-status").textContent = `${hours}u op ${date} voor ${customerName} ✓`;
-    // Reset hours + description; date en klant blijven staan voor volgende entry
-    $("time-hours").value = "";
-    $("time-description").value = "";
-    $("time-hours").focus();
-    loadTodayTimeEntries();
-  } catch (e) {
-    showToast("Boeken mislukt: " + (e.message || e), "err");
-    $("time-status").textContent = "";
-  } finally {
-    btn.disabled = false; btn.textContent = orig;
-  }
-}
-
-async function loadTodayTimeEntries() {
-  const list = $("time-entries-list");
-  if (!list) return;
-  list.innerHTML = '<div class="loading">Laden...</div>';
-  try {
-    if (!cfg.timesheetListPath) throw new Error("Uren-list endpoint niet ingesteld");
-    const data = await informerFetch("GET", cfg.timesheetListPath);
-    // Onbekende response-shape: probeer dezelfde wrapper-conventie als
-    // /invoices/purchase/ ({ <wrapper>: { id: {...} } }) plus fallbacks.
-    const container = data?.timesheet || data?.timesheets || data?.hour || data?.hours || data?.value || data;
-    let entries = [];
-    if (Array.isArray(container)) entries = container;
-    else if (container && typeof container === "object") {
-      entries = Object.entries(container)
-        .filter(([, v]) => v && typeof v === "object")
-        .map(([id, v]) => ({ id, ...v }));
-    }
-    const today = todayIso();
-    // Datumveld is ofwel 'date', 'entry_date', 'timesheet_date' — pak 't eerste dat plausibel is
-    const dateOf = (e) => e.date || e.entry_date || e.timesheet_date || "";
-    const todays = entries.filter(e => dateOf(e).startsWith(today));
-    const totalH = todays.reduce((s, e) => s + (Number(e.hours ?? e.duration ?? 0) || 0), 0);
-    $("time-today-count").textContent = todays.length;
-    $("time-today-total").textContent = todays.length > 0 ? `Totaal: ${totalH.toFixed(2)} uur` : "";
-    if (todays.length === 0) {
-      list.innerHTML = '<div class="empty">Nog geen uren vandaag.</div>';
-      return;
-    }
-    list.innerHTML = todays.map(e => {
-      const h = Number(e.hours ?? e.duration ?? 0) || 0;
-      const relId = e.relation_id;
-      const customer = (relationsCache && relationsCache[String(relId)]?.name) || `Klant #${relId || '?'}`;
-      const desc = e.description || "(geen omschrijving)";
-      return `<div class="row">
-        <div class="info">
-          <div class="top">
-            <span class="from">${escapeHtml(customer)}</span>
-            <span class="badge">${h.toFixed(2)} uur</span>
-          </div>
-          <div class="subject">${escapeHtml(desc)}</div>
-        </div>
-      </div>`;
-    }).join("");
-  } catch (e) {
-    list.innerHTML = `<div class="empty">Uren ophalen mislukt: ${escapeHtml(e.message || String(e))}<br><span class="muted">Endpoint-pad klopt? Check Instellingen → "Endpoint uren ophalen".</span></div>`;
-    $("time-today-count").textContent = "0";
-    $("time-today-total").textContent = "";
-  }
 }
 
 // ============================================================
