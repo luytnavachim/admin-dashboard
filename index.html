@@ -2307,8 +2307,10 @@ async function processSalesPdf(idx) {
     // Admin-specifieke IDs uit Settings — Informer's POST /invoice/sales/
     // verlangt: template_id, payment_condition_id, currency_id,
     // vat_option, ledger_id (per line), costs_id (per line).
-    // Sales-POST accepteert geen 'pdf' (Informer genereert zelf op basis
-    // van template). Anders dan inkoop, waar de PDF mee gaat als bewijs.
+    // Sales-POST accepteert geen 'pdf' (Informer maakt zelf op basis van
+    // template) en geen 'invoice_total' (berekent zelf uit qty × amount
+    // × vat_percentage). Stuur minimaal — alleen wat Informer beschouwt
+    // als input.
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `MIGRATIE-${Date.now()}`,
@@ -2318,8 +2320,6 @@ async function processSalesPdf(idx) {
       payment_condition_id: cfg.salesPaymentConditionId || undefined,
       currency_id: cfg.salesCurrencyId || "126106",
       vat_option: cfg.salesVatOption || "excl",
-      collect: 0,
-      invoice_total: invoiceTotal,
       lines
     };
     const path = cfg.salesCreatePath || "/invoice/sales/";
