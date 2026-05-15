@@ -594,8 +594,14 @@ function isOwnInvoice(email) {
 function looksLikeInvoice(email) {
   const subj = (email.subject || "").toLowerCase();
   const body = (email.bodyPreview || "").toLowerCase();
-  return /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov/.test(subj)
-    || /factuur|invoice|vervaldatum|te betalen|betaaldatum|betalingsherinnering/.test(body.slice(0, 300));
+  const from = senderEmail(email).toLowerCase();
+  // "receipt" pakt mails à la "Your receipt from <SaaS> #..." waar de
+  // PDF-bijlage feitelijk de factuur is. From-adressen zoals
+  // invoice@..., facturatie@..., billing@..., factuur+statements@...
+  // zijn ook sterke factuur-signalen al gebruikt de subject ander woord.
+  return /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov|receipt/.test(subj)
+    || /factuur|invoice|vervaldatum|te betalen|betaaldatum|betalingsherinnering/.test(body.slice(0, 300))
+    || /(^|[+._-])(invoice|factuur|facturatie|billing|facturen|invoices)([+._-]|@)/.test(from);
 }
 function looksLikePayment(email) {
   const subj = (email.subject || "").toLowerCase();
@@ -931,7 +937,7 @@ async function loadAll() {
   setStatus("data ophalen…", true);
 
   try {
-    const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning"];
+    const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning", "receipt"];
 
 // Per mailbox: serieel ophalen (om MailboxConcurrency-limiet te respecteren).
 // Tussen mailboxen: parallel.
@@ -1275,7 +1281,7 @@ async function loadInvoiceEmails() {
   // overeenkomen — alleen extra filter op hasAttachments (PDF-flow heeft
   // bijlage nodig).
   const sinceMs = Date.now() - 60 * 86400000;
-  const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning"];
+  const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning", "receipt"];
 
   // Resolve processed-folder ids parallel — redundant met inbox-scope
   // (Verwerkt zit buiten inbox) maar defensief.
