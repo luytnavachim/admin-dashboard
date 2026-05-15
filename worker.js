@@ -50,8 +50,18 @@ export default {
       return json({ error: "Worker mist INFORMER_API_KEY in Variables." }, 500, cors);
     }
 
-    const baseUrl = (env.INFORMER_BASE_URL || "https://api.informer.eu/v1").replace(/\/+$/, "");
-    const upstreamUrl = baseUrl + "/" + url.pathname.slice(prefix.length) + url.search;
+    // Informer heeft twee API's:
+    //  - publieke API op api.informer.eu/v1 of /v2 (INFORMER_BASE_URL)
+    //  - interne webapp-API op app.informer.eu/api/webapp/ (uren, projecten, etc.)
+    // Frontend kiest expliciet door pad te beginnen met /webapp/ → daar
+    // routeren we naar de tweede host. Auth-headers (API-key/securitycode)
+    // gaan in beide gevallen mee — Informer accepteert dezelfde credentials
+    // op beide endpoints (zolang de key 't recht heeft).
+    const rest = url.pathname.slice(prefix.length);
+    const baseUrl = rest.startsWith("webapp/")
+      ? "https://app.informer.eu/api"
+      : (env.INFORMER_BASE_URL || "https://api.informer.eu/v1").replace(/\/+$/, "");
+    const upstreamUrl = baseUrl + "/" + rest + url.search;
 
     const headers = new Headers();
     headers.set("Accept", "application/json");
