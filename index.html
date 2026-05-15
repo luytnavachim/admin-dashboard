@@ -359,7 +359,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
           <input id="cfg-sales-create-path" type="text" value="/invoice/sales/" placeholder="/invoice/sales/">
         </div>
         <div class="field">
-          <label for="cfg-sales-ledger-id">Ledger-ID verkoop (income-grootboekrekening)</label>
+          <label for="cfg-sales-ledger-id">Ledger-ID verkoop (Informer-interne ID, géén 8000-code)</label>
           <input id="cfg-sales-ledger-id" type="text" placeholder="bv. 15302629">
         </div>
         <div class="field">
@@ -1161,10 +1161,12 @@ function defaultConfig() {
     listPath: "/invoices/purchase/",
     createPath: "/invoice/purchase/",
     salesCreatePath: "/invoice/sales/",
-    salesLedgerId: "",
     // Admin-specifieke IDs voor verkoopfactuur-POST. Defaults uit user's
     // sample sales invoice — Informer maakt deze per administratie aan,
-    // dus voor andere admins moet je ze overschrijven.
+    // dus voor andere admins moet je ze overschrijven. Belangrijk:
+    // salesLedgerId is de interne Informer-ID (lang nummer), NIET de
+    // grootboek-code (8000-iets) die je in de UI ziet.
+    salesLedgerId: "15302629",
     salesTemplateId: "544633",
     salesPaymentConditionId: "704820",
     salesCurrencyId: "126106",
@@ -2305,6 +2307,8 @@ async function processSalesPdf(idx) {
     // Admin-specifieke IDs uit Settings — Informer's POST /invoice/sales/
     // verlangt: template_id, payment_condition_id, currency_id,
     // vat_option, ledger_id (per line), costs_id (per line).
+    // Sales-POST accepteert geen 'pdf' (Informer genereert zelf op basis
+    // van template). Anders dan inkoop, waar de PDF mee gaat als bewijs.
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `MIGRATIE-${Date.now()}`,
@@ -2316,7 +2320,6 @@ async function processSalesPdf(idx) {
       vat_option: cfg.salesVatOption || "excl",
       collect: 0,
       invoice_total: invoiceTotal,
-      pdf: pdfB64,
       lines
     };
     const path = cfg.salesCreatePath || "/invoice/sales/";
