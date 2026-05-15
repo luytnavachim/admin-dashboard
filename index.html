@@ -725,11 +725,9 @@ function needsReply(email) {
 }
 
 // Normaliseert Informer's GET /invoices/purchase/ response naar een
-// platte array. Per Swagger: { purchase: { "<id>": {...} } }. Fallbacks
-// voor andere shapes (array, andere wrapper-naam) zodat we niet
-// breken als Informer 't ooit verandert.
+// platte array. v2: { invoices: [...] }. v1: { purchase: { "<id>": {...} } }.
 function normalizePurchaseInvoices(data) {
-  const container = data?.purchase || data?.purchases || data?.value || data;
+  const container = data?.invoices || data?.purchase || data?.purchases || data?.value || data;
   if (Array.isArray(container)) return container;
   if (container && typeof container === "object") {
     return Object.entries(container)
@@ -739,13 +737,12 @@ function normalizePurchaseInvoices(data) {
   return [];
 }
 
-// True als de factuur nog niet (volledig) betaald is. Informer's GET
-// /invoices/purchase/ shape (per inspectie): bedragen als string,
-// `paid` is betaald-bedrag, `total_price_incl_vat` is totaal incl. BTW,
-// `payment_date` is "0000-00-00" zolang er nog niet betaald is.
+// True als de factuur nog niet (volledig) betaald is. v2: totals.{incl_vat,paid,open}.
+// v1: flat total_price_incl_vat + paid. Bedragen komen als string binnen.
 function isUnpaidInvoice(inv) {
-  const total = Number(inv.total_price_incl_vat ?? 0);
-  const paid = Number(inv.paid ?? 0);
+  if (inv.totals && inv.totals.open != null) return Number(inv.totals.open) > 0;
+  const total = Number(inv.totals?.incl_vat ?? inv.total_price_incl_vat ?? 0);
+  const paid = Number(inv.totals?.paid ?? inv.paid ?? 0);
   if (total <= 0) return false;
   if (paid >= total) return false;
   return true;
@@ -858,7 +855,9 @@ function renderOpenInvoices(invoices, relationNames) {
   list.innerHTML = invoices.map(inv => {
     // Informer's "0000-00-00" zero-date negeren, anders krijg je 1970-rare dates.
     const isRealDate = (s) => s && s !== "0000-00-00";
-    const expiry = isRealDate(inv.expiry_date) ? inv.expiry_date : (isRealDate(inv.date) ? inv.date : null);
+    const expiry = isRealDate(inv.expiry_date) ? inv.expiry_date
+                 : isRealDate(inv.invoice_date) ? inv.invoice_date
+                 : isRealDate(inv.date) ? inv.date : null;
     const dateObj = expiry ? new Date(expiry) : null;
     const days = dateObj && !isNaN(dateObj) ? Math.ceil((dateObj.getTime() - Date.now()) / 86400000) : null;
     let urgencyClass = '', urgencyLabel = '';
@@ -869,12 +868,12 @@ function renderOpenInvoices(invoices, relationNames) {
     else if (days <= 14) { urgencyClass = 'warn'; urgencyLabel = 'Over ' + days + ' dagen'; }
     else { urgencyLabel = 'Over ' + days + ' dagen'; }
     const datePretty = dateObj && !isNaN(dateObj) ? dateObj.toLocaleDateString('nl-NL', { day: 'numeric', month: 'long' }) : '–';
-    const total = Number(inv.total_price_incl_vat ?? 0);
-    const paid = Number(inv.paid ?? 0);
-    const outstanding = Math.max(0, total - paid);
+    const total = Number(inv.totals?.incl_vat ?? inv.total_price_incl_vat ?? 0);
+    const paid = Number(inv.totals?.paid ?? inv.paid ?? 0);
+    const outstanding = inv.totals?.open != null ? Number(inv.totals.open) : Math.max(0, total - paid);
     const supplier = (relationNames && relationNames[String(inv.relation_id)]) || `Leverancier #${inv.relation_id || '?'}`;
     const number = inv.number || '?';
-    const link = inv.invoice_url || null;
+    const link = inv.url || inv.invoice_url || null;
     const subjectHtml = `<div class="subject">${escapeHtml('Factuur ' + number)}</div>`;
     const subjectBlock = link
       ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="subject-link">${subjectHtml}</a>`
