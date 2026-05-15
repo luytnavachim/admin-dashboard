@@ -1623,7 +1623,7 @@ async function sendSelectedToInformer() {
       const newRelation = {
         relation_type:"0", company_name: extracted.supplier_name,
         firstname: extracted.supplier_contact_firstname || "", surname_prefix:"", surname: extracted.supplier_contact_surname || "",
-        street: fb(extracted.supplier_street, "Onbekend"), house_number: fb(extracted.supplier_house_number, "0"), house_number_suffix:"",
+        street: fb(extracted.supplier_street, "Onbekend"), house_number: normHouseNumber(extracted.supplier_house_number), house_number_suffix:"",
         zip: fb(extracted.supplier_zip, "0000XX"), city: fb(extracted.supplier_city, "Onbekend"), country: fb(extracted.supplier_country, "NL"),
         phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
         coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
@@ -1776,7 +1776,7 @@ async function sendUploadedPdfToInformer() {
       const newRelation = {
         relation_type:"0", company_name: extracted.supplier_name,
         firstname: extracted.supplier_contact_firstname || "", surname_prefix:"", surname: extracted.supplier_contact_surname || "",
-        street: fb(extracted.supplier_street, "Onbekend"), house_number: fb(extracted.supplier_house_number, "0"), house_number_suffix:"",
+        street: fb(extracted.supplier_street, "Onbekend"), house_number: normHouseNumber(extracted.supplier_house_number), house_number_suffix:"",
         zip: fb(extracted.supplier_zip, "0000XX"), city: fb(extracted.supplier_city, "Onbekend"), country: fb(extracted.supplier_country, "NL"),
         phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
         coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
@@ -2106,6 +2106,20 @@ async function extractSalesInvoiceViaWorker(pdfBase64) {
 
 // Build a relation-create payload from extracted customer fields.
 // Mirrors the purchase-flow shape so Informer accepts it.
+// Informer wil house_number als puur numeriek, en accepteert "0" niet als
+// geldig huisnummer ("house_number: this field is required" foutmelding).
+// Strippen tot alleen cijfers; fallback "1" als er niets overblijft. Een
+// eventuele suffix als "a" / "bis" hoort eigenlijk in house_number_suffix
+// — voor migratie-doeleinden gooien we 't weg, gebruiker kan in Informer
+// corrigeren.
+function normHouseNumber(v) {
+  const digits = String(v || "").replace(/\D/g, "");
+  // "0" is wat Claude soms teruggeeft als 'geen huisnummer gevonden';
+  // Informer keurt 't af. Forceer "1" als placeholder.
+  if (!digits || digits === "0" || /^0+$/.test(digits)) return "1";
+  return digits;
+}
+
 function customerToRelationPayload(extracted) {
   const fb = (v, def) => (v && String(v).trim()) ? v : def;
   return {
@@ -2115,7 +2129,7 @@ function customerToRelationPayload(extracted) {
     surname_prefix:       "",
     surname:              extracted.customer_contact_surname || "",
     street:               fb(extracted.customer_street, "Onbekend"),
-    house_number:         fb(extracted.customer_house_number, "0"),
+    house_number:         normHouseNumber(extracted.customer_house_number),
     house_number_suffix:  "",
     zip:                  fb(extracted.customer_zip, "0000XX"),
     city:                 fb(extracted.customer_city, "Onbekend"),
