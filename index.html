@@ -360,7 +360,26 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         </div>
         <div class="field">
           <label for="cfg-sales-ledger-id">Ledger-ID verkoop (income-grootboekrekening)</label>
-          <input id="cfg-sales-ledger-id" type="text" placeholder="bv. 8000-iets — anders dan inkoop">
+          <input id="cfg-sales-ledger-id" type="text" placeholder="bv. 15302629">
+        </div>
+        <div class="field">
+          <label for="cfg-sales-template-id">Template-ID verkoopfactuur</label>
+          <input id="cfg-sales-template-id" type="text" placeholder="bv. 544633">
+        </div>
+        <div class="field">
+          <label for="cfg-sales-payment-condition-id">Betalingsconditie-ID</label>
+          <input id="cfg-sales-payment-condition-id" type="text" placeholder="bv. 704820">
+        </div>
+        <div class="field">
+          <label for="cfg-sales-currency-id">Currency-ID (126106 = EUR)</label>
+          <input id="cfg-sales-currency-id" type="text" placeholder="126106" value="126106">
+        </div>
+        <div class="field">
+          <label for="cfg-sales-vat-option">VAT option</label>
+          <select id="cfg-sales-vat-option">
+            <option value="excl">excl (bedragen exclusief BTW)</option>
+            <option value="incl">incl (bedragen inclusief BTW)</option>
+          </select>
         </div>
         <div class="field">
           <label for="cfg-timesheet-create-path">Endpoint uur boeken (POST)</label>
@@ -1143,6 +1162,13 @@ function defaultConfig() {
     createPath: "/invoice/purchase/",
     salesCreatePath: "/invoice/sales/",
     salesLedgerId: "",
+    // Admin-specifieke IDs voor verkoopfactuur-POST. Defaults uit user's
+    // sample sales invoice — Informer maakt deze per administratie aan,
+    // dus voor andere admins moet je ze overschrijven.
+    salesTemplateId: "544633",
+    salesPaymentConditionId: "704820",
+    salesCurrencyId: "126106",
+    salesVatOption: "excl",
     timesheetCreatePath: "/timesheet/",
     timesheetListPath: "/timesheets/"
   };
@@ -1164,6 +1190,10 @@ function saveConfig() {
     createPath: ($("cfg-create-path").value.trim() || "/invoice/purchase/").replace(/^([^\/])/, "/$1"),
     salesCreatePath: ($("cfg-sales-create-path").value.trim() || "/invoice/sales/").replace(/^([^\/])/, "/$1"),
     salesLedgerId: $("cfg-sales-ledger-id").value.trim(),
+    salesTemplateId: $("cfg-sales-template-id").value.trim(),
+    salesPaymentConditionId: $("cfg-sales-payment-condition-id").value.trim(),
+    salesCurrencyId: $("cfg-sales-currency-id").value.trim() || "126106",
+    salesVatOption: $("cfg-sales-vat-option").value || "excl",
     timesheetCreatePath: ($("cfg-timesheet-create-path").value.trim() || "/timesheet/").replace(/^([^\/])/, "/$1"),
     timesheetListPath: ($("cfg-timesheet-list-path").value.trim() || "/timesheets/").replace(/^([^\/])/, "/$1")
   };
@@ -1190,6 +1220,10 @@ function applyConfigToForm() {
   $("cfg-create-path").value = cfg.createPath;
   $("cfg-sales-create-path").value = cfg.salesCreatePath || "/invoice/sales/";
   $("cfg-sales-ledger-id").value = cfg.salesLedgerId || "";
+  $("cfg-sales-template-id").value = cfg.salesTemplateId || "";
+  $("cfg-sales-payment-condition-id").value = cfg.salesPaymentConditionId || "";
+  $("cfg-sales-currency-id").value = cfg.salesCurrencyId || "126106";
+  $("cfg-sales-vat-option").value = cfg.salesVatOption || "excl";
   $("cfg-timesheet-create-path").value = cfg.timesheetCreatePath || "/timesheet/";
   $("cfg-timesheet-list-path").value = cfg.timesheetListPath || "/timesheets/";
   refreshSalesConfigWarn();
@@ -2253,36 +2287,33 @@ async function processSalesPdf(idx) {
       description: extracted.number || "Verkoopfactuur",
       amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 21
     }]).map(ln => {
-      // Claude geeft amount (excl BTW) + vat_amount + vat_rate. Voor
-      // sales hebben we per regel nodig: qty=1, amount=line excl,
-      // vat_id, ledger_account_id. We laten Informer 't BTW-bedrag zelf
-      // berekenen uit vat_id's percentage.
       const amt = Number(ln.amount) || 0;
       return {
         description: (ln.description || "Regel").slice(0, 200),
         qty: 1,
         amount: amt,
         vat_id: SALES_VAT_ID_21,
-        ledger_account_id: ledgerId,
+        // Informer's POST gebruikt ledger_id + costs_id (zoals bij
+        // inkoop) ook al heet 't veld in GET-responses ledger_account_id.
+        ledger_id: ledgerId,
+        costs_id: 0,
         discount: 0
       };
     });
-    // Totaal incl. BTW = sum(qty * amount) * (1 + percentage/100).
-    // Aanname: alle regels 21% (Claude's vat_rate kan afwijken voor
-    // verlaagde/vrijgesteld; in dat geval logt Informer 'n fout en
-    // weet je dat je 't moet aanpassen).
     const totalExcl = lines.reduce((s, ln) => s + (ln.qty * ln.amount), 0);
     const invoiceTotal = Math.round(totalExcl * 1.21 * 100) / 100;
-    // Voor de POST gebruiken we dezelfde veldnamen als bij purchase
-    // (invoice_date, invoice_expiry_date, lines) — Informer's API is
-    // asymmetrisch (GET geeft 'date'/'expiry_date'/'line', POST wil
-    // invoice_*-prefixen) maar dat patroon werkte voor inkoop. Als
-    // sales 't anders wil, krijgen we een duidelijke 422 terug.
+    // Admin-specifieke IDs uit Settings — Informer's POST /invoice/sales/
+    // verlangt: template_id, payment_condition_id, currency_id,
+    // vat_option, ledger_id (per line), costs_id (per line).
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `MIGRATIE-${Date.now()}`,
       invoice_date: _invDate,
       invoice_expiry_date: _expDate,
+      template_id: cfg.salesTemplateId || undefined,
+      payment_condition_id: cfg.salesPaymentConditionId || undefined,
+      currency_id: cfg.salesCurrencyId || "126106",
+      vat_option: cfg.salesVatOption || "excl",
       collect: 0,
       invoice_total: invoiceTotal,
       pdf: pdfB64,
