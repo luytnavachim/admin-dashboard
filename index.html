@@ -256,7 +256,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       <h2>Uren boeken</h2>
       <p class="muted">Direct naar Informer. Datum, klant uit je relaties, uren als 2.5 of 2:30. Druk Enter in 't omschrijving-veld om snel te boeken.</p>
       <div class="warn-box" id="uren-config-warn" style="display:none">
-        <strong>Uren-endpoint niet ingesteld.</strong> Check Instellingen → "Endpoint uren". Default <code>/timetracking/basic/</code> staat er; pas aan als Informer een ander pad gebruikt.
+        <strong>Uren-endpoint niet ingesteld.</strong> Check Instellingen → "Endpoint uren". Default <code>/webapp/timetracking/basic/page/</code> (POST) en <code>/list/</code> (GET) — Worker routeert <code>/webapp/*</code> naar Informer's interne app-API.
       </div>
       <div class="grid-2">
         <div class="field">
@@ -383,11 +383,11 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         </div>
         <div class="field">
           <label for="cfg-timesheet-create-path">Endpoint uur boeken (POST)</label>
-          <input id="cfg-timesheet-create-path" type="text" value="/timetracking/basic/" placeholder="/timetracking/basic/">
+          <input id="cfg-timesheet-create-path" type="text" value="/webapp/timetracking/basic/page/" placeholder="/webapp/timetracking/basic/page/">
         </div>
         <div class="field">
           <label for="cfg-timesheet-list-path">Endpoint uren ophalen (GET)</label>
-          <input id="cfg-timesheet-list-path" type="text" value="/timetracking/basic/" placeholder="/timetracking/basic/">
+          <input id="cfg-timesheet-list-path" type="text" value="/webapp/timetracking/basic/list/" placeholder="/webapp/timetracking/basic/list/">
         </div>
       </div>
       <div class="row-btns">
@@ -1170,8 +1170,8 @@ function defaultConfig() {
     salesPaymentConditionId: "704820",
     salesCurrencyId: "126106",
     salesVatOption: "excl",
-    timesheetCreatePath: "/timetracking/basic/",
-    timesheetListPath: "/timetracking/basic/"
+    timesheetCreatePath: "/webapp/timetracking/basic/page/",
+    timesheetListPath: "/webapp/timetracking/basic/list/"
   };
 }
 function loadConfig() {
@@ -1179,10 +1179,10 @@ function loadConfig() {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return defaultConfig();
     const merged = { ...defaultConfig(), ...JSON.parse(raw) };
-    // Migratie: oude defaults `/timesheet/` + `/timesheets/` (raden) →
-    // Informer's echte endpoint `/timetracking/basic/`.
-    if (merged.timesheetCreatePath === "/timesheet/") merged.timesheetCreatePath = "/timetracking/basic/";
-    if (merged.timesheetListPath === "/timesheets/") merged.timesheetListPath = "/timetracking/basic/";
+    // Migratie: oudere defaults → Informer's echte webapp-endpoints.
+    const oldUrenPaths = new Set(["/timesheet/", "/timesheets/", "/timetracking/basic/"]);
+    if (oldUrenPaths.has(merged.timesheetCreatePath)) merged.timesheetCreatePath = "/webapp/timetracking/basic/page/";
+    if (oldUrenPaths.has(merged.timesheetListPath)) merged.timesheetListPath = "/webapp/timetracking/basic/list/";
     return merged;
   } catch (e) { return defaultConfig(); }
 }
@@ -1200,8 +1200,8 @@ function saveConfig() {
     salesPaymentConditionId: $("cfg-sales-payment-condition-id").value.trim(),
     salesCurrencyId: $("cfg-sales-currency-id").value.trim() || "126106",
     salesVatOption: $("cfg-sales-vat-option").value || "excl",
-    timesheetCreatePath: ($("cfg-timesheet-create-path").value.trim() || "/timetracking/basic/").replace(/^([^\/])/, "/$1"),
-    timesheetListPath: ($("cfg-timesheet-list-path").value.trim() || "/timetracking/basic/").replace(/^([^\/])/, "/$1")
+    timesheetCreatePath: ($("cfg-timesheet-create-path").value.trim() || "/webapp/timetracking/basic/page/").replace(/^([^\/])/, "/$1"),
+    timesheetListPath: ($("cfg-timesheet-list-path").value.trim() || "/webapp/timetracking/basic/list/").replace(/^([^\/])/, "/$1")
   };
   localStorage.setItem(LS_KEY, JSON.stringify(cfg));
   $("cfg-status").textContent = "Opgeslagen.";
@@ -1230,8 +1230,8 @@ function applyConfigToForm() {
   $("cfg-sales-payment-condition-id").value = cfg.salesPaymentConditionId || "";
   $("cfg-sales-currency-id").value = cfg.salesCurrencyId || "126106";
   $("cfg-sales-vat-option").value = cfg.salesVatOption || "excl";
-  $("cfg-timesheet-create-path").value = cfg.timesheetCreatePath || "/timetracking/basic/";
-  $("cfg-timesheet-list-path").value = cfg.timesheetListPath || "/timetracking/basic/";
+  $("cfg-timesheet-create-path").value = cfg.timesheetCreatePath || "/webapp/timetracking/basic/page/";
+  $("cfg-timesheet-list-path").value = cfg.timesheetListPath || "/webapp/timetracking/basic/list/";
   refreshSalesConfigWarn();
   refreshUrenConfigWarn();
 }
