@@ -2158,21 +2158,46 @@ async function processSalesPdf(idx) {
     }
 
     salesSetState(idx, "creating", `4/4 — Verkoopfactuur aanmaken in Informer (klant ${relationSource === "created" ? "aangemaakt" : "gematched"})...`);
-    // Zelfde clamp + line-sum normalisatie als bij inkoop.
+    // Zelfde clamp + line-sum normalisatie als bij inkoop, maar sales
+    // gebruikt een ander line-schema: qty + amount (unit price) +
+    // vat_id + ledger_account_id. Informer berekent zelf de BTW
+    // uit qty × amount × vat_percentage. Voor sales 21% NL is
+    // vat_id 1478830 (inkoop is 1478835 — admin-specifiek toegevoegd
+    // door Informer; deze klopt voor jouw administratie).
     const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
     let _expDate = extracted.invoice_expiry_date || _invDate;
     if (_expDate < _invDate) _expDate = _invDate;
     const ledgerId = Number(cfg.salesLedgerId) || 0;
+    const SALES_VAT_ID_21 = 1478830;
     const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
       description: extracted.number || "Verkoopfactuur",
-      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 0
-    }]).map(ln => ({
-      description: (ln.description || "Regel").slice(0, 200),
-      amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
-      vat_id: 1478835, ledger_id: ledgerId, costs_id: 0
-    }));
-    const lineSum = lines.reduce((s, ln) => s + (Number(ln.amount) || 0) + (Number(ln.vat_amount) || 0), 0);
-    const invoiceTotal = Math.round(lineSum * 100) / 100;
+      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 21
+    }]).map(ln => {
+      // Claude geeft amount (excl BTW) + vat_amount + vat_rate. Voor
+      // sales hebben we per regel nodig: qty=1, amount=line excl,
+      // vat_id, ledger_account_id. We laten Informer 't BTW-bedrag zelf
+      // berekenen uit vat_id's percentage.
+      const amt = Number(ln.amount) || 0;
+      return {
+        description: (ln.description || "Regel").slice(0, 200),
+        qty: 1,
+        amount: amt,
+        vat_id: SALES_VAT_ID_21,
+        ledger_account_id: ledgerId,
+        discount: 0
+      };
+    });
+    // Totaal incl. BTW = sum(qty * amount) * (1 + percentage/100).
+    // Aanname: alle regels 21% (Claude's vat_rate kan afwijken voor
+    // verlaagde/vrijgesteld; in dat geval logt Informer 'n fout en
+    // weet je dat je 't moet aanpassen).
+    const totalExcl = lines.reduce((s, ln) => s + (ln.qty * ln.amount), 0);
+    const invoiceTotal = Math.round(totalExcl * 1.21 * 100) / 100;
+    // Voor de POST gebruiken we dezelfde veldnamen als bij purchase
+    // (invoice_date, invoice_expiry_date, lines) — Informer's API is
+    // asymmetrisch (GET geeft 'date'/'expiry_date'/'line', POST wil
+    // invoice_*-prefixen) maar dat patroon werkte voor inkoop. Als
+    // sales 't anders wil, krijgen we een duidelijke 422 terug.
     const payload = {
       relation_id: parseInt(match.id, 10) || match.id,
       number: extracted.number || `MIGRATIE-${Date.now()}`,
