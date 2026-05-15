@@ -233,6 +233,19 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       </div>
       <div id="flow-log" style="margin-top: 12px;"></div>
     </div>
+
+    <div class="section">
+      <h2>Losse PDF uploaden</h2>
+      <p class="muted">Heb je een factuur-PDF die niet in je inbox zit (bv. download uit een portaal of scan)? Upload 'm hier — zelfde extractie + Informer-flow, zonder Outlook-stappen.</p>
+      <div class="field">
+        <label for="pdf-upload">PDF-bestand</label>
+        <input id="pdf-upload" type="file" accept="application/pdf,.pdf" onchange="onPdfPicked()">
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" id="upload-btn" onclick="sendUploadedPdfToInformer()" disabled>Stuur naar Informer &rarr;</button>
+      </div>
+      <div id="upload-log" style="margin-top: 12px;"></div>
+    </div>
   </section>
 
   <!-- ====== TAB: Instellingen ====== -->
@@ -1236,11 +1249,11 @@ function selectEmail(id) {
   $("skip-btn").disabled = false;
 }
 
-function logStep(text, kind) {
+function logStep(text, kind, targetId) {
   const el = document.createElement("div");
   el.className = "flow-step " + (kind || "active");
   el.textContent = text;
-  $("flow-log").appendChild(el);
+  $(targetId || "flow-log").appendChild(el);
   return el;
 }
 
@@ -1462,6 +1475,101 @@ async function skipSelected() {
     sendBtn.disabled = false;
   } finally {
     skipBtn.disabled = true; skipBtn.textContent = origText;
+  }
+}
+
+// ============================================================
+//  LOSSE PDF UPLOAD → INFORMER
+// ============================================================
+function onPdfPicked() {
+  const f = $("pdf-upload").files[0];
+  $("upload-btn").disabled = !f;
+}
+
+async function sendUploadedPdfToInformer() {
+  const fileInput = $("pdf-upload");
+  const file = fileInput.files[0];
+  if (!file) { showToast("Geen PDF geselecteerd", "err"); return; }
+  // Browsers melden soms application/octet-stream voor PDFs (vooral via
+  // drag-drop), dus we vertrouwen primair op de extensie.
+  const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+  if (!isPdf) { showToast("Bestand is geen PDF", "err"); return; }
+
+  $("upload-log").innerHTML = "";
+  const btn = $("upload-btn");
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "Bezig...";
+
+  let s1 = null, s2 = null, s3 = null;
+  try {
+    s1 = logStep(`1/3 — PDF lezen: ${file.name} (${Math.round(file.size/1024)} KB)...`, "active", "upload-log");
+    const buf = await file.arrayBuffer();
+    const pdfB64 = arrayBufferToBase64(buf);
+    s1.className = "flow-step ok";
+    s1.textContent = `1/3 — PDF gelezen: ${file.name} (${Math.round(file.size/1024)} KB)`;
+
+    s2 = logStep("2/3 — Factuurdata extraheren via Claude...", "active", "upload-log");
+    const extracted = await extractInvoiceViaWorker(pdfB64);
+    s2.className = "flow-step ok";
+    s2.textContent = `2/3 — Geëxtraheerd: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
+
+    s3 = logStep(`3/3 — Leverancier matchen + factuur aanmaken in Informer...`, "active", "upload-log");
+    let match = await findRelationByName(extracted.supplier_name);
+    let relationSource = "match";
+    if (!match) {
+      const fb = (v, def) => (v && String(v).trim()) ? v : def;
+      const newRelation = {
+        relation_type:"0", company_name: extracted.supplier_name,
+        firstname: extracted.supplier_contact_firstname || "", surname_prefix:"", surname: extracted.supplier_contact_surname || "",
+        street: fb(extracted.supplier_street, "Onbekend"), house_number: fb(extracted.supplier_house_number, "0"), house_number_suffix:"",
+        zip: fb(extracted.supplier_zip, "0000XX"), city: fb(extracted.supplier_city, "Onbekend"), country: fb(extracted.supplier_country, "NL"),
+        phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
+        coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
+      };
+      const created = await informerFetch("POST", "/relation/", newRelation);
+      const newId = created?.relation_id || created?.id || (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) || null;
+      if (!newId) throw new Error("Relation aangemaakt maar geen ID teruggekregen — response: " + JSON.stringify(created).slice(0, 300));
+      match = { id: newId, relation: { name: extracted.supplier_name } };
+      relationSource = "created";
+    }
+    const matchLabel = relationSource === "created" ? "aangemaakt" : "gematched";
+
+    const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
+      description: extracted.number || "Inkoopfactuur",
+      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 0
+    }]).map(ln => ({
+      description: (ln.description || "Regel").slice(0, 200),
+      amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
+      vat_id: 1478835, ledger_id: 15302498, costs_id: 0
+    }));
+    const payload = {
+      relation_id: parseInt(match.id, 10) || match.id,
+      number: extracted.number || `UPLOAD-${Date.now()}`,
+      invoice_date: extracted.invoice_date || new Date().toISOString().slice(0, 10),
+      invoice_expiry_date: extracted.invoice_expiry_date || extracted.invoice_date || new Date().toISOString().slice(0, 10),
+      collect: 0, invoice_total: Number(extracted.invoice_total) || 0, pdf: pdfB64, lines
+    };
+    const path = cfg.createPath || "/invoice/purchase/";
+    const result = await informerFetch("POST", path, payload);
+    s3.className = "flow-step ok";
+    const tail = result?.invoice_url ? ` — ${result.invoice_url}` : "";
+    s3.textContent = `3/3 — Leverancier ${matchLabel} (relation_id ${match.id}) · factuur aangemaakt (id ${result?.invoice_id || "?"})${tail}`;
+
+    if (result?.invoice_url) logStep(`Klaar! Open in Informer: ${result.invoice_url}`, "ok", "upload-log");
+    else logStep("Klaar!", "ok", "upload-log");
+    showToast("PDF verstuurd naar Informer", "ok");
+
+    // Reset het file-veld zodat dezelfde PDF opnieuw kan worden geupload
+    fileInput.value = "";
+    btn.disabled = true;
+  } catch (e) {
+    const failing = s3 || s2 || s1;
+    if (failing) { failing.className = "flow-step err"; failing.textContent = (failing.textContent.split("—")[0]) + "— FOUT: " + e.message; }
+    else logStep("Fout: " + e.message, "err", "upload-log");
+    showToast("Mislukt: " + e.message, "err");
+    btn.disabled = false;
+  } finally {
+    btn.textContent = orig;
   }
 }
 
