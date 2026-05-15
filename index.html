@@ -1628,7 +1628,7 @@ async function sendSelectedToInformer() {
         phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
         coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
       };
-      const created = await informerFetch("POST", "/relation/", newRelation);
+      const created = await createRelationWithRetry(newRelation);
       const newId = created?.relation_id || created?.id || (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) || null;
       if (!newId) throw new Error("Relation aangemaakt maar geen ID teruggekregen — response: " + JSON.stringify(created).slice(0, 300));
       match = { id: newId, relation: { name: extracted.supplier_name } };
@@ -1781,7 +1781,7 @@ async function sendUploadedPdfToInformer() {
         phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
         coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
       };
-      const created = await informerFetch("POST", "/relation/", newRelation);
+      const created = await createRelationWithRetry(newRelation);
       const newId = created?.relation_id || created?.id || (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) || null;
       if (!newId) throw new Error("Relation aangemaakt maar geen ID teruggekregen — response: " + JSON.stringify(created).slice(0, 300));
       match = { id: newId, relation: { name: extracted.supplier_name } };
@@ -2106,6 +2106,68 @@ async function extractSalesInvoiceViaWorker(pdfBase64) {
 
 // Build a relation-create payload from extracted customer fields.
 // Mirrors the purchase-flow shape so Informer accepts it.
+// Informer relation create: sensible placeholders voor velden die
+// "required" zijn maar niet op de factuur staan. Gebruikt door
+// createRelationWithRetry hieronder.
+const RELATION_FIELD_FALLBACKS = {
+  house_number: "1",
+  street: "Onbekend",
+  zip: "0000XX",
+  city: "Onbekend",
+  country: "NL",
+  company_name: "Onbekende relatie",
+  firstname: "Onbekend",
+  surname: "Onbekend",
+  email: "onbekend@example.com",
+  phone_number: "0000000000",
+  relation_type: "0",
+  coc: "",
+  vat: "",
+  iban: "",
+  bic: "",
+  web: "",
+  email_invoice: "",
+  fax_number: "",
+  surname_prefix: "",
+  house_number_suffix: ""
+};
+
+// POST /relation/ met self-healing op "X: this field is required" 422's.
+// Informer onthult missing-required-velden één-per-één; rauwe payload
+// retries vullen ze in totdat hij door is of we 6 rondes verder zijn.
+// Returns dezelfde body als informerFetch.
+async function createRelationWithRetry(payload, onPatched) {
+  let current = { ...payload };
+  for (let attempt = 0; attempt <= 6; attempt++) {
+    try {
+      return await informerFetch("POST", "/relation/", current);
+    } catch (e) {
+      const msg = String(e.message || "");
+      // Patronen die Informer gebruikt voor required-veld errors. Pakt
+      // "house_number: this field is required" + variaties zoals
+      // "X is required" of "Field X required".
+      const m = msg.match(/(\w+):\s*this field is required/i) ||
+                msg.match(/(?:field\s+)?["']?(\w+)["']?\s+is\s+required/i);
+      if (!m) throw e;
+      const field = m[1];
+      const fallback = RELATION_FIELD_FALLBACKS[field];
+      if (fallback === undefined) throw e; // onbekend veld → niet auto-fillen
+      if (current[field] === fallback) throw e; // zelfde val, voorkom loop
+      current[field] = fallback;
+      if (typeof onPatched === "function") onPatched(field, fallback);
+    }
+  }
+  throw new Error("Te veel required-veld retries — handmatig aanmaken.");
+}
+
+// True als Informer's error een "factuurnummer bestaat al" signaal heeft.
+// Geen vaste error-code uit Informer's docs gevonden, dus match op
+// gangbare frase-patronen.
+function isDuplicateInvoiceError(e) {
+  const msg = String(e?.message || "").toLowerCase();
+  return /already exists|duplicate|bestaat al|reeds aanwezig|moet uniek|must be unique|uniqueness/.test(msg);
+}
+
 // Informer wil house_number als puur numeriek, en accepteert "0" niet als
 // geldig huisnummer ("house_number: this field is required" foutmelding).
 // Strippen tot alleen cijfers; fallback "1" als er niets overblijft. Een
@@ -2162,13 +2224,17 @@ async function processSalesPdf(idx) {
     let match = await findRelationByName(extracted.customer_name);
     let relationSource = "match";
     if (!match) {
-      const created = await informerFetch("POST", "/relation/", customerToRelationPayload(extracted));
+      const patches = [];
+      const created = await createRelationWithRetry(
+        customerToRelationPayload(extracted),
+        (field, val) => patches.push(`${field}=${val}`)
+      );
       const newId = created?.relation_id || created?.id ||
                     (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) ||
                     null;
       if (!newId) throw new Error("Klant aangemaakt maar geen ID teruggekregen: " + JSON.stringify(created).slice(0, 300));
       match = { id: newId, relation: { name: extracted.customer_name } };
-      relationSource = "created";
+      relationSource = patches.length > 0 ? `created (auto-fill: ${patches.join(", ")})` : "created";
     }
 
     salesSetState(idx, "creating", `4/4 — Verkoopfactuur aanmaken in Informer (klant ${relationSource === "created" ? "aangemaakt" : "gematched"})...`);
@@ -2230,7 +2296,11 @@ async function processSalesPdf(idx) {
       `Aangemaakt (id ${invId}) — ${extracted.customer_name} · nr ${extracted.number} · €${invoiceTotal.toFixed(2)}`,
       invUrl);
   } catch (e) {
-    salesSetState(idx, "error", e.message || String(e));
+    if (isDuplicateInvoiceError(e)) {
+      salesSetState(idx, "skipped", "Factuurnummer bestaat al in Informer — overgeslagen");
+    } else {
+      salesSetState(idx, "error", e.message || String(e));
+    }
   }
 }
 
