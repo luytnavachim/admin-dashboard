@@ -1100,7 +1100,7 @@ function defaultConfig() {
     administrationId: "",
     listPath: "/invoices/purchase/",
     createPath: "/invoice/purchase/",
-    salesCreatePath: "/invoices/sales",
+    salesCreatePath: "/invoice/sales/",
     // Admin-specifieke IDs voor verkoopfactuur-POST. v2 wil 't
     // rekeningnummer voor ledger (8000-serie), niet de interne API-ID.
     salesLedgerId: "8000",
@@ -1116,9 +1116,13 @@ function loadConfig() {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return defaultConfig();
     const merged = { ...defaultConfig(), ...JSON.parse(raw) };
-    // v2-migratie: legacy waardes uit v1 → v2-equivalenten.
-    if (merged.salesCreatePath === "/invoice/sales/") merged.salesCreatePath = "/invoices/sales";
-    if (merged.salesLedgerId === "15302629") merged.salesLedgerId = "8000"; // v2 wil rekeningnummer i.p.v. interne API-ID
+    // v2-migratie: 15302629 was de interne API-ID die we ooit gekopieerd
+    // hebben uit een sample factuur; v2's POST verwacht 't rekeningnummer
+    // (8000) ipv die interne ID.
+    if (merged.salesLedgerId === "15302629") merged.salesLedgerId = "8000";
+    // De v2 docs noemen /invoices/sales als URL, maar dat is 't list-
+    // endpoint, niet de creator. /invoice/sales/ is de juiste POST-target.
+    if (merged.salesCreatePath === "/invoices/sales") merged.salesCreatePath = "/invoice/sales/";
     return merged;
   } catch (e) { return defaultConfig(); }
 }
@@ -2097,7 +2101,7 @@ async function processSalesPdf(idx) {
       vat_option: cfg.salesVatOption || "excl",
       lines
     };
-    const path = cfg.salesCreatePath || "/invoices/sales";
+    const path = cfg.salesCreatePath || "/invoice/sales/";
     const result = await informerFetch("POST", path, payload);
     // v2 retourneert {id, url, ...}; v1 had {invoice_id, invoice_url}.
     const invId = result?.id || result?.invoice_id || result?.invoice?.id || "?";
