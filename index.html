@@ -2075,7 +2075,9 @@ async function processSalesPdf(idx) {
         description: (ln.description || "Regel").slice(0, 200),
         amount: amt,
         vat_id: SALES_VAT_ID_21,
-        ledger_id: ledgerId
+        ledger_id: ledgerId,
+        costs_id: 0,
+        discount: 0
       };
     });
     const totalExcl = lines.reduce((s, ln) => s + (ln.qty * ln.amount), 0);
