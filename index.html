@@ -2064,11 +2064,9 @@ async function processSalesPdf(idx) {
         qty: 1,
         amount: amt,
         product_id: productId,
-        // v2 wil de vat als nested object, matchend met de GET sales
-        // response shape. We sturen óók 'vat_id' platgeslagen voor
-        // backwards compat met v1 — Informer negeert wat 'ie niet kent.
+        // v2 wil vat als nested object, matchend met de GET sales
+        // response shape.
         vat: { id: SALES_VAT_ID_21 },
-        vat_id: SALES_VAT_ID_21,
         ledger_id: 0,
         costs_id: 0,
         discount: 0
