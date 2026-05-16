@@ -2054,6 +2054,7 @@ async function processSalesPdf(idx) {
     if (_expDate < _invDate) _expDate = _invDate;
     const SALES_VAT_ID_21 = 1478830;
     const productId = Number(cfg.salesProductId) || 0;
+    const ledgerId = Number(cfg.salesLedgerId) || 0;
     const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
       description: extracted.number || "Verkoopfactuur",
       amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 21
@@ -2064,10 +2065,13 @@ async function processSalesPdf(idx) {
         qty: 1,
         amount: amt,
         product_id: productId,
-        // v2 wil vat als nested object, matchend met de GET sales
-        // response shape.
-        vat: { id: SALES_VAT_ID_21 },
-        ledger_id: 0,
+        // v2 vereist platte vat_id (nested vat:{id} geeft "Required field
+        // is missing: vat_id"). Maar (vat_id, ledger_id) moet 'n geldige
+        // combo zijn die v2 herkent — welke pair exact werkt, hangt af
+        // van de admin-config en is alleen via experimenteren te vinden.
+        // Settings → Ledger-ID verkoop = test-knop.
+        vat_id: SALES_VAT_ID_21,
+        ledger_id: ledgerId,
         costs_id: 0,
         discount: 0
       };
