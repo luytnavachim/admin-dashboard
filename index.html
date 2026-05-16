@@ -315,8 +315,8 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
           <input id="cfg-sales-create-path" type="text" value="/invoice/sales/" placeholder="/invoice/sales/">
         </div>
         <div class="field">
-          <label for="cfg-sales-ledger-id">Ledger-ID verkoop (Informer-interne ID, géén 8000-code)</label>
-          <input id="cfg-sales-ledger-id" type="text" placeholder="bv. 15302629">
+          <label for="cfg-sales-ledger-id">Ledger-rekeningnummer verkoop (bv. 8000 voor Omzet hoge BTW)</label>
+          <input id="cfg-sales-ledger-id" type="text" placeholder="8000">
         </div>
         <div class="field">
           <label for="cfg-sales-product-id">Product-ID verkoop (uurloon/standaard service, bv. 960456)</label>
@@ -1100,13 +1100,10 @@ function defaultConfig() {
     administrationId: "",
     listPath: "/invoices/purchase/",
     createPath: "/invoice/purchase/",
-    salesCreatePath: "/invoice/sales/",
-    // Admin-specifieke IDs voor verkoopfactuur-POST. Defaults uit user's
-    // sample sales invoice — Informer maakt deze per administratie aan,
-    // dus voor andere admins moet je ze overschrijven. Belangrijk:
-    // salesLedgerId is de interne Informer-ID (lang nummer), NIET de
-    // grootboek-code (8000-iets) die je in de UI ziet.
-    salesLedgerId: "15302629",
+    salesCreatePath: "/invoices/sales",
+    // Admin-specifieke IDs voor verkoopfactuur-POST. v2 wil 't
+    // rekeningnummer voor ledger (8000-serie), niet de interne API-ID.
+    salesLedgerId: "8000",
     salesProductId: "960456",
     salesTemplateId: "544633",
     salesPaymentConditionId: "704820",
@@ -1118,7 +1115,11 @@ function loadConfig() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return defaultConfig();
-    return { ...defaultConfig(), ...JSON.parse(raw) };
+    const merged = { ...defaultConfig(), ...JSON.parse(raw) };
+    // v2-migratie: legacy waardes uit v1 → v2-equivalenten.
+    if (merged.salesCreatePath === "/invoice/sales/") merged.salesCreatePath = "/invoices/sales";
+    if (merged.salesLedgerId === "15302629") merged.salesLedgerId = "8000"; // v2 wil rekeningnummer i.p.v. interne API-ID
+    return merged;
   } catch (e) { return defaultConfig(); }
 }
 function saveConfig() {
@@ -2053,27 +2054,24 @@ async function processSalesPdf(idx) {
     let _expDate = extracted.invoice_expiry_date || _invDate;
     if (_expDate < _invDate) _expDate = _invDate;
     const SALES_VAT_ID_21 = 1478830;
-    const productId = Number(cfg.salesProductId) || 0;
-    const ledgerId = Number(cfg.salesLedgerId) || 0;
+    const ledgerId = Number(cfg.salesLedgerId) || 8000;
+    // v2 line-shape uit Informer's docs: alleen info, qty, description,
+    // amount, vat_id, ledger_id. Geen product_id/costs_id/discount —
+    // die hadden we erbij gehouden voor v1-compat, maar v2 vereist
+    // alleen deze 6. ledger_id is 't rekeningnummer (8000), niet de
+    // interne API-ID.
     const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
       description: extracted.number || "Verkoopfactuur",
       amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 21
     }]).map(ln => {
       const amt = Number(ln.amount) || 0;
       return {
-        description: (ln.description || "Regel").slice(0, 200),
+        info: false,
         qty: 1,
+        description: (ln.description || "Regel").slice(0, 200),
         amount: amt,
-        product_id: productId,
-        // v2 vereist platte vat_id (nested vat:{id} geeft "Required field
-        // is missing: vat_id"). Maar (vat_id, ledger_id) moet 'n geldige
-        // combo zijn die v2 herkent — welke pair exact werkt, hangt af
-        // van de admin-config en is alleen via experimenteren te vinden.
-        // Settings → Ledger-ID verkoop = test-knop.
         vat_id: SALES_VAT_ID_21,
-        ledger_id: ledgerId,
-        costs_id: 0,
-        discount: 0
+        ledger_id: ledgerId
       };
     });
     const totalExcl = lines.reduce((s, ln) => s + (ln.qty * ln.amount), 0);
