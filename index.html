@@ -319,6 +319,10 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
           <input id="cfg-sales-ledger-id" type="text" placeholder="bv. 15302629">
         </div>
         <div class="field">
+          <label for="cfg-sales-product-id">Product-ID verkoop (uurloon/standaard service, bv. 960456)</label>
+          <input id="cfg-sales-product-id" type="text" placeholder="bv. 960456">
+        </div>
+        <div class="field">
           <label for="cfg-sales-template-id">Template-ID verkoopfactuur</label>
           <input id="cfg-sales-template-id" type="text" placeholder="bv. 544633">
         </div>
@@ -1103,6 +1107,7 @@ function defaultConfig() {
     // salesLedgerId is de interne Informer-ID (lang nummer), NIET de
     // grootboek-code (8000-iets) die je in de UI ziet.
     salesLedgerId: "15302629",
+    salesProductId: "960456",
     salesTemplateId: "544633",
     salesPaymentConditionId: "704820",
     salesCurrencyId: "126106",
@@ -1126,6 +1131,7 @@ function saveConfig() {
     createPath: ($("cfg-create-path").value.trim() || "/invoice/purchase/").replace(/^([^\/])/, "/$1"),
     salesCreatePath: ($("cfg-sales-create-path").value.trim() || "/invoice/sales/").replace(/^([^\/])/, "/$1"),
     salesLedgerId: $("cfg-sales-ledger-id").value.trim(),
+    salesProductId: $("cfg-sales-product-id").value.trim(),
     salesTemplateId: $("cfg-sales-template-id").value.trim(),
     salesPaymentConditionId: $("cfg-sales-payment-condition-id").value.trim(),
     salesCurrencyId: $("cfg-sales-currency-id").value.trim() || "126106",
@@ -1154,6 +1160,7 @@ function applyConfigToForm() {
   $("cfg-create-path").value = cfg.createPath;
   $("cfg-sales-create-path").value = cfg.salesCreatePath || "/invoice/sales/";
   $("cfg-sales-ledger-id").value = cfg.salesLedgerId || "";
+  $("cfg-sales-product-id").value = cfg.salesProductId || "";
   $("cfg-sales-template-id").value = cfg.salesTemplateId || "";
   $("cfg-sales-payment-condition-id").value = cfg.salesPaymentConditionId || "";
   $("cfg-sales-currency-id").value = cfg.salesCurrencyId || "126106";
@@ -2046,6 +2053,7 @@ async function processSalesPdf(idx) {
     let _expDate = extracted.invoice_expiry_date || _invDate;
     if (_expDate < _invDate) _expDate = _invDate;
     const SALES_VAT_ID_21 = 1478830;
+    const productId = Number(cfg.salesProductId) || 0;
     const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
       description: extracted.number || "Verkoopfactuur",
       amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 21
@@ -2055,13 +2063,12 @@ async function processSalesPdf(idx) {
         description: (ln.description || "Regel").slice(0, 200),
         qty: 1,
         amount: amt,
+        // v2 leidt ledger af uit product_id — zonder product weigert 'ie
+        // de combo (vat_id, ledger_id=0) met "not a valid combination".
+        // Met product_id 960456 (jouw uurloon-product) heeft Informer
+        // genoeg context: vat 1478830 + product's eigen ledger.
+        product_id: productId,
         vat_id: SALES_VAT_ID_21,
-        // ledger_id = 0 → Informer kiest de omzet-ledger zelf op basis
-        // van de vat_id (matcht de v2 GET-sales response shape die ook
-        // ledger_id 0 retourneert). Eerder stuurden we expliciet
-        // cfg.salesLedgerId, maar v2 weigert (15302629, 1478830) met
-        // "vat_id and ledger_id are not a valid combination" — ook al
-        // is dat conceptueel de juiste "Omzet hoge BTW"-ledger.
         ledger_id: 0,
         costs_id: 0,
         discount: 0
