@@ -2063,11 +2063,11 @@ async function processSalesPdf(idx) {
         description: (ln.description || "Regel").slice(0, 200),
         qty: 1,
         amount: amt,
-        // v2 leidt ledger af uit product_id — zonder product weigert 'ie
-        // de combo (vat_id, ledger_id=0) met "not a valid combination".
-        // Met product_id 960456 (jouw uurloon-product) heeft Informer
-        // genoeg context: vat 1478830 + product's eigen ledger.
         product_id: productId,
+        // v2 wil de vat als nested object, matchend met de GET sales
+        // response shape. We sturen óók 'vat_id' platgeslagen voor
+        // backwards compat met v1 — Informer negeert wat 'ie niet kent.
+        vat: { id: SALES_VAT_ID_21 },
         vat_id: SALES_VAT_ID_21,
         ledger_id: 0,
         costs_id: 0,
