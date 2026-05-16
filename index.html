@@ -2097,10 +2097,11 @@ async function processSalesPdf(idx) {
       vat_option: cfg.salesVatOption || "excl",
       lines
     };
-    const path = cfg.salesCreatePath || "/invoice/sales/";
+    const path = cfg.salesCreatePath || "/invoices/sales";
     const result = await informerFetch("POST", path, payload);
-    const invId = result?.invoice_id || "?";
-    const invUrl = result?.invoice_url || null;
+    // v2 retourneert {id, url, ...}; v1 had {invoice_id, invoice_url}.
+    const invId = result?.id || result?.invoice_id || result?.invoice?.id || "?";
+    const invUrl = result?.url || result?.invoice_url || result?.invoice?.url || null;
     salesSetState(idx, "ok",
       `Aangemaakt (id ${invId}) — ${extracted.customer_name} · nr ${extracted.number} · €${invoiceTotal.toFixed(2)}`,
       invUrl);
