@@ -341,9 +341,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
             <option value="incl">incl (bedragen inclusief BTW)</option>
           </select>
         </div>
-        <div class="field">
-          <label><input id="cfg-sales-direct-definitive" type="checkbox"> Direct definitief maken (skip concept-stap)</label>
-        </div>
       </div>
       <div class="row-btns">
         <button class="btn primary" onclick="saveConfig()">Opslaan</button>
@@ -1111,8 +1108,7 @@ function defaultConfig() {
     salesTemplateId: "544633",
     salesPaymentConditionId: "704820",
     salesCurrencyId: "126106",
-    salesVatOption: "excl",
-    salesDirectDefinitive: false
+    salesVatOption: "excl"
   };
 }
 function loadConfig() {
@@ -1144,8 +1140,7 @@ function saveConfig() {
     salesTemplateId: $("cfg-sales-template-id").value.trim(),
     salesPaymentConditionId: $("cfg-sales-payment-condition-id").value.trim(),
     salesCurrencyId: $("cfg-sales-currency-id").value.trim() || "126106",
-    salesVatOption: $("cfg-sales-vat-option").value || "excl",
-    salesDirectDefinitive: $("cfg-sales-direct-definitive").checked
+    salesVatOption: $("cfg-sales-vat-option").value || "excl"
   };
   localStorage.setItem(LS_KEY, JSON.stringify(cfg));
   $("cfg-status").textContent = "Opgeslagen.";
@@ -1175,7 +1170,6 @@ function applyConfigToForm() {
   $("cfg-sales-payment-condition-id").value = cfg.salesPaymentConditionId || "";
   $("cfg-sales-currency-id").value = cfg.salesCurrencyId || "126106";
   $("cfg-sales-vat-option").value = cfg.salesVatOption || "excl";
-  $("cfg-sales-direct-definitive").checked = Boolean(cfg.salesDirectDefinitive);
   refreshSalesConfigWarn();
 }
 
@@ -2109,12 +2103,6 @@ async function processSalesPdf(idx) {
       vat_option: cfg.salesVatOption || "excl",
       lines
     };
-    // Concept-toggle: zonder dit veld maakt Informer 'm als concept aan
-    // (concept:1 in GET-response). Met concept:0 wordt 'ie direct
-    // definitief — handig voor bulk-migraties zodra de extractie
-    // betrouwbaar is, want Informer heeft geen UI-bulkactie voor 't
-    // promoten van concepten.
-    if (cfg.salesDirectDefinitive) payload.concept = 0;
     const path = cfg.salesCreatePath || "/invoice/sales/";
     const result = await informerFetch("POST", path, payload);
     // v2 retourneert {id, url, ...}; v1 had {invoice_id, invoice_url}.
