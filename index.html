@@ -315,8 +315,8 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
           <input id="cfg-sales-create-path" type="text" value="/invoice/sales/" placeholder="/invoice/sales/">
         </div>
         <div class="field">
-          <label for="cfg-sales-ledger-id">Ledger-rekeningnummer verkoop (bv. 8000 voor Omzet hoge BTW)</label>
-          <input id="cfg-sales-ledger-id" type="text" placeholder="8000">
+          <label for="cfg-sales-ledger-id">Ledger interne API-ID verkoop (zie /invoices/sales/options voor geldige IDs, bv. 15302629 = Omzet hoge BTW)</label>
+          <input id="cfg-sales-ledger-id" type="text" placeholder="15302629">
         </div>
         <div class="field">
           <label for="cfg-sales-product-id">Product-ID verkoop (uurloon/standaard service, bv. 960456)</label>
@@ -1103,7 +1103,7 @@ function defaultConfig() {
     salesCreatePath: "/invoice/sales/",
     // Admin-specifieke IDs voor verkoopfactuur-POST. v2 wil 't
     // rekeningnummer voor ledger (8000-serie), niet de interne API-ID.
-    salesLedgerId: "8000",
+    salesLedgerId: "15302629",
     salesProductId: "960456",
     salesTemplateId: "544633",
     salesPaymentConditionId: "704820",
@@ -1116,12 +1116,12 @@ function loadConfig() {
     const raw = localStorage.getItem(LS_KEY);
     if (!raw) return defaultConfig();
     const merged = { ...defaultConfig(), ...JSON.parse(raw) };
-    // v2-migratie: 15302629 was de interne API-ID die we ooit gekopieerd
-    // hebben uit een sample factuur; v2's POST verwacht 't rekeningnummer
-    // (8000) ipv die interne ID.
-    if (merged.salesLedgerId === "15302629") merged.salesLedgerId = "8000";
-    // De v2 docs noemen /invoices/sales als URL, maar dat is 't list-
-    // endpoint, niet de creator. /invoice/sales/ is de juiste POST-target.
+    // v2-migratie: heen-en-weer geprobeerd, /invoices/sales/options is
+    // de waarheid: ledger_id moet de interne API-ID zijn (15302629 voor
+    // Omzet hoge BTW), niet de rekeningnummer (8000). Een eerdere
+    // tussenfase migreerde naar "8000" — die rollen we terug.
+    if (merged.salesLedgerId === "8000") merged.salesLedgerId = "15302629";
+    // /invoices/sales is 't list-endpoint; /invoice/sales/ is de creator.
     if (merged.salesCreatePath === "/invoices/sales") merged.salesCreatePath = "/invoice/sales/";
     return merged;
   } catch (e) { return defaultConfig(); }
@@ -2058,7 +2058,7 @@ async function processSalesPdf(idx) {
     let _expDate = extracted.invoice_expiry_date || _invDate;
     if (_expDate < _invDate) _expDate = _invDate;
     const SALES_VAT_ID_21 = 1478830;
-    const ledgerId = Number(cfg.salesLedgerId) || 8000;
+    const ledgerId = Number(cfg.salesLedgerId) || 15302629;
     // v2 line-shape uit Informer's docs: alleen info, qty, description,
     // amount, vat_id, ledger_id. Geen product_id/costs_id/discount —
     // die hadden we erbij gehouden voor v1-compat, maar v2 vereist
