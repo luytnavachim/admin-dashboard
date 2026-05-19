@@ -146,9 +146,100 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
 details summary { cursor: pointer; color: var(--muted); font-size: 12px; user-select: none; }
 details[open] summary { margin-bottom: 8px; }
 h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: white; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+/* ---- Dev console ---- */
+#dev-console {
+  position: fixed;
+  right: 16px;
+  top: 80px;
+  bottom: 16px;
+  width: 320px;
+  background: #0d1117;
+  color: #c9d1d9;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  font-family: "SF Mono", "Menlo", "Consolas", monospace;
+  font-size: 11.5px;
+  display: none;
+  flex-direction: column;
+  z-index: 50;
+  box-shadow: 0 4px 14px rgba(0,0,0,0.18);
+}
+#dev-console.show { display: flex; }
+#dev-console .dc-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 6px 10px;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  border-radius: 8px 8px 0 0;
+  font-size: 11px;
+  color: #8b949e;
+}
+#dev-console .dc-head .dc-title { display: flex; align-items: center; gap: 6px; }
+#dev-console .dc-head .dc-title::before {
+  content: ""; width: 8px; height: 8px; border-radius: 50%; background: #3fb950;
+}
+#dev-console .dc-actions { display: flex; gap: 6px; }
+#dev-console .dc-actions button {
+  background: transparent; border: 1px solid #30363d; color: #8b949e;
+  font: inherit; font-size: 10px; padding: 1px 6px; border-radius: 4px;
+  cursor: pointer;
+}
+#dev-console .dc-actions button:hover { color: #c9d1d9; border-color: #58a6ff; }
+#dev-console .dc-body {
+  flex: 1; overflow-y: auto; padding: 8px 10px;
+  line-height: 1.5;
+  scrollbar-width: thin;
+  scrollbar-color: #30363d transparent;
+}
+#dev-console .dc-body::-webkit-scrollbar { width: 6px; }
+#dev-console .dc-body::-webkit-scrollbar-thumb { background: #30363d; border-radius: 3px; }
+#dev-console .dc-line { white-space: pre-wrap; word-break: break-word; }
+#dev-console .dc-ts { color: #6e7681; margin-right: 6px; }
+#dev-console .dc-line.dc-info .dc-msg { color: #79c0ff; }
+#dev-console .dc-line.dc-ok .dc-msg   { color: #3fb950; }
+#dev-console .dc-line.dc-err .dc-msg  { color: #f85149; }
+#dev-console .dc-line.dc-warn .dc-msg { color: #d29922; }
+#dev-console .dc-line.dc-dim .dc-msg  { color: #6e7681; }
+#dev-console .dc-line .dc-arrow { color: #6e7681; margin-right: 4px; }
+#dev-console .dc-cursor {
+  display: inline-block; width: 7px; height: 13px;
+  background: #c9d1d9; vertical-align: -2px; margin-left: 2px;
+  animation: dc-blink 1s steps(2, start) infinite;
+}
+@keyframes dc-blink { 50% { opacity: 0; } }
+#dev-console-toggle {
+  position: fixed; right: 16px; top: 14px;
+  background: #0d1117; color: #c9d1d9;
+  border: 1px solid #30363d; border-radius: 6px;
+  font-family: "SF Mono", "Menlo", monospace; font-size: 11px;
+  padding: 4px 10px; cursor: pointer; z-index: 51;
+  display: none;
+}
+#dev-console-toggle.show { display: inline-block; }
+#dev-console-toggle::before { content: "›_ "; color: #3fb950; }
+@media (max-width: 1340px) {
+  #dev-console { width: 280px; }
+}
+@media (max-width: 1100px) {
+  #dev-console.show { display: none; }
+  #dev-console.show.force { display: flex; right: 12px; left: 12px; width: auto; top: 60px; bottom: 60px; }
+}
 </style>
 </head>
 <body>
+<button id="dev-console-toggle" onclick="toggleDevConsole()" title="Toggle dev console">console</button>
+<div id="dev-console" aria-live="polite">
+  <div class="dc-head">
+    <div class="dc-title">admin-dashboard ~ activity</div>
+    <div class="dc-actions">
+      <button onclick="clearDevConsole()" title="Wis log">clear</button>
+      <button onclick="toggleDevConsole()" title="Verberg">×</button>
+    </div>
+  </div>
+  <div class="dc-body" id="dev-console-body">
+    <div class="dc-line dc-dim"><span class="dc-arrow">›</span><span class="dc-msg">ready<span class="dc-cursor"></span></span></div>
+  </div>
+</div>
 <div id="config-error" style="display:none">
   <h1>Administratie</h1>
   <div class="config-warning">
@@ -456,6 +547,65 @@ function showError(msg) {
   $("alert-area").appendChild(el);
 }
 
+// ---- Dev console ----
+const DEV_LOG_MAX = 200;
+function devLog(text, kind) {
+  const body = $("dev-console-body");
+  if (!body) return;
+  // Verwijder cursor van vorige laatste regel
+  const oldCursor = body.querySelector(".dc-cursor");
+  if (oldCursor) oldCursor.remove();
+  const now = new Date();
+  const ts = String(now.getHours()).padStart(2, "0") + ":" +
+             String(now.getMinutes()).padStart(2, "0") + ":" +
+             String(now.getSeconds()).padStart(2, "0");
+  const line = document.createElement("div");
+  line.className = "dc-line dc-" + (kind || "info");
+  line.innerHTML = `<span class="dc-ts">${ts}</span><span class="dc-arrow">›</span><span class="dc-msg"></span>`;
+  line.querySelector(".dc-msg").textContent = text;
+  // Cursor aan einde van laatste regel
+  const cursor = document.createElement("span");
+  cursor.className = "dc-cursor";
+  line.querySelector(".dc-msg").appendChild(cursor);
+  body.appendChild(line);
+  // Cap
+  while (body.children.length > DEV_LOG_MAX) body.removeChild(body.firstChild);
+  body.scrollTop = body.scrollHeight;
+}
+function clearDevConsole() {
+  const body = $("dev-console-body");
+  if (body) body.innerHTML = '<div class="dc-line dc-dim"><span class="dc-arrow">›</span><span class="dc-msg">cleared<span class="dc-cursor"></span></span></div>';
+}
+function toggleDevConsole() {
+  const el = $("dev-console");
+  if (!el) return;
+  const visible = el.classList.toggle("show");
+  localStorage.setItem("dev_console_visible", visible ? "1" : "0");
+  // Toggle-knop teken bijwerken
+  const btn = $("dev-console-toggle");
+  if (btn) btn.textContent = visible ? "hide console" : "console";
+}
+function showDevConsoleIfEnabled() {
+  // Default: aan bij overzicht-tab
+  const wantVisible = localStorage.getItem("dev_console_visible") !== "0";
+  const el = $("dev-console");
+  const btn = $("dev-console-toggle");
+  if (!el || !btn) return;
+  el.classList.toggle("show", wantVisible);
+  btn.classList.add("show");
+  btn.textContent = wantVisible ? "hide console" : "console";
+}
+function hideDevConsole() {
+  const el = $("dev-console");
+  const btn = $("dev-console-toggle");
+  if (el) el.classList.remove("show");
+  if (btn) btn.classList.remove("show");
+}
+function shortenPath(p) {
+  // Geef alleen het laatste deel van een Graph-pad weer
+  return (p || "").replace("https://graph.microsoft.com/v1.0", "").replace(/\$select=[^&]+&?/g, "").replace(/\?$/, "").slice(0, 80);
+}
+
 // ============================================================
 //  AUTH
 // ============================================================
@@ -514,6 +664,8 @@ async function getToken() {
 async function graph(method, path, body, retries) {
   const token = await getToken();
   const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + path;
+  const t0 = performance.now();
+  devLog(`graph ${method} ${shortenPath(path)}`, "dim");
   const opts = {
     method,
     headers: {
@@ -524,6 +676,7 @@ async function graph(method, path, body, retries) {
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
   const res = await fetch(url, opts);
+  const ms = Math.round(performance.now() - t0);
   if (!res.ok) {
     const errText = await res.text();
     let err;
@@ -534,11 +687,14 @@ async function graph(method, path, body, retries) {
     if (isThrottle && left > 0) {
       const retryAfterHeader = res.headers.get("Retry-After");
       const waitMs = retryAfterHeader ? parseInt(retryAfterHeader, 10) * 1000 : (1500 * (4 - left));
+      devLog(`  throttled · retry in ${waitMs}ms`, "warn");
       await new Promise(r => setTimeout(r, waitMs));
       return graph(method, path, body, left - 1);
     }
+    devLog(`  ✗ ${res.status} ${ms}ms · ${msg.slice(0, 80)}`, "err");
     throw new Error(msg);
   }
+  devLog(`  ✓ ${res.status} ${ms}ms`, "ok");
   if (res.status === 204) return null;
   return await res.json();
 }
@@ -943,6 +1099,7 @@ async function markProcessed(btn, id, mboxEmail, senderAddr) {
   const row = btn.closest('.row');
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = 'Verplaatsen…';
+  devLog(`verwerk: ${(senderAddr || '?').split('@')[0]} → ${mbox.label}/${PROCESSED_FOLDER_NAME}`, "info");
   try {
     const parentId = await findFolderId(mbox, PROCESSED_FOLDER_NAME);
     if (!parentId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" kon niet gemaakt worden in ${mbox.email}.`);
@@ -963,6 +1120,7 @@ async function markHandled(btn, id, mboxEmail) {
   const row = btn.closest('.row');
   const orig = btn.textContent;
   btn.disabled = true; btn.textContent = 'Markeren…';
+  devLog(`klaar: mail in ${mbox.label} als gelezen markeren`, "info");
   try {
     await markRead(mbox, id);
     showToast(`Gemarkeerd (${mbox.label})`, 'ok');
@@ -977,6 +1135,7 @@ async function markHandled(btn, id, mboxEmail) {
 //  MAIN LOAD
 // ============================================================
 async function loadAll() {
+  devLog(`loadAll: ${MAILBOXES.length} mailboxen ophalen`, "info");
   $("today-line").textContent = new Date().toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
   $("alert-area").innerHTML = `
     <div class="help">
@@ -1072,6 +1231,8 @@ function showApp() {
   $("user-label").textContent = (account && (account.username || account.name)) || "";
   applyConfigToForm();
   resetCreateBody();
+  showDevConsoleIfEnabled();
+  devLog(`signed in as ${(account && account.username) || '?'}`, "ok");
   loadAll();
 }
 
@@ -1082,6 +1243,9 @@ let facturenLoaded = false;
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
+  // Dev console alleen op Overzicht zichtbaar
+  if (name === "overzicht") showDevConsoleIfEnabled();
+  else hideDevConsole();
   // Lazy-load invoice emails on first activation of the facturen tab
   if (name === "facturen" && !facturenLoaded && account) {
     facturenLoaded = true;
@@ -1262,13 +1426,18 @@ async function informerFetch(method, path, body) {
 
   const debugReq = { method, url, headers: { ...headers, Authorization: headers.Authorization ? "<redacted>" : undefined }, body: body ? (typeof body === "string" ? body.slice(0, 500) : body) : undefined };
   if ($("debug-log")) $("debug-log").textContent = JSON.stringify({ request: debugReq, response: "(in flight...)" }, null, 2);
+  const _t0 = performance.now();
+  devLog(`informer ${method} ${path}`, "dim");
   let res;
   try {
     res = await fetch(url, opts);
   } catch (netErr) {
+    devLog(`  ✗ network · ${netErr.message.slice(0, 60)}`, "err");
     if ($("debug-log")) $("debug-log").textContent = JSON.stringify({ request: debugReq, network_error: netErr.message }, null, 2);
     throw netErr;
   }
+  const _ms = Math.round(performance.now() - _t0);
+  devLog(`  ${res.ok ? "✓" : "✗"} ${res.status} ${_ms}ms`, res.ok ? "ok" : "err");
   const text = await res.text();
   let json = null;
   try { json = JSON.parse(text); }
@@ -1700,6 +1869,7 @@ async function sendRowToInformer(btn, id, mboxEmail) {
   const origBtnText = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Bezig…";
+  devLog(`informer-flow: "${(email.subject || '').slice(0, 40)}" (${email._mailbox.label})`, "info");
 
   // Maak tijdelijke DOM-elementen aan voor wat sendSelectedToInformer nodig heeft
   let tempFlowLog = null, tempSendBtn = null;
