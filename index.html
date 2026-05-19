@@ -758,12 +758,16 @@ function renderInvoices(emails) {
       </div>
       <div class="actions">
         <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Open</a>
+        ${e.hasAttachments ? `<button class="btn" data-action="informer" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" title="Stuur PDF + data direct naar Informer">→ Informer</button>` : ''}
         <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" data-sender="${escapeHtml(senderEmail(e))}">Verwerkt ✓</button>
       </div>
     </div>`;
   }).join("");
   list.querySelectorAll('[data-action="processed"]').forEach(btn => {
     btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id, btn.dataset.mbox, btn.dataset.sender));
+  });
+  list.querySelectorAll('[data-action="informer"]').forEach(btn => {
+    btn.addEventListener('click', () => sendRowToInformer(btn, btn.dataset.id, btn.dataset.mbox));
   });
 }
 function renderReply(emails) {
@@ -830,6 +834,9 @@ function renderOpenInvoices(invoices, relationNames) {
     const subjectBlock = link
       ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="subject-link">${subjectHtml}</a>`
       : subjectHtml;
+    const actions = link
+      ? `<div class="actions"><a class="btn primary" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Open in Informer om te koppelen aan een banktransactie">→ Informer</a></div>`
+      : '';
     return `<div class="row">
       <div class="info">
         <div class="top">
@@ -839,6 +846,7 @@ function renderOpenInvoices(invoices, relationNames) {
         ${subjectBlock}
         <div class="meta">${escapeHtml(datePretty)} · € ${outstanding.toFixed(2)}${paid > 0 ? ` open van € ${total.toFixed(2)}` : ''}</div>
       </div>
+      ${actions}
     </div>`;
   }).join("");
 }
@@ -1038,6 +1046,7 @@ const allInvoiceCandidates = perMbox.flatMap(x => x.invoices);
         return !isNaN(t) && t >= sixtyDaysAgo;
       })
       .sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+    window.lastInvoices = invoices;
     renderInvoices(invoices);
 
     const repliesNeeded = allInbox.filter(needsReply).sort((a,b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime)).slice(0, 12);
@@ -1675,6 +1684,65 @@ async function sendSelectedToInformer() {
   } finally {
     btn.disabled = false;
     btn.textContent = origText;
+  }
+}
+
+// Adapter: triggert de Informer-flow vanuit een Overzicht-rij door
+// kort de globale state na te bootsen die sendSelectedToInformer verwacht.
+// Voordeel: één gedeelde flow, geen code-duplicatie.
+async function sendRowToInformer(btn, id, mboxEmail) {
+  const email = (window.lastInvoices || []).find(e =>
+    e.id === id && e._mailbox && e._mailbox.email === mboxEmail
+  );
+  if (!email) { showToast("Mail niet in cache — ververs de pagina", "err"); return; }
+
+  const row = btn.closest('.row');
+  const origBtnText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Bezig…";
+
+  // Maak tijdelijke DOM-elementen aan voor wat sendSelectedToInformer nodig heeft
+  let tempFlowLog = null, tempSendBtn = null;
+  if (!$("flow-log")) {
+    tempFlowLog = document.createElement("div");
+    tempFlowLog.id = "flow-log";
+    tempFlowLog.style.display = "none";
+    document.body.appendChild(tempFlowLog);
+  }
+  if (!$("send-btn")) {
+    tempSendBtn = document.createElement("button");
+    tempSendBtn.id = "send-btn";
+    tempSendBtn.style.display = "none";
+    document.body.appendChild(tempSendBtn);
+  }
+
+  // Stash en wissel global state
+  const prevSel = selectedEmailId;
+  const wasInList = !!invoiceEmails.find(e => e.id === email.id);
+  if (!wasInList) invoiceEmails.push(email);
+  selectedEmailId = email.id;
+
+  try {
+    await sendSelectedToInformer();
+    // sendSelectedToInformer haalt de mail uit invoiceEmails op succes
+    const succeeded = !invoiceEmails.find(e => e.id === email.id);
+    if (succeeded) {
+      showToast(`Verstuurd naar Informer (${email._mailbox.label || email._mailbox.email})`, "ok");
+      fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
+    } else {
+      btn.disabled = false;
+      btn.textContent = origBtnText;
+      if (!wasInList) invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
+    }
+  } catch (e) {
+    btn.disabled = false;
+    btn.textContent = origBtnText;
+    showToast("Naar Informer mislukt: " + e.message, "err");
+    if (!wasInList) invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
+  } finally {
+    selectedEmailId = prevSel;
+    if (tempFlowLog) tempFlowLog.remove();
+    if (tempSendBtn) tempSendBtn.remove();
   }
 }
 
