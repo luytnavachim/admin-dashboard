@@ -115,7 +115,11 @@ export default {
 };
 
 // ---------------------------------------------------------------------------
-// /extract — PDF invoice extraction via Claude API (claude-opus-4-7).
+// /extract — PDF invoice extraction via Claude API (claude-haiku-4-5).
+// Haiku is ~15x goedkoper dan Opus en levert voor gestructureerde
+// tool_choice-extractie van facturen identieke resultaten. Switch terug
+// naar claude-sonnet-4-6 of claude-opus-4-7 alleen als Haiku op specifieke
+// PDF's faalt (zeldzaam).
 //
 // Input:  POST { pdf_base64: "..." }
 // Output: { extracted: { supplier_name, number, ... }, usage: {...} }
@@ -240,7 +244,7 @@ async function handleExtract(request, env, cors, kind) {
     : "Dit is een inkoopfactuur. Roep de report_purchase_invoice tool aan met de geëxtraheerde velden. Belangrijke regels: (1) supplier_name = de partij die de factuur stuurt (bedrijfsnaam, geen e-mail/persoonsnaam). (2) Datums in YYYY-MM-DD. (3) Bedragen als getal (geen valuta-symbool). (4) Als de PDF geen regel-specificatie geeft, één samenvattende lijn met de totalen.";
 
   const anthropicReq = {
-    model: "claude-opus-4-7",
+    model: "claude-haiku-4-5",
     max_tokens: 4096,
     // Thinking deliberately omitted: Anthropic rejects thinking when
     // tool_choice forces a specific tool. Extraction here is pattern
