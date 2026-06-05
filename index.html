@@ -397,6 +397,13 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       </div>
     </div>
 
+    <div class="warn-box" style="display:flex;align-items:flex-start;gap:10px;">
+      <input type="checkbox" id="proj-concept-mode" onchange="saveConceptMode()" checked style="margin-top:2px;">
+      <label for="proj-concept-mode" style="cursor:pointer;">
+        <strong>Testmodus</strong> — factuur wordt alleen als <em>concept</em> in Informer aangemaakt en <strong>niet verstuurd</strong>; je uren blijven open. Controleer het concept in Informer en verwijder het daar. Vink dit uit als je echt wilt factureren én versturen.
+      </label>
+    </div>
+
     <div class="section">
       <h2>Nieuw project</h2>
       <p class="muted">Neem een project uit Informer over (projectnummer, naam, relatie, uurtarief). Daarna boek je uren en factureer je met één klik: er wordt een verkoopfactuur in Informer aangemaakt én verstuurd.</p>
@@ -1327,6 +1334,7 @@ function switchTab(name) {
   if (name === "projecten") {
     const keyInput = $("proj-sync-key");
     if (keyInput && !keyInput.value) keyInput.value = projSyncKey();
+    if ($("proj-concept-mode")) $("proj-concept-mode").checked = projConceptMode();
     renderProjects();
     if (projSyncKey() && projWorkerBase()) {
       setProjSyncStatus("synchroniseren…");
@@ -2727,6 +2735,15 @@ function renderProjects() {
   }).join("");
 }
 
+// Testmodus: factuur alleen als concept aanmaken, niet versturen, uren blijven open.
+// Default AAN (veilig) — staat pas uit als je 'm bewust uitvinkt.
+function projConceptMode() { return localStorage.getItem("proj-concept-mode") !== "0"; }
+function saveConceptMode() {
+  const on = !!($("proj-concept-mode") && $("proj-concept-mode").checked);
+  localStorage.setItem("proj-concept-mode", on ? "1" : "0");
+  showToast(on ? "Testmodus aan — facturen worden alleen als concept aangemaakt" : "Live: facturen worden aangemaakt én verstuurd", on ? "ok" : "err");
+}
+
 async function invoiceProject(id) {
   const p = projFindById(id);
   if (!p) return;
@@ -2736,14 +2753,19 @@ async function invoiceProject(id) {
   const open = projOpenEntries(p);
   if (!open.length) { showToast("Geen open uren om te factureren", "err"); return; }
 
+  const conceptOnly = projConceptMode();
   const inv = computeProjectInvoice(p, open, cfg);
   const sendTo = p.relationEmail || "";
-  const confirmMsg =
-    `Factuur aanmaken én definitief versturen in Informer?\n\n` +
-    `Project: ${p.name}\nKlant: ${p.relationName}\n` +
+  const bedrag =
     `Uren: ${fmtHrs(inv.totalHours)} × ${fmtEur(inv.rate)} = ${fmtEur(inv.amountExcl)} excl. btw (${fmtEur(inv.totalIncl)} incl.)\n` +
-    `Periode: ${inv.periodFrom} t/m ${inv.periodTo}\n` +
-    (sendTo ? `Versturen naar: ${sendTo}` : `Geen e-mail bekend — wordt alleen definitief gemaakt (niet gemaild).`);
+    `Periode: ${inv.periodFrom} t/m ${inv.periodTo}`;
+  const confirmMsg = conceptOnly
+    ? `TESTMODUS — alleen CONCEPT aanmaken in Informer (niet versturen).\n\n` +
+      `Project: ${p.name}\nKlant: ${p.relationName}\n${bedrag}\n\n` +
+      `Je uren blijven open. Controleer het concept in Informer en verwijder het daar als het klopt.`
+    : `LIVE — factuur aanmaken ÉN definitief versturen in Informer.\n\n` +
+      `Project: ${p.name}\nKlant: ${p.relationName}\n${bedrag}\n` +
+      (sendTo ? `Versturen naar: ${sendTo}` : `Geen e-mail bekend — wordt alleen definitief gemaakt (niet gemaild).`);
   if (!confirm(confirmMsg)) return;
 
   setS("Bezig — klant opzoeken…");
@@ -2758,13 +2780,22 @@ async function invoiceProject(id) {
     }
     inv.payload.relation_id = parseInt(relationId, 10) || relationId;
 
-    setS("Bezig — factuur aanmaken…");
+    setS(conceptOnly ? "Bezig — concept aanmaken…" : "Bezig — factuur aanmaken…");
     const result = await informerFetch("POST", cfg.salesCreatePath || "/invoice/sales/", inv.payload);
     const invId = result?.id || result?.invoice_id || result?.invoice?.id || null;
     const invUrl = result?.url || result?.invoice_url || result?.invoice?.url || null;
     if (!invId) throw new Error("Factuur aangemaakt maar geen ID teruggekregen: " + JSON.stringify(result).slice(0, 200));
 
-    // definitief maken / versturen
+    if (conceptOnly) {
+      // Niet versturen, uren NIET markeren — blijven open voor de echte factuur.
+      renderProjects();
+      showToast(`Concept aangemaakt (id ${invId}) — niet verstuurd`, "ok");
+      const afterC = $("proj-status-" + id);
+      if (afterC) afterC.innerHTML = `🧪 Concept id ${escapeHtml(String(invId))}${invUrl ? ` — <a href="${escapeHtml(invUrl)}" target="_blank" rel="noopener">openen in Informer</a>` : ""} · niet verstuurd · uren blijven open`;
+      return;
+    }
+
+    // LIVE: definitief maken / versturen
     let sendNote = "";
     try {
       setS("Bezig — versturen…");
