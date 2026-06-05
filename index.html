@@ -426,15 +426,14 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         <datalist id="proj-klant-list"></datalist>
         <span class="muted" id="proj-klant-hint" style="font-size:11px;">Relaties laden…</span>
       </div>
-      <div class="grid-2">
-        <div class="field">
-          <label for="proj-tarief">Uurtarief (€ excl. btw)</label>
-          <input id="proj-tarief" type="number" min="0" step="0.01" placeholder="bv. 117">
-        </div>
-        <div class="field">
-          <label for="proj-template">Factuur-template</label>
-          <select id="proj-template"><option value="">(standaard uit Instellingen)</option></select>
-        </div>
+      <div class="field">
+        <label>Tarieven (€ excl. btw) — voeg er meerdere toe om per urenboeking te kiezen</label>
+        <div id="proj-rates"></div>
+        <button class="btn" type="button" onclick="addRateRow()" style="margin-top:6px;">+ tarief</button>
+      </div>
+      <div class="field">
+        <label for="proj-template">Factuur-template</label>
+        <select id="proj-template"><option value="">(standaard uit Instellingen)</option></select>
       </div>
       <div class="row-btns">
         <button class="btn primary" onclick="addProject()">Project toevoegen</button>
@@ -1341,6 +1340,7 @@ function switchTab(name) {
     const keyInput = $("proj-sync-key");
     if (keyInput && !keyInput.value) keyInput.value = projSyncKey();
     if ($("proj-concept-mode")) $("proj-concept-mode").checked = projConceptMode();
+    ensureRateRows();
     renderProjects();
     if (projSyncKey() && projWorkerBase()) {
       setProjSyncStatus("synchroniseren…");
@@ -2568,6 +2568,22 @@ function projGenId(prefix) { return prefix + "_" + Date.now().toString(36) + Mat
 function projFindById(id) { return projectsData.projects.find(p => p.id === id) || null; }
 function projOpenEntries(p) { return (p.entries || []).filter(e => !e.invoiced); }
 function projOpenHours(p) { return projOpenEntries(p).reduce((s, e) => s + (Number(e.hours) || 0), 0); }
+// Tarieven: project kan meerdere rates[] hebben ({label, amount}); oudere
+// projecten hebben alleen hourlyRate → normaliseren naar één tarief.
+function projRatesOf(p) {
+  if (Array.isArray(p.rates) && p.rates.length) return p.rates;
+  return [{ id: "base", label: "", amount: Number(p.hourlyRate) || 0 }];
+}
+function entryRateAmount(p, e) {
+  if (e.rateAmount != null && e.rateAmount !== "") return Number(e.rateAmount) || 0;
+  return Number(projRatesOf(p)[0].amount) || 0;
+}
+function projOpenAmount(p) {
+  return projOpenEntries(p).reduce((s, e) => s + (Number(e.hours) || 0) * entryRateAmount(p, e), 0);
+}
+function projRatesLabel(p) {
+  return projRatesOf(p).map(r => (r.label ? r.label + " " : "") + fmtEur(r.amount)).join(" · ");
+}
 function fmtEur(n) { return "€" + (Number(n) || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
 function fmtHrs(n) {
   const v = Number(n) || 0;
@@ -2575,22 +2591,43 @@ function fmtHrs(n) {
 }
 
 // Pure rekenkern (apart zodat 'm te unit-testen is): bouwt de factuur-payload.
+// Groepeert de open uren per tarief (label+bedrag) → één factuurregel per tarief.
 function computeProjectInvoice(p, openEntries, cfg) {
-  const totalHours = openEntries.reduce((s, e) => s + (Number(e.hours) || 0), 0);
-  const rate = Number(p.hourlyRate) || 0;
-  const amountExcl = Math.round(totalHours * rate * 100) / 100;
-  const totalIncl = Math.round(amountExcl * 1.21 * 100) / 100;
-  const dates = openEntries.map(e => e.date).filter(Boolean).sort();
-  const periodFrom = dates[0] || "";
-  const periodTo = dates[dates.length - 1] || "";
-  const hrsLabel = (Number.isInteger(totalHours) ? totalHours.toString() : totalHours.toFixed(2).replace(/\.?0+$/, "")) + " u";
+  const ratesList = (Array.isArray(p.rates) && p.rates.length)
+    ? p.rates : [{ label: "", amount: Number(p.hourlyRate) || 0 }];
+  const defAmt = Number(ratesList[0].amount) || 0;
+  const defLabel = ratesList[0].label || "";
   const projLabel = p.projectNumber ? `${p.name} (${p.projectNumber})` : p.name;
-  const description = `Werkzaamheden ${projLabel} (${periodFrom} t/m ${periodTo}) — ${hrsLabel}`.slice(0, 200);
   const ledgerId = Number(cfg.salesLedgerId) || 15302629;
-  const lines = [{
-    info: false, qty: totalHours, description,
-    amount: rate, vat_id: p.vatId || PROJ_SALES_VAT_ID_21, ledger_id: ledgerId, costs_id: 0, discount: 0
-  }];
+  const vatId = p.vatId || PROJ_SALES_VAT_ID_21;
+
+  // groepeer per (label|bedrag)
+  const groups = [];
+  const byKey = {};
+  for (const e of openEntries) {
+    const amt = (e.rateAmount != null && e.rateAmount !== "") ? Number(e.rateAmount) || 0 : defAmt;
+    const label = e.rateLabel || defLabel;
+    const key = label + "|" + amt;
+    if (!byKey[key]) { byKey[key] = { label, amount: amt, hours: 0, dates: [] }; groups.push(byKey[key]); }
+    byKey[key].hours += Number(e.hours) || 0;
+    if (e.date) byKey[key].dates.push(e.date);
+  }
+
+  const lines = groups.map(g => {
+    const ds = g.dates.slice().sort();
+    const from = ds[0] || "", to = ds[ds.length - 1] || "";
+    const hrsLabel = (Number.isInteger(g.hours) ? g.hours.toString() : g.hours.toFixed(2).replace(/\.?0+$/, "")) + " u";
+    const lbl = g.label ? ` — ${g.label}` : "";
+    const description = `Werkzaamheden ${projLabel}${lbl} (${from} t/m ${to}) — ${hrsLabel}`.slice(0, 200);
+    return { info: false, qty: g.hours, description, amount: g.amount, vat_id: vatId, ledger_id: ledgerId, costs_id: 0, discount: 0 };
+  });
+
+  const totalHours = lines.reduce((s, l) => s + l.qty, 0);
+  const amountExcl = Math.round(lines.reduce((s, l) => s + l.qty * l.amount, 0) * 100) / 100;
+  const totalIncl = Math.round(amountExcl * 1.21 * 100) / 100;
+  const allDates = openEntries.map(e => e.date).filter(Boolean).sort();
+  const periodFrom = allDates[0] || "", periodTo = allDates[allDates.length - 1] || "";
+  const breakdown = groups.map(g => ({ label: g.label, hours: g.hours, amount: g.amount, lineTotal: Math.round(g.hours * g.amount * 100) / 100 }));
   const invDate = new Date().toISOString().slice(0, 10);
   const payload = {
     relation_id: p.relationId != null ? (parseInt(p.relationId, 10) || p.relationId) : null,
@@ -2602,7 +2639,7 @@ function computeProjectInvoice(p, openEntries, cfg) {
     vat_option: cfg.salesVatOption || "excl",
     lines
   };
-  return { totalHours, rate, amountExcl, totalIncl, periodFrom, periodTo, description, lines, payload, invDate };
+  return { totalHours, amountExcl, totalIncl, periodFrom, periodTo, lines, breakdown, payload, invDate };
 }
 if (typeof module !== "undefined" && module.exports) module.exports = { computeProjectInvoice };
 
@@ -2680,15 +2717,43 @@ function refreshProjectenConfigWarn() {
   if (w) w.style.display = (cfg.salesCreatePath && cfg.baseUrl) ? "none" : "block";
 }
 
+// ---- Tarief-rijen in het nieuw-project-formulier ----
+function rateRowHtml(label, amount) {
+  return `<div class="entry-add proj-rate-row" style="border:none;padding:0;margin-top:6px;">
+    <div class="field desc" style="margin:0;"><input type="text" class="proj-rate-label" placeholder="bv. Regulier beheer" value="${escapeHtml(label || "")}"></div>
+    <div class="field hrs" style="margin:0;"><input type="number" class="proj-rate-amount" min="0" step="0.01" placeholder="€/uur" value="${amount != null ? escapeHtml(String(amount)) : ""}"></div>
+    <button class="icon-btn" type="button" title="Verwijderen" onclick="this.closest('.proj-rate-row').remove()">✕</button>
+  </div>`;
+}
+function addRateRow(label, amount) {
+  const wrap = $("proj-rates");
+  if (wrap) wrap.insertAdjacentHTML("beforeend", rateRowHtml(label, amount));
+}
+function ensureRateRows() {
+  const wrap = $("proj-rates");
+  if (wrap && !wrap.querySelector(".proj-rate-row")) addRateRow();
+}
+function readRateRows() {
+  const wrap = $("proj-rates");
+  if (!wrap) return [];
+  const rates = [];
+  wrap.querySelectorAll(".proj-rate-row").forEach(r => {
+    const label = (r.querySelector(".proj-rate-label")?.value || "").trim();
+    const amount = parseFloat(r.querySelector(".proj-rate-amount")?.value);
+    if (!isNaN(amount) && amount >= 0) rates.push({ id: projGenId("r"), label, amount });
+  });
+  return rates;
+}
+
 function addProject() {
   const nummer = $("proj-nummer").value.trim();
   const naam = $("proj-naam").value.trim();
   const klant = $("proj-klant").value.trim();
-  const tarief = parseFloat($("proj-tarief").value);
+  const rates = readRateRows();
   const status = $("proj-add-status");
   if (!naam) { status.textContent = "Vul een projectnaam in."; return; }
   if (!klant) { status.textContent = "Kies een klant."; return; }
-  if (!(tarief >= 0)) { status.textContent = "Vul een geldig uurtarief in."; return; }
+  if (!rates.length) { status.textContent = "Vul minstens één geldig tarief in."; return; }
   const rel = projRelationMap[klant.toLowerCase().trim()] || null;
   const templateId = ($("proj-template") && $("proj-template").value) || "";
   projectsData.projects.unshift({
@@ -2696,13 +2761,14 @@ function addProject() {
     relationId: rel ? rel.id : null,
     relationName: rel ? rel.name : klant,
     relationEmail: rel ? rel.email : "",
-    hourlyRate: tarief, vatId: PROJ_SALES_VAT_ID_21,
+    rates: rates, hourlyRate: rates[0].amount, vatId: PROJ_SALES_VAT_ID_21,
     templateId: templateId,
     templateName: templateId && projTemplates[templateId] ? projTemplates[templateId] : "",
     createdAt: new Date().toISOString(), entries: []
   });
   saveProjects();
-  $("proj-nummer").value = ""; $("proj-naam").value = ""; $("proj-klant").value = ""; $("proj-tarief").value = "";
+  $("proj-nummer").value = ""; $("proj-naam").value = ""; $("proj-klant").value = "";
+  if ($("proj-rates")) { $("proj-rates").innerHTML = ""; addRateRow(); }
   if ($("proj-template")) $("proj-template").value = String(cfg.salesTemplateId || "");
   status.textContent = rel ? "" : "Let op: geen exacte Informer-relatie gematcht — bij factureren wordt de klant op naam opgezocht.";
   renderProjects();
@@ -2725,7 +2791,14 @@ function addEntry(id) {
   const desc = $("entry-desc-" + id).value.trim();
   if (!date) { showToast("Kies een datum", "err"); return; }
   if (!(hours > 0)) { showToast("Vul een aantal uren in", "err"); return; }
-  p.entries.push({ id: projGenId("e"), date, hours, description: desc || "Werkzaamheden", invoiced: false, invoiceId: null });
+  const rates = projRatesOf(p);
+  const sel = $("entry-rate-" + id);
+  const r = (sel ? rates[parseInt(sel.value, 10)] : rates[0]) || rates[0];
+  p.entries.push({
+    id: projGenId("e"), date, hours, description: desc || "Werkzaamheden",
+    rateAmount: Number(r.amount) || 0, rateLabel: r.label || "",
+    invoiced: false, invoiceId: null
+  });
   saveProjects();
   renderProjects();
 }
@@ -2749,24 +2822,32 @@ function renderProjects() {
   const today = new Date().toISOString().slice(0, 10);
   wrap.innerHTML = projectsData.projects.map(p => {
     const openHrs = projOpenHours(p);
-    const openAmt = openHrs * (Number(p.hourlyRate) || 0);
+    const openAmt = projOpenAmount(p);
+    const rates = projRatesOf(p);
     const entries = (p.entries || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
-    const entriesHtml = entries.length ? entries.map(e => `
+    const entriesHtml = entries.length ? entries.map(e => {
+      const rAmt = entryRateAmount(p, e);
+      const rTag = `${fmtHrs(e.hours)} × ${fmtEur(rAmt)}${e.rateLabel ? ` <span class="muted">(${escapeHtml(e.rateLabel)})</span>` : ""}`;
+      return `
       <div class="entry-row ${e.invoiced ? "invoiced" : ""}">
         <span class="e-date">${escapeHtml(e.date)}</span>
         <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${e.invoiced ? ' · <span class="badge ok">gefactureerd</span>' : ""}</span>
-        <span class="e-hrs">${escapeHtml(fmtHrs(e.hours))}</span>
+        <span class="e-hrs" style="min-width:150px;">${rTag}</span>
         ${e.invoiced ? "" : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
-      </div>`).join("") : `<div class="empty">Nog geen uren geboekt.</div>`;
+      </div>`;
+    }).join("") : `<div class="empty">Nog geen uren geboekt.</div>`;
     const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Informer-koppeling</span>';
     const nummerBadge = p.projectNumber ? `<span class="badge info">${escapeHtml(p.projectNumber)}</span> ` : "";
     const tmplName = p.templateName || (p.templateId && projTemplates[p.templateId]) || "";
     const tmplPart = tmplName ? ` · template: ${escapeHtml(tmplName)}` : "";
+    const rateSelect = rates.length > 1
+      ? `<div class="field" style="margin:0;min-width:150px;"><label>Tarief</label><select id="entry-rate-${p.id}">${rates.map((r, i) => `<option value="${i}">${escapeHtml((r.label ? r.label + " — " : "") + fmtEur(r.amount))}</option>`).join("")}</select></div>`
+      : "";
     return `<div class="section" data-proj="${p.id}">
       <div class="proj-head">
         <div class="meta">
           <h2>${nummerBadge}${escapeHtml(p.name)}</h2>
-          <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${fmtEur(p.hourlyRate)}/uur${tmplPart}</div>
+          <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${escapeHtml(projRatesLabel(p))}${tmplPart}</div>
         </div>
         <div class="proj-total">
           <div class="amt">${fmtEur(openAmt)}</div>
@@ -2777,6 +2858,7 @@ function renderProjects() {
       <div class="entry-add">
         <div class="field date"><label>Datum</label><input type="date" id="entry-date-${p.id}" value="${today}"></div>
         <div class="field hrs"><label>Uren</label><input type="number" min="0" step="0.25" id="entry-hrs-${p.id}" placeholder="2"></div>
+        ${rateSelect}
         <div class="field desc"><label>Omschrijving</label><input type="text" id="entry-desc-${p.id}" placeholder="bv. Serveronderhoud"></div>
         <button class="btn" onclick="addEntry('${p.id}')">+ Uren</button>
       </div>
@@ -2810,8 +2892,11 @@ async function invoiceProject(id) {
   const conceptOnly = projConceptMode();
   const inv = computeProjectInvoice(p, open, cfg);
   const sendTo = p.relationEmail || "";
+  const bedragLines = inv.breakdown.map(b =>
+    `  • ${b.label || "Tarief"}: ${fmtHrs(b.hours)} × ${fmtEur(b.amount)} = ${fmtEur(b.lineTotal)}`).join("\n");
   const bedrag =
-    `Uren: ${fmtHrs(inv.totalHours)} × ${fmtEur(inv.rate)} = ${fmtEur(inv.amountExcl)} excl. btw (${fmtEur(inv.totalIncl)} incl.)\n` +
+    `${bedragLines}\n` +
+    `Totaal: ${fmtEur(inv.amountExcl)} excl. btw (${fmtEur(inv.totalIncl)} incl.)\n` +
     `Periode: ${inv.periodFrom} t/m ${inv.periodTo}`;
   const confirmMsg = conceptOnly
     ? `TESTMODUS — alleen CONCEPT aanmaken in Informer (niet versturen).\n\n` +
