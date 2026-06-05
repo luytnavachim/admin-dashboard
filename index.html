@@ -146,6 +146,28 @@ h2 .count { font-size: 12px; font-weight: 500; background: var(--border); color:
 details summary { cursor: pointer; color: var(--muted); font-size: 12px; user-select: none; }
 details[open] summary { margin-bottom: 8px; }
 h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: white; width: 22px; height: 22px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; }
+/* ---- Projecten ---- */
+.proj-head { display: flex; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.proj-head .meta { flex: 1; min-width: 200px; }
+.proj-head h2 { margin-bottom: 2px; }
+.proj-sub { font-size: 12px; color: var(--muted); }
+.proj-total { text-align: right; }
+.proj-total .amt { font-size: 20px; font-weight: 500; }
+.proj-total .hrs { font-size: 12px; color: var(--muted); }
+.entry-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-top: 0.5px solid var(--border); font-size: 13px; }
+.entry-row:first-of-type { border-top: none; }
+.entry-row .e-date { color: var(--muted); min-width: 84px; font-variant-numeric: tabular-nums; }
+.entry-row .e-desc { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.entry-row .e-hrs { font-variant-numeric: tabular-nums; min-width: 56px; text-align: right; }
+.entry-row.invoiced { opacity: 0.55; }
+.entry-row.invoiced .e-desc { text-decoration: line-through; }
+.entry-add { display: flex; gap: 8px; flex-wrap: wrap; align-items: end; margin-top: 10px; padding-top: 10px; border-top: 0.5px dashed var(--border-strong); }
+.entry-add .field { margin: 0; }
+.entry-add .field.date input { width: 140px; }
+.entry-add .field.hrs input { width: 80px; }
+.entry-add .field.desc { flex: 1; min-width: 160px; }
+.icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 6px; }
+.icon-btn:hover { color: var(--danger-text); background: var(--danger-bg); }
 /* ---- Dev console ---- */
 #dev-console {
   position: fixed;
@@ -273,6 +295,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
     <button class="tab active" data-tab="overzicht">Overzicht</button>
     <button class="tab" data-tab="facturen">Facturen verwerken</button>
     <button class="tab" data-tab="migratie">Verkoop migreren</button>
+    <button class="tab" data-tab="projecten">Projecten</button>
     <button class="tab" data-tab="instellingen">Instellingen</button>
     <button class="tab" data-tab="geavanceerd">Geavanceerd</button>
   </nav>
@@ -358,6 +381,37 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       </div>
       <div id="migratie-list" style="margin-top: 12px;"></div>
     </div>
+  </section>
+
+  <!-- ====== TAB: Projecten (uren registreren → verkoopfactuur) ====== -->
+  <section id="tab-projecten" class="tab-panel">
+    <div class="section">
+      <h2>Nieuw project</h2>
+      <p class="muted">Registreer uren per project en factureer ze met één klik. Uren worden lokaal in deze browser bewaard; bij <em>Factureren</em> wordt er een verkoopfactuur in Informer aangemaakt én verstuurd. Informer-projecten zelf zijn API-afgeschermd, dus maak het project hier één keer aan.</p>
+      <div class="warn-box" id="projecten-config-warn" style="display:none">
+        <strong>Eerst even Instellingen invullen.</strong> Sales endpoint en ledger-ID staan leeg — vul ze in onder de Instellingen-tab en kom terug.
+      </div>
+      <div class="field">
+        <label for="proj-naam">Projectnaam</label>
+        <input id="proj-naam" type="text" placeholder="bv. Onderhoud Q2 — Klant X">
+      </div>
+      <div class="field">
+        <label for="proj-klant">Klant (Informer-relatie)</label>
+        <input id="proj-klant" type="text" list="proj-klant-list" placeholder="Begin te typen om te zoeken…" autocomplete="off">
+        <datalist id="proj-klant-list"></datalist>
+        <span class="muted" id="proj-klant-hint" style="font-size:11px;">Relaties laden…</span>
+      </div>
+      <div class="field">
+        <label for="proj-tarief">Uurtarief (€ excl. btw)</label>
+        <input id="proj-tarief" type="number" min="0" step="0.01" placeholder="bv. 85">
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" onclick="addProject()">Project toevoegen</button>
+        <span class="muted" id="proj-add-status" style="align-self:center;"></span>
+      </div>
+    </div>
+
+    <div id="projecten-list"></div>
   </section>
 
   <!-- ====== TAB: Instellingen ====== -->
@@ -1250,6 +1304,11 @@ function switchTab(name) {
   if (name === "facturen" && !facturenLoaded && account) {
     facturenLoaded = true;
     loadInvoiceEmails().catch(e => console.warn("loadInvoiceEmails:", e));
+  }
+  // Projecten: render lijst + relaties (eenmalig) laden voor de klant-picker
+  if (name === "projecten") {
+    renderProjects();
+    if (account && cfg.baseUrl) loadProjectRelations().catch(e => console.warn("loadProjectRelations:", e));
   }
 }
 document.addEventListener("click", (ev) => {
@@ -2379,6 +2438,264 @@ async function startSalesMigration() {
   startBtn.textContent = origText;
   const okCount = salesQueue.filter(e => e.status === "ok").length;
   showToast(`Migratie klaar: ${okCount}/${salesQueue.length} succesvol`, okCount === salesQueue.length ? "ok" : "err");
+}
+
+// ============================================================
+//  PROJECTEN — uren registreren → verkoopfactuur
+// ============================================================
+const PROJ_LS_KEY = "projects_v1";
+const PROJ_SALES_VAT_ID_21 = 1478830;          // sales 21% NL (zelfde als migratie)
+const PROJ_SEND_PATH = "/invoice/sales/send/";
+let projectsData = loadProjects();
+let projRelationsLoaded = false;
+let projRelationMap = {};                        // lowercased name -> {id, name, email}
+
+function loadProjects() {
+  try {
+    const raw = localStorage.getItem(PROJ_LS_KEY);
+    if (!raw) return { projects: [] };
+    const d = JSON.parse(raw);
+    if (!d || !Array.isArray(d.projects)) return { projects: [] };
+    return d;
+  } catch (e) { return { projects: [] }; }
+}
+function saveProjects() { localStorage.setItem(PROJ_LS_KEY, JSON.stringify(projectsData)); }
+function projGenId(prefix) { return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
+function projFindById(id) { return projectsData.projects.find(p => p.id === id) || null; }
+function projOpenEntries(p) { return (p.entries || []).filter(e => !e.invoiced); }
+function projOpenHours(p) { return projOpenEntries(p).reduce((s, e) => s + (Number(e.hours) || 0), 0); }
+function fmtEur(n) { return "€" + (Number(n) || 0).toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
+function fmtHrs(n) {
+  const v = Number(n) || 0;
+  return (Number.isInteger(v) ? v.toString() : v.toFixed(2).replace(/\.?0+$/, "")) + " u";
+}
+
+// Pure rekenkern (apart zodat 'm te unit-testen is): bouwt de factuur-payload.
+function computeProjectInvoice(p, openEntries, cfg) {
+  const totalHours = openEntries.reduce((s, e) => s + (Number(e.hours) || 0), 0);
+  const rate = Number(p.hourlyRate) || 0;
+  const amountExcl = Math.round(totalHours * rate * 100) / 100;
+  const totalIncl = Math.round(amountExcl * 1.21 * 100) / 100;
+  const dates = openEntries.map(e => e.date).filter(Boolean).sort();
+  const periodFrom = dates[0] || "";
+  const periodTo = dates[dates.length - 1] || "";
+  const hrsLabel = (Number.isInteger(totalHours) ? totalHours.toString() : totalHours.toFixed(2).replace(/\.?0+$/, "")) + " u";
+  const description = `Werkzaamheden ${p.name} (${periodFrom} t/m ${periodTo}) — ${hrsLabel}`.slice(0, 200);
+  const ledgerId = Number(cfg.salesLedgerId) || 15302629;
+  const lines = [{
+    info: false, qty: totalHours, description,
+    amount: rate, vat_id: p.vatId || PROJ_SALES_VAT_ID_21, ledger_id: ledgerId, costs_id: 0, discount: 0
+  }];
+  const invDate = new Date().toISOString().slice(0, 10);
+  const payload = {
+    relation_id: p.relationId != null ? (parseInt(p.relationId, 10) || p.relationId) : null,
+    reference: (p.name || "").slice(0, 100),
+    invoice_date: invDate,
+    template_id: parseInt(cfg.salesTemplateId, 10) || undefined,
+    payment_condition_id: parseInt(cfg.salesPaymentConditionId, 10) || undefined,
+    currency_id: parseInt(cfg.salesCurrencyId, 10) || 126106,
+    vat_option: cfg.salesVatOption || "excl",
+    lines
+  };
+  return { totalHours, rate, amountExcl, totalIncl, periodFrom, periodTo, description, lines, payload, invDate };
+}
+if (typeof module !== "undefined" && module.exports) module.exports = { computeProjectInvoice };
+
+// Relatie-picker (datalist) — eenmalig laden uit Informer
+async function loadProjectRelations() {
+  if (projRelationsLoaded) return;
+  const hint = $("proj-klant-hint");
+  try {
+    const data = await informerFetch("GET", "/relations/");
+    const container = data?.relation || data?.relations || data;
+    const dl = $("proj-klant-list");
+    let opts = "";
+    projRelationMap = {};
+    if (container && typeof container === "object") {
+      for (const [id, rel] of Object.entries(container)) {
+        if (!rel || typeof rel !== "object") continue;
+        const name = rel.company_name || rel.name || "";
+        if (!name) continue;
+        projRelationMap[name.toLowerCase().trim()] = { id, name, email: rel.email_invoice || rel.email || "" };
+        opts += `<option value="${escapeHtml(name)}"></option>`;
+      }
+    }
+    if (dl) dl.innerHTML = opts;
+    projRelationsLoaded = true;
+    if (hint) hint.textContent = Object.keys(projRelationMap).length + " relaties geladen — kies of typ exact de bedrijfsnaam.";
+  } catch (e) {
+    if (hint) hint.textContent = "Relaties laden mislukt (" + (e.message || e) + ") — je kunt de klantnaam handmatig typen.";
+  }
+}
+
+function refreshProjectenConfigWarn() {
+  const w = $("projecten-config-warn");
+  if (w) w.style.display = (cfg.salesCreatePath && cfg.baseUrl) ? "none" : "block";
+}
+
+function addProject() {
+  const naam = $("proj-naam").value.trim();
+  const klant = $("proj-klant").value.trim();
+  const tarief = parseFloat($("proj-tarief").value);
+  const status = $("proj-add-status");
+  if (!naam) { status.textContent = "Vul een projectnaam in."; return; }
+  if (!klant) { status.textContent = "Kies een klant."; return; }
+  if (!(tarief >= 0)) { status.textContent = "Vul een geldig uurtarief in."; return; }
+  const rel = projRelationMap[klant.toLowerCase().trim()] || null;
+  projectsData.projects.unshift({
+    id: projGenId("p"), name: naam,
+    relationId: rel ? rel.id : null,
+    relationName: rel ? rel.name : klant,
+    relationEmail: rel ? rel.email : "",
+    hourlyRate: tarief, vatId: PROJ_SALES_VAT_ID_21,
+    createdAt: new Date().toISOString(), entries: []
+  });
+  saveProjects();
+  $("proj-naam").value = ""; $("proj-klant").value = ""; $("proj-tarief").value = "";
+  status.textContent = rel ? "" : "Let op: geen exacte Informer-relatie gematcht — bij factureren wordt de klant op naam opgezocht.";
+  renderProjects();
+}
+
+function deleteProject(id) {
+  const p = projFindById(id);
+  if (!p) return;
+  if (!confirm(`Project "${p.name}" en alle bijbehorende uren verwijderen?`)) return;
+  projectsData.projects = projectsData.projects.filter(x => x.id !== id);
+  saveProjects();
+  renderProjects();
+}
+
+function addEntry(id) {
+  const p = projFindById(id);
+  if (!p) return;
+  const date = $("entry-date-" + id).value;
+  const hours = parseFloat($("entry-hrs-" + id).value);
+  const desc = $("entry-desc-" + id).value.trim();
+  if (!date) { showToast("Kies een datum", "err"); return; }
+  if (!(hours > 0)) { showToast("Vul een aantal uren in", "err"); return; }
+  p.entries.push({ id: projGenId("e"), date, hours, description: desc || "Werkzaamheden", invoiced: false, invoiceId: null });
+  saveProjects();
+  renderProjects();
+}
+
+function deleteEntry(projId, entryId) {
+  const p = projFindById(projId);
+  if (!p) return;
+  p.entries = p.entries.filter(e => e.id !== entryId);
+  saveProjects();
+  renderProjects();
+}
+
+function renderProjects() {
+  const wrap = $("projecten-list");
+  if (!wrap) return;
+  refreshProjectenConfigWarn();
+  if (!projectsData.projects.length) {
+    wrap.innerHTML = `<div class="section"><div class="empty">Nog geen projecten. Maak er hierboven één aan.</div></div>`;
+    return;
+  }
+  const today = new Date().toISOString().slice(0, 10);
+  wrap.innerHTML = projectsData.projects.map(p => {
+    const openHrs = projOpenHours(p);
+    const openAmt = openHrs * (Number(p.hourlyRate) || 0);
+    const entries = (p.entries || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
+    const entriesHtml = entries.length ? entries.map(e => `
+      <div class="entry-row ${e.invoiced ? "invoiced" : ""}">
+        <span class="e-date">${escapeHtml(e.date)}</span>
+        <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${e.invoiced ? ' · <span class="badge ok">gefactureerd</span>' : ""}</span>
+        <span class="e-hrs">${escapeHtml(fmtHrs(e.hours))}</span>
+        ${e.invoiced ? "" : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
+      </div>`).join("") : `<div class="empty">Nog geen uren geboekt.</div>`;
+    const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Informer-koppeling</span>';
+    return `<div class="section" data-proj="${p.id}">
+      <div class="proj-head">
+        <div class="meta">
+          <h2>${escapeHtml(p.name)}</h2>
+          <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${fmtEur(p.hourlyRate)}/uur</div>
+        </div>
+        <div class="proj-total">
+          <div class="amt">${fmtEur(openAmt)}</div>
+          <div class="hrs">${fmtHrs(openHrs)} open</div>
+        </div>
+      </div>
+      <div style="margin-top:12px;">${entriesHtml}</div>
+      <div class="entry-add">
+        <div class="field date"><label>Datum</label><input type="date" id="entry-date-${p.id}" value="${today}"></div>
+        <div class="field hrs"><label>Uren</label><input type="number" min="0" step="0.25" id="entry-hrs-${p.id}" placeholder="2"></div>
+        <div class="field desc"><label>Omschrijving</label><input type="text" id="entry-desc-${p.id}" placeholder="bv. Serveronderhoud"></div>
+        <button class="btn" onclick="addEntry('${p.id}')">+ Uren</button>
+      </div>
+      <div class="row-btns" style="margin-top:12px;">
+        <button class="btn primary" onclick="invoiceProject('${p.id}')" ${openHrs > 0 ? "" : "disabled"}>Factureren (${fmtEur(openAmt)}) &rarr;</button>
+        <button class="btn danger" onclick="deleteProject('${p.id}')">Project verwijderen</button>
+        <span class="muted" id="proj-status-${p.id}" style="align-self:center;"></span>
+      </div>
+    </div>`;
+  }).join("");
+}
+
+async function invoiceProject(id) {
+  const p = projFindById(id);
+  if (!p) return;
+  const statusEl = $("proj-status-" + id);
+  const setS = (t) => { if (statusEl) statusEl.textContent = t; };
+  if (!cfg.salesCreatePath || !cfg.baseUrl) { showToast("Vul eerst Instellingen (sales endpoint) in", "err"); switchTab("instellingen"); return; }
+  const open = projOpenEntries(p);
+  if (!open.length) { showToast("Geen open uren om te factureren", "err"); return; }
+
+  const inv = computeProjectInvoice(p, open, cfg);
+  const sendTo = p.relationEmail || "";
+  const confirmMsg =
+    `Factuur aanmaken én definitief versturen in Informer?\n\n` +
+    `Project: ${p.name}\nKlant: ${p.relationName}\n` +
+    `Uren: ${fmtHrs(inv.totalHours)} × ${fmtEur(inv.rate)} = ${fmtEur(inv.amountExcl)} excl. btw (${fmtEur(inv.totalIncl)} incl.)\n` +
+    `Periode: ${inv.periodFrom} t/m ${inv.periodTo}\n` +
+    (sendTo ? `Versturen naar: ${sendTo}` : `Geen e-mail bekend — wordt alleen definitief gemaakt (niet gemaild).`);
+  if (!confirm(confirmMsg)) return;
+
+  setS("Bezig — klant opzoeken…");
+  try {
+    // relation_id bepalen (gekoppeld id, anders op naam matchen)
+    let relationId = p.relationId;
+    if (!relationId) {
+      const match = await findRelationByName(p.relationName);
+      if (!match) throw new Error(`Klant "${p.relationName}" niet gevonden in Informer — koppel of maak 'm eerst aan.`);
+      relationId = match.id;
+      p.relationId = relationId; saveProjects();
+    }
+    inv.payload.relation_id = parseInt(relationId, 10) || relationId;
+
+    setS("Bezig — factuur aanmaken…");
+    const result = await informerFetch("POST", cfg.salesCreatePath || "/invoice/sales/", inv.payload);
+    const invId = result?.id || result?.invoice_id || result?.invoice?.id || null;
+    const invUrl = result?.url || result?.invoice_url || result?.invoice?.url || null;
+    if (!invId) throw new Error("Factuur aangemaakt maar geen ID teruggekregen: " + JSON.stringify(result).slice(0, 200));
+
+    // definitief maken / versturen
+    let sendNote = "";
+    try {
+      setS("Bezig — versturen…");
+      const sendPayload = sendTo
+        ? { invoice_id: parseInt(invId, 10) || invId, method: "email", email_address: sendTo }
+        : { invoice_id: parseInt(invId, 10) || invId, method: "mark" };
+      await informerFetch("POST", PROJ_SEND_PATH, sendPayload);
+      sendNote = sendTo ? ` · verstuurd naar ${sendTo}` : " · definitief gemaakt";
+    } catch (sendErr) {
+      sendNote = " · ⚠ aanmaken gelukt maar versturen mislukte: " + (sendErr.message || sendErr);
+    }
+
+    // boekingen markeren als gefactureerd
+    const stamp = new Date().toISOString();
+    open.forEach(e => { e.invoiced = true; e.invoiceId = invId; e.invoicedAt = stamp; });
+    saveProjects();
+    renderProjects();
+    showToast(`Factuur aangemaakt (id ${invId})${sendTo ? " + verstuurd" : ""}`, "ok");
+    const after = $("proj-status-" + id);
+    if (after) after.innerHTML = `✓ Factuur id ${escapeHtml(String(invId))}${invUrl ? ` — <a href="${escapeHtml(invUrl)}" target="_blank" rel="noopener">openen</a>` : ""}${escapeHtml(sendNote)}`;
+  } catch (e) {
+    setS("");
+    showToast("Factureren mislukt: " + (e.message || e), "err");
+  }
 }
 
 // ============================================================
