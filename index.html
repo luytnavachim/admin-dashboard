@@ -422,13 +422,19 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       </div>
       <div class="field">
         <label for="proj-klant">Relatie / klant (Informer)</label>
-        <input id="proj-klant" type="text" list="proj-klant-list" placeholder="Begin te typen om te zoeken…" autocomplete="off">
+        <input id="proj-klant" type="text" list="proj-klant-list" placeholder="Begin te typen om te zoeken…" autocomplete="off" onchange="onProjKlantChange()" oninput="onProjKlantChange()">
         <datalist id="proj-klant-list"></datalist>
         <span class="muted" id="proj-klant-hint" style="font-size:11px;">Relaties laden…</span>
       </div>
-      <div class="field">
-        <label for="proj-tarief">Uurtarief (€ excl. btw)</label>
-        <input id="proj-tarief" type="number" min="0" step="0.01" placeholder="bv. 117">
+      <div class="grid-2">
+        <div class="field">
+          <label for="proj-tarief">Uurtarief (€ excl. btw)</label>
+          <input id="proj-tarief" type="number" min="0" step="0.01" placeholder="bv. 117">
+        </div>
+        <div class="field">
+          <label for="proj-template">Factuur-template</label>
+          <select id="proj-template"><option value="">(standaard uit Instellingen)</option></select>
+        </div>
       </div>
       <div class="row-btns">
         <button class="btn primary" onclick="addProject()">Project toevoegen</button>
@@ -2590,7 +2596,7 @@ function computeProjectInvoice(p, openEntries, cfg) {
     relation_id: p.relationId != null ? (parseInt(p.relationId, 10) || p.relationId) : null,
     reference: (p.projectNumber || p.name || "").slice(0, 100),
     invoice_date: invDate,
-    template_id: parseInt(cfg.salesTemplateId, 10) || undefined,
+    template_id: parseInt(p.templateId, 10) || parseInt(cfg.salesTemplateId, 10) || undefined,
     payment_condition_id: parseInt(cfg.salesPaymentConditionId, 10) || undefined,
     currency_id: parseInt(cfg.salesCurrencyId, 10) || 126106,
     vat_option: cfg.salesVatOption || "excl",
@@ -2600,11 +2606,39 @@ function computeProjectInvoice(p, openEntries, cfg) {
 }
 if (typeof module !== "undefined" && module.exports) module.exports = { computeProjectInvoice };
 
+let projTemplates = {};   // id -> description (alleen sales_invoice)
+
+// Verkoopfactuur-templates laden voor de template-keuze
+async function loadProjectTemplates() {
+  try {
+    const data = await informerFetch("GET", "/templates/");
+    const container = data?.templates || data?.template || data;
+    projTemplates = {};
+    if (container && typeof container === "object") {
+      for (const [id, t] of Object.entries(container)) {
+        if (t && typeof t === "object" && (t.type === "sales_invoice" || !t.type)) {
+          projTemplates[id] = t.description || ("Template " + id);
+        }
+      }
+    }
+  } catch (e) { projTemplates = {}; }
+  // Dropdown vullen
+  const sel = $("proj-template");
+  if (sel) {
+    const def = String(cfg.salesTemplateId || "");
+    sel.innerHTML = `<option value="">(standaard uit Instellingen)</option>` +
+      Object.entries(projTemplates).map(([id, desc]) =>
+        `<option value="${escapeHtml(id)}">${escapeHtml(desc)}</option>`).join("");
+    if (def && projTemplates[def]) sel.value = def;
+  }
+}
+
 // Relatie-picker (datalist) — eenmalig laden uit Informer
 async function loadProjectRelations() {
   if (projRelationsLoaded) return;
   const hint = $("proj-klant-hint");
   try {
+    await loadProjectTemplates();
     const data = await informerFetch("GET", "/relations/");
     const container = data?.relation || data?.relations || data;
     const dl = $("proj-klant-list");
@@ -2615,7 +2649,11 @@ async function loadProjectRelations() {
         if (!rel || typeof rel !== "object") continue;
         const name = rel.company_name || rel.name || "";
         if (!name) continue;
-        projRelationMap[name.toLowerCase().trim()] = { id, name, email: rel.email_invoice || rel.email || "" };
+        projRelationMap[name.toLowerCase().trim()] = {
+          id, name,
+          email: rel.email_invoice || rel.email || "",
+          templateId: rel.sales_invoice_template_id || ""
+        };
         opts += `<option value="${escapeHtml(name)}"></option>`;
       }
     }
@@ -2624,6 +2662,16 @@ async function loadProjectRelations() {
     if (hint) hint.textContent = Object.keys(projRelationMap).length + " relaties geladen — kies of typ exact de bedrijfsnaam.";
   } catch (e) {
     if (hint) hint.textContent = "Relaties laden mislukt (" + (e.message || e) + ") — je kunt de klantnaam handmatig typen.";
+  }
+}
+
+// Bij klant-keuze: template automatisch op de standaard van die relatie zetten.
+function onProjKlantChange() {
+  const klant = ($("proj-klant").value || "").trim().toLowerCase();
+  const rel = projRelationMap[klant];
+  const sel = $("proj-template");
+  if (rel && rel.templateId && sel && projTemplates[String(rel.templateId)]) {
+    sel.value = String(rel.templateId);
   }
 }
 
@@ -2642,16 +2690,20 @@ function addProject() {
   if (!klant) { status.textContent = "Kies een klant."; return; }
   if (!(tarief >= 0)) { status.textContent = "Vul een geldig uurtarief in."; return; }
   const rel = projRelationMap[klant.toLowerCase().trim()] || null;
+  const templateId = ($("proj-template") && $("proj-template").value) || "";
   projectsData.projects.unshift({
     id: projGenId("p"), projectNumber: nummer, name: naam,
     relationId: rel ? rel.id : null,
     relationName: rel ? rel.name : klant,
     relationEmail: rel ? rel.email : "",
     hourlyRate: tarief, vatId: PROJ_SALES_VAT_ID_21,
+    templateId: templateId,
+    templateName: templateId && projTemplates[templateId] ? projTemplates[templateId] : "",
     createdAt: new Date().toISOString(), entries: []
   });
   saveProjects();
   $("proj-nummer").value = ""; $("proj-naam").value = ""; $("proj-klant").value = ""; $("proj-tarief").value = "";
+  if ($("proj-template")) $("proj-template").value = String(cfg.salesTemplateId || "");
   status.textContent = rel ? "" : "Let op: geen exacte Informer-relatie gematcht — bij factureren wordt de klant op naam opgezocht.";
   renderProjects();
 }
@@ -2708,11 +2760,13 @@ function renderProjects() {
       </div>`).join("") : `<div class="empty">Nog geen uren geboekt.</div>`;
     const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Informer-koppeling</span>';
     const nummerBadge = p.projectNumber ? `<span class="badge info">${escapeHtml(p.projectNumber)}</span> ` : "";
+    const tmplName = p.templateName || (p.templateId && projTemplates[p.templateId]) || "";
+    const tmplPart = tmplName ? ` · template: ${escapeHtml(tmplName)}` : "";
     return `<div class="section" data-proj="${p.id}">
       <div class="proj-head">
         <div class="meta">
           <h2>${nummerBadge}${escapeHtml(p.name)}</h2>
-          <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${fmtEur(p.hourlyRate)}/uur</div>
+          <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${fmtEur(p.hourlyRate)}/uur${tmplPart}</div>
         </div>
         <div class="proj-total">
           <div class="amt">${fmtEur(openAmt)}</div>
