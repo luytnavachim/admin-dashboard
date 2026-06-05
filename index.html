@@ -2490,7 +2490,15 @@ function loadProjectsCache() {
 }
 
 // ---- Sync met de Worker KV-store (cross-device) ----
-function projWorkerBase() { return (cfg.baseUrl || "").replace(/\/api\/?$/, ""); }
+// De projecten-opslag draait altijd op de Worker zelf. Als de Informer-base
+// (Instellingen) een absolute Worker-URL is, leiden we 't daaruit af; anders
+// (bv. relatieve "/api" via Apache-proxy) vallen we terug op de Worker-origin.
+const PROJ_WORKER_ORIGIN = "https://admin-dashboard.michavantuyl.workers.dev";
+function projWorkerBase() {
+  const b = (cfg.baseUrl || "").trim();
+  if (/^https?:\/\//i.test(b)) return b.replace(/\/api\/?$/, "");
+  return PROJ_WORKER_ORIGIN;
+}
 function projSyncKey() {
   try { return (JSON.parse(localStorage.getItem(PROJ_SYNC_LS_KEY)) || {}).key || ""; }
   catch { return ""; }
