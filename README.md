@@ -2,17 +2,23 @@
 
 Eén-persoons inkoop- en verkoopadministratie voor Triplet IT, als single-file webapp. Geen build-stap, geen bundler: pure HTML + JavaScript dat rechtstreeks met **Microsoft Graph** praat via OAuth (MSAL), en met **Informer** (boekhoudpakket) via een eigen **Cloudflare Worker**. Factuur-PDF's worden door **Claude** (Anthropic API) omgezet naar gestructureerde data.
 
-**Live:** https://admin.triplet-it.nl/ (gehost op GitHub Pages, custom domain)
+**Live:** https://admin.triplet-it.nl/ — de **frontend** (`index.html`) wordt geserveerd door **Apache op een eigen Hetzner-server** (`95.217.203.120`). De **Cloudflare Worker** (`…workers.dev`) is alleen de **API-backend** (Informer-proxy + Claude-extractie). De repo op GitHub (`luytnavachim/admin-dashboard`) is versiebeheer; publiceren is **twee losse stappen** (zie [Deployen](#deployen)):
+
+- frontend → SSH naar de Hetzner-server + `git pull` in de webroot;
+- worker → `npx wrangler deploy` (alleen nodig als `worker.js` wijzigt).
+
+> ⚠️ `git push` alleen verandert de live site niet. Voor een `index.html`-wijziging moet de Hetzner-server `git pull` doen.
 
 ---
 
 ## Wat je krijgt
 
-Een dashboard met vijf tabs:
+Een dashboard met zes tabs:
 
 - **Overzicht** — live status over alle gemonitorde mailboxen: facturen die verwerkt/betaald moeten worden, mails die antwoord vragen, openstaande inkoopfacturen uit Informer, en je agenda voor de komende 2 dagen. Per factuurrij een `→ Informer`-knop en een `Verwerkt ✓`-knop die de mail naar `MoneyMonk Verwerkt` verplaatst.
 - **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt de relation in Informer, maakt de inkoopfactuur aan mét PDF als bijlage, en verplaatst de mail naar `MoneyMonk Verwerkt`. Ook een **losse-PDF-upload** voor facturen die niet in je inbox zitten.
 - **Verkoop migreren** — bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Informer (per PDF: Claude extraheert klant + bedragen → klant matchen/aanmaken → POST naar het sales-endpoint).
+- **Projecten** — uren registreren per project en factureren met één klik. Je maakt een project aan (naam + Informer-klant + vast uurtarief), boekt er uren op (datum, uren, omschrijving), en met `Factureren` bouwt het dashboard er één samenvattende verkoopfactuurregel van (totaal open uren × tarief), maakt de factuur aan via `/invoice/sales/` en maakt 'm definitief/verstuurt 'm via `/invoice/sales/send/`. Gefactureerde uren blijven als historie staan, gemarkeerd zodat ze niet dubbel op een volgende factuur komen. Informer-projecten zelf zijn API-afgeschermd, daarom worden de projecten en uren **lokaal in de browser** (`localStorage`, key `projects_v1`) bewaard.
 - **Instellingen** — Informer-verbinding (base URL via de Worker, endpoints, sales ledger-/product-/template-/currency-IDs, BTW-optie).
 - **Geavanceerd** — API-sandbox: verbinding testen, bestaande inkoopfacturen ophalen, test-inkoopfactuur aanmaken, plus een debug-log van de laatste Informer request/response.
 
@@ -23,14 +29,15 @@ Verder: persistente login (MSAL-token in `localStorage`, automatische refresh) e
 ## Architectuur
 
 ```
-Browser (GitHub Pages)
+Browser  ←─ index.html geserveerd door Apache op de Hetzner-server (95.217.203.120)
   ├── MSAL OAuth → Microsoft Graph        (mail + agenda + mappen, direct)
-  └── Cloudflare Worker
+  ├── localStorage                        (Informer-config + projecten/uren)
+  └── Cloudflare Worker (…workers.dev)     — alleen API-backend
         ├── /api/<path> → Informer API     (CORS-proxy, auth server-side)
         └── /extract  /extract-sales       (PDF → Claude Haiku → JSON)
 ```
 
-Informer staat geen directe browser-calls toe (CORS) en de API-key mag niet in de frontend staan — daarom loopt al het Informer-verkeer via de Worker, die de key server-side bewaart. Diezelfde Worker draait ook de Claude-extractie, zodat de Anthropic-key eveneens server-side blijft.
+De frontend (statische HTML/JS) draait dus op je eigen Hetzner-box; de Cloudflare Worker is puur de backend. Informer staat geen directe browser-calls toe (CORS) en de API-key mag niet in de frontend staan — daarom loopt al het Informer-verkeer via de Worker, die de key server-side bewaart. Diezelfde Worker draait ook de Claude-extractie, zodat de Anthropic-key eveneens server-side blijft.
 
 | Bestand | Doel |
 |---|---|
@@ -81,12 +88,38 @@ const CLIENT_ID = "...";
 
 Vervang door je client-ID uit stap 1. In dezelfde sectie staan ook `MAILBOXES`, `MONEYMONK_ADDRESS`, `PROCESSED_FOLDER_NAME` en `SELF_EMAILS`/`SELF_DOMAINS` — pas die aan naar je eigen situatie.
 
-### Stap 4 — Hosten
+### Stap 4 — Hosten & deployen (Cloudflare)
 
-- **GitHub Pages**: push `index.html` (+ `worker.js`, `README.md`) naar de repo, Settings → Pages → branch `main` / root. Custom domain via `admin.triplet-it.nl` (CNAME).
-- **Lokaal**: `python3 -m http.server 8000` → open `http://localhost:8000/` (`file://` werkt niet door OAuth-restricties).
+De site draait op de Cloudflare Worker uit `worker.js`; `wrangler.jsonc` zet `assets.directory: "./"`, dus de Worker serveert ook `index.html` en de andere statische bestanden uit de repo-root. Het custom domein `admin.triplet-it.nl` hangt aan deze Worker (geen GitHub Pages, geen CNAME-bestand in de repo).
 
-Zorg dat je host-URL exact als Redirect URI in Azure staat (stap 1), anders weigert de login.
+**Live zetten van een wijziging:**
+
+```bash
+cd ~/Documents/admin-standalone
+git add -A && git commit -m "..." && git push   # versiebeheer — NIET de deploy
+npx wrangler deploy                              # DIT publiceert naar admin.triplet-it.nl
+```
+
+> ⚠️ `git push` alleen is niet genoeg — de live site verandert pas na `wrangler deploy`. De "Auto deploy …"-commits in de history zijn gewoon git-commits, geen Cloudflare-deploys.
+
+**Eerste keer / na een verlopen sessie** vraagt wrangler om login:
+
+```bash
+npx wrangler login        # opent browser → Allow
+```
+
+Lukt deployen niet met `Authentication error [code: 10000]`, dan zit er meestal een verlopen `CLOUDFLARE_API_TOKEN` in je shell-omgeving die de browser-login overschrijft. Oplossing:
+
+```bash
+unset CLOUDFLARE_API_TOKEN CLOUDFLARE_API_KEY CLOUDFLARE_EMAIL CLOUDFLARE_ACCOUNT_ID
+npx wrangler logout && npx wrangler login && npx wrangler deploy
+```
+
+Check ook of zo'n token in `~/.zshrc` / `~/.zprofile` staat (`grep CLOUDFLARE ~/.zshrc`). Het Cloudflare-account is `12663d0e232c029c7a69c8c166efd87c` — die kun je desnoods vastzetten met `"account_id": "…"` in `wrangler.jsonc`.
+
+**Lokaal testen** (zonder deploy): `python3 -m http.server 8000` → `http://localhost:8000/` (`file://` werkt niet door OAuth-restricties). Voor de Informer/Claude-endpoints lokaal: `npx wrangler dev`.
+
+Zorg dat elke host-URL (incl. `http://localhost:8000/`) exact als Redirect URI in Azure staat (stap 1), anders weigert de login.
 
 ### Stap 5 — Instellingen invullen
 
