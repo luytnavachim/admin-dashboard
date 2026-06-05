@@ -431,9 +431,18 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         <div id="proj-rates"></div>
         <button class="btn" type="button" onclick="addRateRow()" style="margin-top:6px;">+ tarief</button>
       </div>
-      <div class="field">
-        <label for="proj-template">Factuur-template</label>
-        <select id="proj-template"><option value="">(standaard uit Instellingen)</option></select>
+      <div class="grid-2">
+        <div class="field">
+          <label for="proj-template">Factuur-template</label>
+          <select id="proj-template"><option value="">(standaard uit Instellingen)</option></select>
+        </div>
+        <div class="field">
+          <label for="proj-linemode">Factuurregels</label>
+          <select id="proj-linemode">
+            <option value="summary">Samengevat per tarief (1 regel per tarief)</option>
+            <option value="perEntry">Aparte regel per boeking</option>
+          </select>
+        </div>
       </div>
       <div class="row-btns">
         <button class="btn primary" onclick="addProject()">Project toevoegen</button>
@@ -2616,19 +2625,33 @@ function computeProjectInvoice(p, openEntries, cfg) {
     byKey[key].entries.push(e);
   }
 
-  const lines = groups.map(g => {
-    const ds = g.dates.slice().sort();
-    const from = ds[0] || "", to = ds[ds.length - 1] || "";
-    const lbl = g.label ? ` — ${g.label}` : "";
-    const header = `Werkzaamheden ${projLabel}${lbl} (${from} t/m ${to}) — ${hLabel(g.hours)}`;
-    // Specificatie: per boeking datum + omschrijving + uren
-    const detail = g.entries.slice()
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
-      .map(e => `${e.date}: ${e.description || "Werkzaamheden"} (${hLabel(Number(e.hours) || 0)})`)
-      .join("\n");
-    const description = `${header}\n${detail}`.slice(0, 2000);
-    return { info: false, qty: g.hours, description, amount: g.amount, vat_id: vatId, ledger_id: ledgerId, costs_id: 0, discount: 0 };
+  const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const mkLine = (qty, description, amount) => ({
+    info: false, qty, description: String(description).slice(0, 2000),
+    amount, vat_id: vatId, ledger_id: ledgerId, costs_id: 0, discount: 0
   });
+
+  let lines;
+  if (p.lineMode === "perEntry") {
+    // Eén factuurregel per urenboeking (datum + omschrijving, eigen tarief).
+    lines = openEntries.slice().sort(byDate).map(e => {
+      const amt = (e.rateAmount != null && e.rateAmount !== "") ? Number(e.rateAmount) || 0 : defAmt;
+      const desc = `${e.date}: ${e.description || "Werkzaamheden"}`;
+      return mkLine(Number(e.hours) || 0, desc, amt);
+    });
+  } else {
+    // Samengevat: één regel per tarief, met de datums in de specificatie.
+    lines = groups.map(g => {
+      const ds = g.dates.slice().sort();
+      const from = ds[0] || "", to = ds[ds.length - 1] || "";
+      const lbl = g.label ? ` — ${g.label}` : "";
+      const header = `Werkzaamheden ${projLabel}${lbl} (${from} t/m ${to}) — ${hLabel(g.hours)}`;
+      const detail = g.entries.slice().sort(byDate)
+        .map(e => `${e.date}: ${e.description || "Werkzaamheden"} (${hLabel(Number(e.hours) || 0)})`)
+        .join("\n");
+      return mkLine(g.hours, `${header}\n${detail}`, g.amount);
+    });
+  }
 
   const totalHours = lines.reduce((s, l) => s + l.qty, 0);
   const amountExcl = Math.round(lines.reduce((s, l) => s + l.qty * l.amount, 0) * 100) / 100;
@@ -2764,6 +2787,7 @@ function addProject() {
   if (!rates.length) { status.textContent = "Vul minstens één geldig tarief in."; return; }
   const rel = projRelationMap[klant.toLowerCase().trim()] || null;
   const templateId = ($("proj-template") && $("proj-template").value) || "";
+  const lineMode = ($("proj-linemode") && $("proj-linemode").value) || "summary";
   projectsData.projects.unshift({
     id: projGenId("p"), projectNumber: nummer, name: naam,
     relationId: rel ? rel.id : null,
@@ -2772,13 +2796,23 @@ function addProject() {
     rates: rates, hourlyRate: rates[0].amount, vatId: PROJ_SALES_VAT_ID_21,
     templateId: templateId,
     templateName: templateId && projTemplates[templateId] ? projTemplates[templateId] : "",
+    lineMode: lineMode,
     createdAt: new Date().toISOString(), entries: []
   });
   saveProjects();
   $("proj-nummer").value = ""; $("proj-naam").value = ""; $("proj-klant").value = "";
   if ($("proj-rates")) { $("proj-rates").innerHTML = ""; addRateRow(); }
   if ($("proj-template")) $("proj-template").value = String(cfg.salesTemplateId || "");
+  if ($("proj-linemode")) $("proj-linemode").value = "summary";
   status.textContent = rel ? "" : "Let op: geen exacte Informer-relatie gematcht — bij factureren wordt de klant op naam opgezocht.";
+  renderProjects();
+}
+
+function setProjectLineMode(id, mode) {
+  const p = projFindById(id);
+  if (!p) return;
+  p.lineMode = (mode === "perEntry") ? "perEntry" : "summary";
+  saveProjects();
   renderProjects();
 }
 
@@ -2872,6 +2906,12 @@ function renderProjects() {
       </div>
       <div class="row-btns" style="margin-top:12px;">
         <button class="btn primary" onclick="invoiceProject('${p.id}')" ${openHrs > 0 ? "" : "disabled"}>Factureren (${fmtEur(openAmt)}) &rarr;</button>
+        <label class="muted" style="display:flex;align-items:center;gap:4px;">Regels:
+          <select onchange="setProjectLineMode('${p.id}', this.value)" style="font:inherit;font-size:12px;padding:4px 6px;border:0.5px solid var(--border-strong);border-radius:6px;">
+            <option value="summary" ${p.lineMode === "perEntry" ? "" : "selected"}>samengevat per tarief</option>
+            <option value="perEntry" ${p.lineMode === "perEntry" ? "selected" : ""}>aparte regel per boeking</option>
+          </select>
+        </label>
         <button class="btn danger" onclick="deleteProject('${p.id}')">Project verwijderen</button>
         <span class="muted" id="proj-status-${p.id}" style="align-self:center;"></span>
       </div>
