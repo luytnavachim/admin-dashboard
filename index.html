@@ -397,11 +397,14 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       </div>
     </div>
 
-    <div class="warn-box" style="display:flex;align-items:flex-start;gap:10px;">
-      <input type="checkbox" id="proj-concept-mode" onchange="saveConceptMode()" checked style="margin-top:2px;">
-      <label for="proj-concept-mode" style="cursor:pointer;">
-        <strong>Testmodus</strong> — factuur wordt alleen als <em>concept</em> in Informer aangemaakt en <strong>niet verstuurd</strong>; je uren blijven open. Controleer het concept in Informer en verwijder het daar. Vink dit uit als je echt wilt factureren én versturen.
-      </label>
+    <div class="help" style="display:flex;align-items:flex-start;gap:10px;">
+      <span style="margin-top:1px;">ℹ️</span>
+      <div><strong>Factureren</strong> maakt altijd een <em>concept</em> in Informer aan — je verstuurt 'm zelf vanuit Informer (zodat je er evt. een bijlage aan kunt koppelen). Normaal worden de geboekte uren daarbij als gefactureerd gemarkeerd.
+        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;">
+          <input type="checkbox" id="proj-test-mode" onchange="saveTestMode()">
+          <span><strong>Testfactuur</strong> — alleen ter controle: maak het concept aan maar laat de uren open (verwijder het concept daarna in Informer).</span>
+        </label>
+      </div>
     </div>
 
     <div class="section">
@@ -1348,7 +1351,7 @@ function switchTab(name) {
   if (name === "projecten") {
     const keyInput = $("proj-sync-key");
     if (keyInput && !keyInput.value) keyInput.value = projSyncKey();
-    if ($("proj-concept-mode")) $("proj-concept-mode").checked = projConceptMode();
+    if ($("proj-test-mode")) $("proj-test-mode").checked = projTestMode();
     ensureRateRows();
     renderProjects();
     if (projSyncKey() && projWorkerBase()) {
@@ -2497,7 +2500,6 @@ async function startSalesMigration() {
 const PROJ_LS_KEY = "projects_v1";              // offline-cache (laatste server-staat)
 const PROJ_SYNC_LS_KEY = "projects_sync_v1";   // { key } — sync-wachtwoord per apparaat
 const PROJ_SALES_VAT_ID_21 = 1478830;          // sales 21% NL (zelfde als migratie)
-const PROJ_SEND_PATH = "/invoice/sales/send/";
 let projectsData = loadProjectsCache();
 let projRelationsLoaded = false;
 let projRelationMap = {};                        // lowercased name -> {id, name, email}
@@ -2853,6 +2855,17 @@ function deleteEntry(projId, entryId) {
   renderProjects();
 }
 
+function unInvoiceEntry(projId, entryId) {
+  const p = projFindById(projId);
+  if (!p) return;
+  const e = (p.entries || []).find(x => x.id === entryId);
+  if (!e) return;
+  if (!confirm("Deze boeking terugzetten naar 'open' (telt weer mee bij factureren)?")) return;
+  e.invoiced = false; e.invoiceId = null; e.invoicedAt = null;
+  saveProjects();
+  renderProjects();
+}
+
 function renderProjects() {
   const wrap = $("projecten-list");
   if (!wrap) return;
@@ -2875,7 +2888,9 @@ function renderProjects() {
         <span class="e-date">${escapeHtml(e.date)}</span>
         <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${e.invoiced ? ' · <span class="badge ok">gefactureerd</span>' : ""}</span>
         <span class="e-hrs" style="min-width:150px;">${rTag}</span>
-        ${e.invoiced ? "" : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
+        ${e.invoiced
+          ? `<button class="icon-btn" title="Terugzetten naar open (bv. als je het concept in Informer hebt verwijderd)" onclick="unInvoiceEntry('${p.id}','${e.id}')" style="color:var(--muted);">↩</button>`
+          : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
       </div>`;
     }).join("") : `<div class="empty">Nog geen uren geboekt.</div>`;
     const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Informer-koppeling</span>';
@@ -2919,13 +2934,17 @@ function renderProjects() {
   }).join("");
 }
 
-// Testmodus: factuur alleen als concept aanmaken, niet versturen, uren blijven open.
-// Default AAN (veilig) — staat pas uit als je 'm bewust uitvinkt.
-function projConceptMode() { return localStorage.getItem("proj-concept-mode") !== "0"; }
-function saveConceptMode() {
-  const on = !!($("proj-concept-mode") && $("proj-concept-mode").checked);
-  localStorage.setItem("proj-concept-mode", on ? "1" : "0");
-  showToast(on ? "Testmodus aan — facturen worden alleen als concept aangemaakt" : "Live: facturen worden aangemaakt én verstuurd", on ? "ok" : "err");
+// Factureren = ALTIJD een concept in Informer aanmaken (nooit automatisch
+// versturen) — je verstuurt zelf vanuit Informer, evt. met bijlage.
+// Normaal worden de uren als gefactureerd gemarkeerd. Met "Testfactuur" aan
+// blijft het concept een dry-run en blijven de uren open.
+function projTestMode() { return localStorage.getItem("proj-test-mode") === "1"; }
+function saveTestMode() {
+  const on = !!($("proj-test-mode") && $("proj-test-mode").checked);
+  localStorage.setItem("proj-test-mode", on ? "1" : "0");
+  showToast(on
+    ? "Testfactuur aan — concept aanmaken, uren blijven open"
+    : "Normaal — concept aanmaken én uren als gefactureerd markeren", "ok");
 }
 
 async function invoiceProject(id) {
@@ -2937,22 +2956,20 @@ async function invoiceProject(id) {
   const open = projOpenEntries(p);
   if (!open.length) { showToast("Geen open uren om te factureren", "err"); return; }
 
-  const conceptOnly = projConceptMode();
+  const testMode = projTestMode();
   const inv = computeProjectInvoice(p, open, cfg);
-  const sendTo = p.relationEmail || "";
   const bedragLines = inv.breakdown.map(b =>
     `  • ${b.label || "Tarief"}: ${fmtHrs(b.hours)} × ${fmtEur(b.amount)} = ${fmtEur(b.lineTotal)}`).join("\n");
   const bedrag =
     `${bedragLines}\n` +
     `Totaal: ${fmtEur(inv.amountExcl)} excl. btw (${fmtEur(inv.totalIncl)} incl.)\n` +
     `Periode: ${inv.periodFrom} t/m ${inv.periodTo}`;
-  const confirmMsg = conceptOnly
-    ? `TESTMODUS — alleen CONCEPT aanmaken in Informer (niet versturen).\n\n` +
-      `Project: ${p.name}\nKlant: ${p.relationName}\n${bedrag}\n\n` +
-      `Je uren blijven open. Controleer het concept in Informer en verwijder het daar als het klopt.`
-    : `LIVE — factuur aanmaken ÉN definitief versturen in Informer.\n\n` +
-      `Project: ${p.name}\nKlant: ${p.relationName}\n${bedrag}\n` +
-      (sendTo ? `Versturen naar: ${sendTo}` : `Geen e-mail bekend — wordt alleen definitief gemaakt (niet gemaild).`);
+  const confirmMsg =
+    `Concept-factuur aanmaken in Informer (niet verstuurd).\n\n` +
+    `Project: ${p.name}\nKlant: ${p.relationName}\n${bedrag}\n\n` +
+    (testMode
+      ? `TESTFACTUUR: de uren blijven open. Verwijder het concept daarna in Informer.`
+      : `Je verstuurt 'm zelf vanuit Informer (evt. met bijlage). De uren worden als gefactureerd gemarkeerd.`);
   if (!confirm(confirmMsg)) return;
 
   setS("Bezig — klant opzoeken…");
@@ -2967,42 +2984,22 @@ async function invoiceProject(id) {
     }
     inv.payload.relation_id = parseInt(relationId, 10) || relationId;
 
-    setS(conceptOnly ? "Bezig — concept aanmaken…" : "Bezig — factuur aanmaken…");
+    setS("Bezig — concept aanmaken…");
     const result = await informerFetch("POST", cfg.salesCreatePath || "/invoice/sales/", inv.payload);
     const invId = result?.id || result?.invoice_id || result?.invoice?.id || null;
     const invUrl = result?.url || result?.invoice_url || result?.invoice?.url || null;
-    if (!invId) throw new Error("Factuur aangemaakt maar geen ID teruggekregen: " + JSON.stringify(result).slice(0, 200));
+    if (!invId) throw new Error("Concept aangemaakt maar geen ID teruggekregen: " + JSON.stringify(result).slice(0, 200));
 
-    if (conceptOnly) {
-      // Niet versturen, uren NIET markeren — blijven open voor de echte factuur.
-      renderProjects();
-      showToast(`Concept aangemaakt (id ${invId}) — niet verstuurd`, "ok");
-      const afterC = $("proj-status-" + id);
-      if (afterC) afterC.innerHTML = `🧪 Concept id ${escapeHtml(String(invId))}${invUrl ? ` — <a href="${escapeHtml(invUrl)}" target="_blank" rel="noopener">openen in Informer</a>` : ""} · niet verstuurd · uren blijven open`;
-      return;
+    if (!testMode) {
+      // Boekingen markeren als gefactureerd (concept ís de factuur; jij verstuurt zelf).
+      const stamp = new Date().toISOString();
+      open.forEach(e => { e.invoiced = true; e.invoiceId = invId; e.invoicedAt = stamp; });
+      saveProjects();
     }
-
-    // LIVE: definitief maken / versturen
-    let sendNote = "";
-    try {
-      setS("Bezig — versturen…");
-      const sendPayload = sendTo
-        ? { invoice_id: parseInt(invId, 10) || invId, method: "email", email_address: sendTo }
-        : { invoice_id: parseInt(invId, 10) || invId, method: "mark" };
-      await informerFetch("POST", PROJ_SEND_PATH, sendPayload);
-      sendNote = sendTo ? ` · verstuurd naar ${sendTo}` : " · definitief gemaakt";
-    } catch (sendErr) {
-      sendNote = " · ⚠ aanmaken gelukt maar versturen mislukte: " + (sendErr.message || sendErr);
-    }
-
-    // boekingen markeren als gefactureerd
-    const stamp = new Date().toISOString();
-    open.forEach(e => { e.invoiced = true; e.invoiceId = invId; e.invoicedAt = stamp; });
-    saveProjects();
     renderProjects();
-    showToast(`Factuur aangemaakt (id ${invId})${sendTo ? " + verstuurd" : ""}`, "ok");
+    showToast(`Concept aangemaakt (id ${invId})`, "ok");
     const after = $("proj-status-" + id);
-    if (after) after.innerHTML = `✓ Factuur id ${escapeHtml(String(invId))}${invUrl ? ` — <a href="${escapeHtml(invUrl)}" target="_blank" rel="noopener">openen</a>` : ""}${escapeHtml(sendNote)}`;
+    if (after) after.innerHTML = `✓ Concept id ${escapeHtml(String(invId))}${invUrl ? ` — <a href="${escapeHtml(invUrl)}" target="_blank" rel="noopener">openen in Informer</a>` : ""} · verstuur zelf vanuit Informer${testMode ? " · TEST: uren blijven open" : ""}`;
   } catch (e) {
     setS("");
     showToast("Factureren mislukt: " + (e.message || e), "err");
