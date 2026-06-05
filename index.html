@@ -2601,24 +2601,32 @@ function computeProjectInvoice(p, openEntries, cfg) {
   const ledgerId = Number(cfg.salesLedgerId) || 15302629;
   const vatId = p.vatId || PROJ_SALES_VAT_ID_21;
 
-  // groepeer per (label|bedrag)
+  const hLabel = (n) => (Number.isInteger(n) ? n.toString() : n.toFixed(2).replace(/\.?0+$/, "")) + " u";
+
+  // groepeer per (label|bedrag); bewaar de losse boekingen voor de specificatie
   const groups = [];
   const byKey = {};
   for (const e of openEntries) {
     const amt = (e.rateAmount != null && e.rateAmount !== "") ? Number(e.rateAmount) || 0 : defAmt;
     const label = e.rateLabel || defLabel;
     const key = label + "|" + amt;
-    if (!byKey[key]) { byKey[key] = { label, amount: amt, hours: 0, dates: [] }; groups.push(byKey[key]); }
+    if (!byKey[key]) { byKey[key] = { label, amount: amt, hours: 0, dates: [], entries: [] }; groups.push(byKey[key]); }
     byKey[key].hours += Number(e.hours) || 0;
     if (e.date) byKey[key].dates.push(e.date);
+    byKey[key].entries.push(e);
   }
 
   const lines = groups.map(g => {
     const ds = g.dates.slice().sort();
     const from = ds[0] || "", to = ds[ds.length - 1] || "";
-    const hrsLabel = (Number.isInteger(g.hours) ? g.hours.toString() : g.hours.toFixed(2).replace(/\.?0+$/, "")) + " u";
     const lbl = g.label ? ` — ${g.label}` : "";
-    const description = `Werkzaamheden ${projLabel}${lbl} (${from} t/m ${to}) — ${hrsLabel}`.slice(0, 200);
+    const header = `Werkzaamheden ${projLabel}${lbl} (${from} t/m ${to}) — ${hLabel(g.hours)}`;
+    // Specificatie: per boeking datum + omschrijving + uren
+    const detail = g.entries.slice()
+      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0))
+      .map(e => `${e.date}: ${e.description || "Werkzaamheden"} (${hLabel(Number(e.hours) || 0)})`)
+      .join("\n");
+    const description = `${header}\n${detail}`.slice(0, 2000);
     return { info: false, qty: g.hours, description, amount: g.amount, vat_id: vatId, ledger_id: ledgerId, costs_id: 0, discount: 0 };
   });
 
