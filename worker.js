@@ -8,7 +8,7 @@
  *      INFORMER_API_KEY        = <jouw api key>        (Secret — encrypt!)
  *      INFORMER_SECURITY_CODE  = <jouw security code>  (Secret — alleen als anders dan API key)
  *      INFORMER_AUTH_METHOD    = apikey | bearer | basic-key | basic-user | x-api-key
- *      INFORMER_BASE_URL       = https://api.informer.eu/v1   (of v2, etc.)
+ *      INFORMER_BASE_URL       = https://api.informer.eu/v2   (of v2, etc.)
  *      ALLOWED_ORIGIN          = *  of  https://jouwsite.github.io  (komma-gescheiden voor meerdere)
  * 4. Copy de worker-URL (eindigt op .workers.dev).
  * 5. In informer.html → sectie 1 → Base URL = <worker-url>/api
@@ -50,7 +50,7 @@ export default {
       return json({ error: "Worker mist INFORMER_API_KEY in Variables." }, 500, cors);
     }
 
-    const baseUrl = (env.INFORMER_BASE_URL || "https://api.informer.eu/v1").replace(/\/+$/, "");
+    const baseUrl = (env.INFORMER_BASE_URL || "https://api.informer.eu/v2").replace(/\/+$/, "");
     const upstreamUrl = baseUrl + "/" + url.pathname.slice(prefix.length) + url.search;
 
     const headers = new Headers();
