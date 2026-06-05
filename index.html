@@ -386,24 +386,42 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <!-- ====== TAB: Projecten (uren registreren → verkoopfactuur) ====== -->
   <section id="tab-projecten" class="tab-panel">
     <div class="section">
+      <h2>Synchronisatie <span class="muted" id="proj-sync-status" style="font-weight:400;"></span></h2>
+      <p class="muted">Projecten en uren worden centraal in je Cloudflare Worker (KV) bewaard, zodat je ze op elk apparaat ziet. Vul hieronder het sync-wachtwoord in (één keer per apparaat) — dat is de <code>PROJECTS_KEY</code> die in de Worker staat.</p>
+      <div class="field">
+        <label for="proj-sync-key">Sync-wachtwoord</label>
+        <input id="proj-sync-key" type="password" placeholder="PROJECTS_KEY uit de Worker" autocomplete="off">
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" onclick="saveProjSyncKey()">Verbinden &amp; synchroniseren</button>
+      </div>
+    </div>
+
+    <div class="section">
       <h2>Nieuw project</h2>
-      <p class="muted">Registreer uren per project en factureer ze met één klik. Uren worden lokaal in deze browser bewaard; bij <em>Factureren</em> wordt er een verkoopfactuur in Informer aangemaakt én verstuurd. Informer-projecten zelf zijn API-afgeschermd, dus maak het project hier één keer aan.</p>
+      <p class="muted">Neem een project uit Informer over (projectnummer, naam, relatie, uurtarief). Daarna boek je uren en factureer je met één klik: er wordt een verkoopfactuur in Informer aangemaakt én verstuurd.</p>
       <div class="warn-box" id="projecten-config-warn" style="display:none">
         <strong>Eerst even Instellingen invullen.</strong> Sales endpoint en ledger-ID staan leeg — vul ze in onder de Instellingen-tab en kom terug.
       </div>
-      <div class="field">
-        <label for="proj-naam">Projectnaam</label>
-        <input id="proj-naam" type="text" placeholder="bv. Onderhoud Q2 — Klant X">
+      <div class="grid-2">
+        <div class="field">
+          <label for="proj-nummer">Projectnummer (Informer)</label>
+          <input id="proj-nummer" type="text" placeholder="bv. 2026F740123">
+        </div>
+        <div class="field">
+          <label for="proj-naam">Projectnaam</label>
+          <input id="proj-naam" type="text" placeholder="bv. Ondersteuning Team IP-Services">
+        </div>
       </div>
       <div class="field">
-        <label for="proj-klant">Klant (Informer-relatie)</label>
+        <label for="proj-klant">Relatie / klant (Informer)</label>
         <input id="proj-klant" type="text" list="proj-klant-list" placeholder="Begin te typen om te zoeken…" autocomplete="off">
         <datalist id="proj-klant-list"></datalist>
         <span class="muted" id="proj-klant-hint" style="font-size:11px;">Relaties laden…</span>
       </div>
       <div class="field">
         <label for="proj-tarief">Uurtarief (€ excl. btw)</label>
-        <input id="proj-tarief" type="number" min="0" step="0.01" placeholder="bv. 85">
+        <input id="proj-tarief" type="number" min="0" step="0.01" placeholder="bv. 117">
       </div>
       <div class="row-btns">
         <button class="btn primary" onclick="addProject()">Project toevoegen</button>
@@ -1305,9 +1323,19 @@ function switchTab(name) {
     facturenLoaded = true;
     loadInvoiceEmails().catch(e => console.warn("loadInvoiceEmails:", e));
   }
-  // Projecten: render lijst + relaties (eenmalig) laden voor de klant-picker
+  // Projecten: sync vanaf de Worker, render lijst, relaties laden voor de klant-picker
   if (name === "projecten") {
+    const keyInput = $("proj-sync-key");
+    if (keyInput && !keyInput.value) keyInput.value = projSyncKey();
     renderProjects();
+    if (projSyncKey() && projWorkerBase()) {
+      setProjSyncStatus("synchroniseren…");
+      syncLoadProjects()
+        .then(ok => { renderProjects(); setProjSyncStatus(ok ? "✓ gesynct" : "", ok ? "ok" : ""); })
+        .catch(e => setProjSyncStatus("⚠ " + (e.message || e), "err"));
+    } else {
+      setProjSyncStatus("niet verbonden — vul sync-wachtwoord in", "err");
+    }
     if (account && cfg.baseUrl) loadProjectRelations().catch(e => console.warn("loadProjectRelations:", e));
   }
 }
@@ -2443,14 +2471,15 @@ async function startSalesMigration() {
 // ============================================================
 //  PROJECTEN — uren registreren → verkoopfactuur
 // ============================================================
-const PROJ_LS_KEY = "projects_v1";
+const PROJ_LS_KEY = "projects_v1";              // offline-cache (laatste server-staat)
+const PROJ_SYNC_LS_KEY = "projects_sync_v1";   // { key } — sync-wachtwoord per apparaat
 const PROJ_SALES_VAT_ID_21 = 1478830;          // sales 21% NL (zelfde als migratie)
 const PROJ_SEND_PATH = "/invoice/sales/send/";
-let projectsData = loadProjects();
+let projectsData = loadProjectsCache();
 let projRelationsLoaded = false;
 let projRelationMap = {};                        // lowercased name -> {id, name, email}
 
-function loadProjects() {
+function loadProjectsCache() {
   try {
     const raw = localStorage.getItem(PROJ_LS_KEY);
     if (!raw) return { projects: [] };
@@ -2459,7 +2488,60 @@ function loadProjects() {
     return d;
   } catch (e) { return { projects: [] }; }
 }
-function saveProjects() { localStorage.setItem(PROJ_LS_KEY, JSON.stringify(projectsData)); }
+
+// ---- Sync met de Worker KV-store (cross-device) ----
+function projWorkerBase() { return (cfg.baseUrl || "").replace(/\/api\/?$/, ""); }
+function projSyncKey() {
+  try { return (JSON.parse(localStorage.getItem(PROJ_SYNC_LS_KEY)) || {}).key || ""; }
+  catch { return ""; }
+}
+function setProjSyncStatus(t, kind) {
+  const el = $("proj-sync-status");
+  if (!el) return;
+  el.textContent = t || "";
+  el.style.color = kind === "err" ? "var(--danger-text)" : (kind === "ok" ? "var(--ok-text)" : "var(--muted)");
+}
+function saveProjSyncKey() {
+  const k = ($("proj-sync-key").value || "").trim();
+  localStorage.setItem(PROJ_SYNC_LS_KEY, JSON.stringify({ key: k }));
+  if (!k) { setProjSyncStatus("geen wachtwoord ingevuld", "err"); return; }
+  setProjSyncStatus("verbinden…");
+  syncLoadProjects().then(ok => {
+    renderProjects();
+    setProjSyncStatus(ok ? "✓ verbonden" : "kon niet laden", ok ? "ok" : "err");
+  }).catch(e => setProjSyncStatus("⚠ " + (e.message || e), "err"));
+}
+
+// Haalt de centrale staat op en overschrijft de lokale cache.
+async function syncLoadProjects() {
+  const base = projWorkerBase(), key = projSyncKey();
+  if (!base || !key) return false;
+  const res = await fetch(base + "/projects", { headers: { "X-Projects-Key": key } });
+  if (!res.ok) {
+    const msg = res.status === 401 ? "verkeerd sync-wachtwoord" : ("HTTP " + res.status);
+    throw new Error(msg);
+  }
+  const data = await res.json();
+  projectsData = (data && Array.isArray(data.projects)) ? data : { projects: [] };
+  localStorage.setItem(PROJ_LS_KEY, JSON.stringify(projectsData));
+  return true;
+}
+
+// Schrijft lokaal (cache) en pusht naar de Worker. Fire-and-forget vanuit UI.
+function saveProjects() {
+  localStorage.setItem(PROJ_LS_KEY, JSON.stringify(projectsData));
+  const base = projWorkerBase(), key = projSyncKey();
+  if (!base || !key) { setProjSyncStatus("⚠ niet gesynct — vul sync-wachtwoord in", "err"); return; }
+  setProjSyncStatus("opslaan…");
+  fetch(base + "/projects", {
+    method: "PUT",
+    headers: { "Content-Type": "application/json", "X-Projects-Key": key },
+    body: JSON.stringify(projectsData)
+  }).then(res => {
+    if (!res.ok) throw new Error(res.status === 401 ? "verkeerd sync-wachtwoord" : ("HTTP " + res.status));
+    setProjSyncStatus("✓ gesynct " + new Date().toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }), "ok");
+  }).catch(e => setProjSyncStatus("⚠ sync mislukt: " + (e.message || e), "err"));
+}
 function projGenId(prefix) { return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function projFindById(id) { return projectsData.projects.find(p => p.id === id) || null; }
 function projOpenEntries(p) { return (p.entries || []).filter(e => !e.invoiced); }
@@ -2480,7 +2562,8 @@ function computeProjectInvoice(p, openEntries, cfg) {
   const periodFrom = dates[0] || "";
   const periodTo = dates[dates.length - 1] || "";
   const hrsLabel = (Number.isInteger(totalHours) ? totalHours.toString() : totalHours.toFixed(2).replace(/\.?0+$/, "")) + " u";
-  const description = `Werkzaamheden ${p.name} (${periodFrom} t/m ${periodTo}) — ${hrsLabel}`.slice(0, 200);
+  const projLabel = p.projectNumber ? `${p.name} (${p.projectNumber})` : p.name;
+  const description = `Werkzaamheden ${projLabel} (${periodFrom} t/m ${periodTo}) — ${hrsLabel}`.slice(0, 200);
   const ledgerId = Number(cfg.salesLedgerId) || 15302629;
   const lines = [{
     info: false, qty: totalHours, description,
@@ -2489,7 +2572,7 @@ function computeProjectInvoice(p, openEntries, cfg) {
   const invDate = new Date().toISOString().slice(0, 10);
   const payload = {
     relation_id: p.relationId != null ? (parseInt(p.relationId, 10) || p.relationId) : null,
-    reference: (p.name || "").slice(0, 100),
+    reference: (p.projectNumber || p.name || "").slice(0, 100),
     invoice_date: invDate,
     template_id: parseInt(cfg.salesTemplateId, 10) || undefined,
     payment_condition_id: parseInt(cfg.salesPaymentConditionId, 10) || undefined,
@@ -2534,6 +2617,7 @@ function refreshProjectenConfigWarn() {
 }
 
 function addProject() {
+  const nummer = $("proj-nummer").value.trim();
   const naam = $("proj-naam").value.trim();
   const klant = $("proj-klant").value.trim();
   const tarief = parseFloat($("proj-tarief").value);
@@ -2543,7 +2627,7 @@ function addProject() {
   if (!(tarief >= 0)) { status.textContent = "Vul een geldig uurtarief in."; return; }
   const rel = projRelationMap[klant.toLowerCase().trim()] || null;
   projectsData.projects.unshift({
-    id: projGenId("p"), name: naam,
+    id: projGenId("p"), projectNumber: nummer, name: naam,
     relationId: rel ? rel.id : null,
     relationName: rel ? rel.name : klant,
     relationEmail: rel ? rel.email : "",
@@ -2551,7 +2635,7 @@ function addProject() {
     createdAt: new Date().toISOString(), entries: []
   });
   saveProjects();
-  $("proj-naam").value = ""; $("proj-klant").value = ""; $("proj-tarief").value = "";
+  $("proj-nummer").value = ""; $("proj-naam").value = ""; $("proj-klant").value = ""; $("proj-tarief").value = "";
   status.textContent = rel ? "" : "Let op: geen exacte Informer-relatie gematcht — bij factureren wordt de klant op naam opgezocht.";
   renderProjects();
 }
@@ -2607,10 +2691,11 @@ function renderProjects() {
         ${e.invoiced ? "" : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
       </div>`).join("") : `<div class="empty">Nog geen uren geboekt.</div>`;
     const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Informer-koppeling</span>';
+    const nummerBadge = p.projectNumber ? `<span class="badge info">${escapeHtml(p.projectNumber)}</span> ` : "";
     return `<div class="section" data-proj="${p.id}">
       <div class="proj-head">
         <div class="meta">
-          <h2>${escapeHtml(p.name)}</h2>
+          <h2>${nummerBadge}${escapeHtml(p.name)}</h2>
           <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${fmtEur(p.hourlyRate)}/uur</div>
         </div>
         <div class="proj-total">

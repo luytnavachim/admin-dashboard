@@ -18,7 +18,7 @@ Een dashboard met zes tabs:
 - **Overzicht** — live status over alle gemonitorde mailboxen: facturen die verwerkt/betaald moeten worden, mails die antwoord vragen, openstaande inkoopfacturen uit Informer, en je agenda voor de komende 2 dagen. Per factuurrij een `→ Informer`-knop en een `Verwerkt ✓`-knop die de mail naar `MoneyMonk Verwerkt` verplaatst.
 - **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt de relation in Informer, maakt de inkoopfactuur aan mét PDF als bijlage, en verplaatst de mail naar `MoneyMonk Verwerkt`. Ook een **losse-PDF-upload** voor facturen die niet in je inbox zitten.
 - **Verkoop migreren** — bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Informer (per PDF: Claude extraheert klant + bedragen → klant matchen/aanmaken → POST naar het sales-endpoint).
-- **Projecten** — uren registreren per project en factureren met één klik. Je maakt een project aan (naam + Informer-klant + vast uurtarief), boekt er uren op (datum, uren, omschrijving), en met `Factureren` bouwt het dashboard er één samenvattende verkoopfactuurregel van (totaal open uren × tarief), maakt de factuur aan via `/invoice/sales/` en maakt 'm definitief/verstuurt 'm via `/invoice/sales/send/`. Gefactureerde uren blijven als historie staan, gemarkeerd zodat ze niet dubbel op een volgende factuur komen. Informer-projecten zelf zijn API-afgeschermd, daarom worden de projecten en uren **lokaal in de browser** (`localStorage`, key `projects_v1`) bewaard.
+- **Projecten** — uren registreren per project en factureren met één klik. Je neemt een project uit Informer over (projectnummer + naam + relatie + vast uurtarief), boekt er uren op (datum, uren, omschrijving), en met `Factureren` bouwt het dashboard er één samenvattende verkoopfactuurregel van (totaal open uren × tarief), maakt de factuur aan via `/invoice/sales/` en maakt 'm definitief/verstuurt 'm via `/invoice/sales/send/` (het projectnummer komt als referentie op de factuur). Gefactureerde uren blijven als historie staan, gemarkeerd zodat ze niet dubbel op een volgende factuur komen. Informer-projecten zelf zijn API-afgeschermd, daarom voer je ze hier één keer in. De data wordt **cross-device** bewaard in **Cloudflare Workers KV** (endpoint `/projects` op de Worker, beveiligd met een sync-wachtwoord `PROJECTS_KEY`); `localStorage` dient alleen als offline-cache.
 - **Instellingen** — Informer-verbinding (base URL via de Worker, endpoints, sales ledger-/product-/template-/currency-IDs, BTW-optie).
 - **Geavanceerd** — API-sandbox: verbinding testen, bestaande inkoopfacturen ophalen, test-inkoopfactuur aanmaken, plus een debug-log van de laatste Informer request/response.
 
@@ -74,9 +74,23 @@ Microsoft Graph vereist een geregistreerde "app" zodat de pagina mag inloggen. G
    - `INFORMER_BASE_URL` — bv. `https://api.informer.eu/v1`.
    - `ANTHROPIC_API_KEY` — voor de PDF-extractie *(Secret)*.
    - `ALLOWED_ORIGIN` — `*` of je dashboard-URL(s), komma-gescheiden.
+   - `PROJECTS_KEY` — sync-wachtwoord voor de Projecten-tab *(Secret)* — zie hieronder.
 3. Kopieer de Worker-URL (eindigt op `.workers.dev`). De Informer-base-URL in het dashboard wordt dan `<worker-url>/api`.
 
 > De Worker gebruikt `claude-haiku-4-5` voor extractie (~15× goedkoper dan Opus, identieke resultaten voor gestructureerde `tool_choice`-extractie). Terugschakelen naar Sonnet/Opus alleen als Haiku op specifieke PDF's faalt.
+
+#### Projecten-opslag (Workers KV) — éénmalig
+
+De Projecten-tab bewaart projecten + uren cross-device in een KV-store. Setup vanuit de repo:
+
+```bash
+npx wrangler kv namespace create PROJECTS   # geeft een id terug
+# → plak die id in wrangler.jsonc bij kv_namespaces (binding PROJECTS_KV)
+npx wrangler secret put PROJECTS_KEY         # kies een wachtwoord
+npx wrangler deploy
+```
+
+Daarna vul je in de **Projecten-tab → Synchronisatie** datzelfde `PROJECTS_KEY`-wachtwoord in (één keer per apparaat). De data staat dan in `/projects` op de Worker, beveiligd met dat wachtwoord via de `X-Projects-Key`-header.
 
 ### Stap 3 — Client-ID invullen
 

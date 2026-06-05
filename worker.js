@@ -41,6 +41,10 @@ export default {
       return await handleExtract(request, env, cors, "sales");
     }
 
+    if (url.pathname === "/projects") {
+      return await handleProjects(request, env, cors);
+    }
+
     const prefix = "/api/";
     if (!url.pathname.startsWith(prefix)) {
       return json({ error: "Use /api/<path>" }, 404, cors);
@@ -300,6 +304,51 @@ function hasErrorPayload(err) {
   return Boolean(err);
 }
 
+// ---------------------------------------------------------------------------
+// /projects — cross-device opslag van projecten + uren in Workers KV.
+// Eén key ("projects_v1") met de hele JSON-blob (single-user tool).
+// Beveiligd met een gedeeld wachtwoord: de frontend stuurt header
+// X-Projects-Key, die moet matchen met env.PROJECTS_KEY (Secret).
+//   GET  /projects  → { projects: [...] , updatedAt }
+//   PUT  /projects  → body { projects: [...] }  (POST mag ook)
+// Vereist KV-binding env.PROJECTS_KV (zie wrangler.jsonc).
+// ---------------------------------------------------------------------------
+async function handleProjects(request, env, cors) {
+  if (!env.PROJECTS_KEY) {
+    return json({ error: "Worker mist PROJECTS_KEY in Variables (Secret)." }, 500, cors);
+  }
+  const provided = request.headers.get("X-Projects-Key") || "";
+  if (provided !== env.PROJECTS_KEY) {
+    return json({ error: "Unauthorized — onjuiste of ontbrekende X-Projects-Key." }, 401, cors);
+  }
+  if (!env.PROJECTS_KV) {
+    return json({ error: "Worker mist PROJECTS_KV binding (kv_namespaces in wrangler.jsonc)." }, 500, cors);
+  }
+  const KEY = "projects_v1";
+
+  if (request.method === "GET") {
+    const raw = await env.PROJECTS_KV.get(KEY);
+    let data = { projects: [] };
+    if (raw) { try { data = JSON.parse(raw); } catch { data = { projects: [] }; } }
+    if (!data || !Array.isArray(data.projects)) data = { projects: [] };
+    return json(data, 200, cors);
+  }
+
+  if (request.method === "PUT" || request.method === "POST") {
+    let body;
+    try { body = await request.json(); }
+    catch { return json({ error: "Body moet JSON zijn met { projects: [...] }." }, 400, cors); }
+    if (!body || !Array.isArray(body.projects)) {
+      return json({ error: "Body moet { projects: [...] } zijn." }, 400, cors);
+    }
+    body.updatedAt = new Date().toISOString();
+    await env.PROJECTS_KV.put(KEY, JSON.stringify(body));
+    return json({ ok: true, updatedAt: body.updatedAt, count: body.projects.length }, 200, cors);
+  }
+
+  return json({ error: "Alleen GET of PUT." }, 405, cors);
+}
+
 function buildCors(origin, env) {
   const allow = env.ALLOWED_ORIGIN || "*";
   let allowOrigin = "*";
@@ -310,7 +359,7 @@ function buildCors(origin, env) {
   return {
     "Access-Control-Allow-Origin": allowOrigin,
     "Access-Control-Allow-Methods": "GET, POST, PUT, PATCH, DELETE, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key",
+    "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key, X-Projects-Key",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin"
   };
