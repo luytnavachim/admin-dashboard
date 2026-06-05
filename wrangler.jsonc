@@ -1,21 +1,25 @@
 {
-  "$schema": "https://unpkg.com/wrangler/config-schema.json",
-  "name": "admin-dashboard",
-  "main": "worker.js",
-  "compatibility_date": "2026-05-14",
-  "compatibility_flags": ["nodejs_compat"],
-  "assets": {
-    "directory": "./"
-  },
-  "kv_namespaces": [
-    // Projecten + uren (cross-device opslag voor de Projecten-tab).
-    // Maak de namespace aan met:  npx wrangler kv namespace create PROJECTS
-    // en plak de teruggegeven id hieronder.
-    { "binding": "PROJECTS_KV", "id": "REPLACE_WITH_KV_ID" }
-  ],
-  "vars": {
-    "INFORMER_AUTH_METHOD": "apikey",
-    "INFORMER_BASE_URL": "https://api.informer.eu/v1",
-    "ALLOWED_ORIGIN": "*"
-  }
+	"$schema": "https://unpkg.com/wrangler/config-schema.json",
+	"name": "admin-dashboard",
+	"main": "worker.js",
+	"compatibility_date": "2026-05-14",
+	"compatibility_flags": [
+		"nodejs_compat"
+	],
+	"assets": {
+		"directory": "./"
+	},
+	"kv_namespaces": [
+		// Projecten + uren (cross-device opslag voor de Projecten-tab).
+		// Binding-naam moet PROJECTS_KV zijn (zo gebruikt worker.js het).
+		{
+			"binding": "PROJECTS_KV",
+			"id": "dd70a8ae9c3340e49d7d1c0c7f13fc5d"
+		}
+	],
+	"vars": {
+		"INFORMER_AUTH_METHOD": "apikey",
+		"INFORMER_BASE_URL": "https://api.informer.eu/v1",
+		"ALLOWED_ORIGIN": "*"
+	}
 }
