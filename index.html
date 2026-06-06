@@ -2895,7 +2895,35 @@ const DOORBELAST_LABEL = "Doorbelasting";
 const dbPending = {};                   // projectId -> geëxtraheerde factuur
 const dbInformerCache = {};             // projectId -> opgehaalde inkoopfacturen uit Informer
 
-// Bron 2: bestaande inkoopfacturen uit Informer ophalen om uit te kiezen.
+// Beschrijving opschonen: 'Stuksprijs: € 80,00'-tekst eruit + witruimte normaliseren.
+function dbCleanDesc(s) {
+  return String(s || "").replace(/stuks?prijs\s*:?[^\n]*/ig, " ").replace(/\s+/g, " ").trim();
+}
+// Werkdatum uit de regel halen (DD-MM-YYYY → YYYY-MM-DD); leeg als niet gevonden.
+function dbParseDate(s) {
+  const m = String(s || "").match(/(\d{2})-(\d{2})-(\d{4})/);
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
+}
+// Bouw per-regel boekingen uit de geëxtraheerde factuur (aantal = uren).
+function dbLinesFromExtract(ex) {
+  const invDate = ex.invoice_date || new Date().toISOString().slice(0, 10);
+  const src = Array.isArray(ex.lines) ? ex.lines : [];
+  const out = [];
+  for (const l of src) {
+    const amt = Number(l.amount) || 0;
+    let qty = Number(l.qty) || 0;
+    if (qty <= 0 && amt > 0) qty = Math.round((amt / DOORBELAST_INKOOP) * 100) / 100;  // fallback
+    if (qty <= 0) continue;
+    out.push({ qty, description: dbCleanDesc(l.description), date: dbParseDate(l.description) || invDate, amount: amt });
+  }
+  if (!out.length) {
+    const excl = Math.round(((Number(ex.invoice_total) || 0) / 1.21) * 100) / 100;
+    out.push({ qty: Math.round((excl / DOORBELAST_INKOOP) * 100) / 100, description: `Doorbelasting ${ex.supplier_name || ""}`.trim(), date: invDate, amount: excl });
+  }
+  return out;
+}
+
+// Bron B: bestaande inkoopfacturen uit Informer ophalen om uit te kiezen.
 async function loadDoorbelastingInformer(id) {
   const cont = $("db-informer-" + id);
   if (!cont) return;
@@ -2912,7 +2940,7 @@ async function loadDoorbelastingInformer(id) {
       const excl = inv.totals?.excl_vat != null ? Number(inv.totals.excl_vat) : Math.round((incl / 1.21) * 100) / 100;
       const supplier = (relationsCache && relationsCache[String(inv.relation_id)]?.name) || `Leverancier #${inv.relation_id || "?"}`;
       const date = (inv.invoice_date && inv.invoice_date !== "0000-00-00") ? inv.invoice_date : (inv.date || "");
-      return { supplier, number: inv.number || "?", date, excl };
+      return { invId: inv.id, supplier, number: inv.number || "?", date, excl };
     }).filter(x => x.excl > 0).slice(0, 40);
     if (!dbInformerCache[id].length) { cont.innerHTML = '<div class="empty">Geen inkoopfacturen gevonden in Informer.</div>'; return; }
     cont.innerHTML = `<div class="muted" style="margin:8px 0 4px;">Kies de inkoopfactuur om door te belasten:</div>` +
@@ -2924,12 +2952,31 @@ async function loadDoorbelastingInformer(id) {
   } catch (e) { cont.innerHTML = `<div class="empty">Ophalen mislukt: ${escapeHtml(e.message || String(e))}</div>`; }
 }
 
-function pickDoorbelastingInformer(id, idx) {
+async function pickDoorbelastingInformer(id, idx) {
   const x = (dbInformerCache[id] || [])[idx];
   if (!x) return;
-  const hours = Math.round((x.excl / DOORBELAST_INKOOP) * 100) / 100;
-  dbPending[id] = { supplier: x.supplier, number: x.number, date: x.date || new Date().toISOString().slice(0, 10), exclTotal: x.excl, hours };
-  renderDbPreview(id, `aantal uren berekend als totaal ÷ €${DOORBELAST_INKOOP} (Informer bewaart geen aantal per regel) — controleer.`);
+  const cont = $("db-preview-" + id);
+  if (cont) cont.innerHTML = '<div class="loading">Factuurregels ophalen…</div>';
+  let lines = [];
+  try {
+    if (x.invId) {
+      const det = await informerFetch("GET", `/invoice/purchase/${x.invId}/`);
+      const inv = det?.purchase || det?.invoice || det;
+      const raw = inv?.lines || inv?.line || [];
+      const arr = Array.isArray(raw) ? raw : Object.values(raw || {});
+      arr.forEach(l => {
+        const amt = Number(l.amount ?? l.price ?? 0) || 0;
+        const q = Number(l.qty) || 0;
+        const qty = q > 0 ? q : Math.round((amt / DOORBELAST_INKOOP) * 100) / 100;
+        if (qty > 0) lines.push({ qty, description: dbCleanDesc(l.description || l.text || ""), date: dbParseDate(l.description || "") || x.date, amount: amt });
+      });
+    }
+  } catch (e) { /* val terug op totaal hieronder */ }
+  if (!lines.length) {
+    lines = [{ qty: Math.round((x.excl / DOORBELAST_INKOOP) * 100) / 100, description: `Doorbelasting ${x.supplier} factuur ${x.number}`, date: x.date, amount: x.excl }];
+  }
+  dbPending[id] = { supplier: x.supplier, number: x.number, date: x.date || new Date().toISOString().slice(0, 10), lines };
+  renderDbPreview(id);
 }
 
 async function importDoorbelasting(id) {
@@ -2952,31 +2999,29 @@ async function importDoorbelasting(id) {
     if (!res.ok) throw new Error((body && body.error) || ("HTTP " + res.status));
     const ex = body && body.extracted;
     if (!ex) throw new Error("Geen data uit factuur gehaald.");
-    const lines = Array.isArray(ex.lines) ? ex.lines : [];
-    const exclTotal = lines.length
-      ? Math.round(lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100
-      : Math.round(((Number(ex.invoice_total) || 0) / 1.21) * 100) / 100;
-    let hours = lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
-    let note = "";
-    if (!(hours > 0)) { hours = Math.round((exclTotal / DOORBELAST_INKOOP) * 100) / 100; note = `geen aantal op de factuur gevonden — geschat als totaal ÷ €${DOORBELAST_INKOOP}; controleer het aantal uren.`; }
-    dbPending[id] = { supplier: ex.supplier_name || "", number: ex.number || "", date: ex.invoice_date || new Date().toISOString().slice(0, 10), exclTotal, hours };
+    dbPending[id] = {
+      supplier: ex.supplier_name || "", number: ex.number || "",
+      date: ex.invoice_date || new Date().toISOString().slice(0, 10),
+      lines: dbLinesFromExtract(ex)
+    };
     setS("");
-    renderDbPreview(id, note);
+    renderDbPreview(id);
   } catch (e) { setS(""); showToast("Inlezen mislukt: " + (e.message || e), "err"); }
 }
 
-function renderDbPreview(id, note) {
+function renderDbPreview(id) {
   const wrap = $("db-preview-" + id);
   const d = dbPending[id];
   if (!wrap || !d) return;
+  const totalH = d.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+  const rows = d.lines.map(l => `<div class="entry-row">
+    <span class="e-date">${escapeHtml(l.date)}</span>
+    <span class="e-desc" title="${escapeHtml(l.description)}">${escapeHtml(l.description)}</span>
+    <span class="e-hrs" style="min-width:120px;">${fmtHrs(l.qty)} × ${fmtEur(DOORBELAST_RATE)}</span>
+  </div>`).join("");
   wrap.innerHTML = `<div class="warn-box" style="margin-top:10px;">
-    <div><strong>${escapeHtml(d.supplier || "Leverancier")}</strong> · factuur ${escapeHtml(d.number || "?")} · ${escapeHtml(d.date)} · ${fmtEur(d.exclTotal)} excl. btw</div>
-    ${note ? `<div class="muted" style="margin-top:4px;">⚠ ${escapeHtml(note)}</div>` : ""}
-    <div class="entry-add" style="margin-top:8px;">
-      <div class="field date" style="margin:0;"><label>Datum</label><input type="date" id="db-d-${id}" value="${escapeHtml(d.date)}"></div>
-      <div class="field hrs" style="margin:0;"><label>Uren</label><input type="number" min="0" step="0.25" id="db-h-${id}" value="${d.hours}"></div>
-      <div class="field desc" style="margin:0;"><label>Omschrijving</label><input type="text" id="db-desc-${id}" value="Doorbelasting ${escapeHtml(d.supplier || "Nova Trinity")} factuur ${escapeHtml(d.number || "")}"></div>
-    </div>
+    <div><strong>${escapeHtml(d.supplier || "Leverancier")}</strong> · factuur ${escapeHtml(d.number || "?")} · ${escapeHtml(d.date)} · ${d.lines.length} regel(s) · ${fmtHrs(totalH)} → ${fmtEur(totalH * DOORBELAST_RATE)}</div>
+    <div style="margin-top:8px;">${rows}</div>
     <div class="row-btns" style="margin-top:8px;">
       <button class="btn" onclick="addDoorbelastingEntry('${id}', false)">Toevoegen als uren (€${DOORBELAST_RATE}/uur)</button>
       <button class="btn primary" onclick="addDoorbelastingEntry('${id}', true)">Toevoegen + factureren (concept) &rarr;</button>
@@ -2987,20 +3032,22 @@ function renderDbPreview(id, note) {
 function addDoorbelastingEntry(id, andInvoice) {
   const p = projFindById(id);
   if (!p) return;
-  const date = $("db-d-" + id).value;
-  const hours = parseFloat($("db-h-" + id).value);
-  const desc = ($("db-desc-" + id).value || "").trim();
-  if (!date) { showToast("Kies een datum", "err"); return; }
-  if (!(hours > 0)) { showToast("Ongeldig aantal uren", "err"); return; }
-  p.entries.push({
-    id: projGenId("e"), date, hours, description: desc || "Doorbelasting",
-    rateAmount: DOORBELAST_RATE, rateLabel: DOORBELAST_LABEL, invoiced: false, invoiceId: null
+  const d = dbPending[id];
+  if (!d || !Array.isArray(d.lines) || !d.lines.length) { showToast("Niets om toe te voegen", "err"); return; }
+  d.lines.forEach(l => {
+    if (!(Number(l.qty) > 0)) return;
+    p.entries.push({
+      id: projGenId("e"), date: l.date || d.date, hours: Number(l.qty),
+      description: l.description || "Doorbelasting",
+      rateAmount: DOORBELAST_RATE, rateLabel: DOORBELAST_LABEL, invoiced: false, invoiceId: null
+    });
   });
+  const n = d.lines.length, totalH = d.lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
   delete dbPending[id];
   projExpanded.add(id);
   saveProjects();
   renderProjects();
-  showToast(`Doorbelasting toegevoegd: ${fmtHrs(hours)} × €${DOORBELAST_RATE}`, "ok");
+  showToast(`${n} doorbelasting-regel(s) toegevoegd: ${fmtHrs(totalH)} × €${DOORBELAST_RATE}`, "ok");
   if (andInvoice) invoiceProject(id);   // direct doorzetten: concept aanmaken
 }
 
