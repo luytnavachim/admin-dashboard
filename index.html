@@ -2888,10 +2888,49 @@ function unInvoiceEntry(projId, entryId) {
   renderProjects();
 }
 
-// ---- Doorbelasting: inkoopfactuur (PDF) → uren tegen vast tarief ----
+// ---- Doorbelasting: inkoopfactuur (PDF of uit Informer) → uren tegen vast tarief ----
 const DOORBELAST_RATE = 100;            // vast doorbelasttarief €/uur
+const DOORBELAST_INKOOP = 80;           // inkooptarief leverancier (€/uur) voor uren-berekening
 const DOORBELAST_LABEL = "Doorbelasting";
 const dbPending = {};                   // projectId -> geëxtraheerde factuur
+const dbInformerCache = {};             // projectId -> opgehaalde inkoopfacturen uit Informer
+
+// Bron 2: bestaande inkoopfacturen uit Informer ophalen om uit te kiezen.
+async function loadDoorbelastingInformer(id) {
+  const cont = $("db-informer-" + id);
+  if (!cont) return;
+  cont.innerHTML = '<div class="loading">Inkoopfacturen ophalen…</div>';
+  try {
+    const [data] = await Promise.all([
+      informerFetch("GET", cfg.listPath || "/invoices/purchase/"),
+      loadRelationsCache().catch(() => null)
+    ]);
+    const all = normalizePurchaseInvoices(data);
+    all.sort((a, b) => new Date(b.invoice_date || b.date || 0) - new Date(a.invoice_date || a.date || 0));
+    dbInformerCache[id] = all.map(inv => {
+      const incl = Number(inv.totals?.incl_vat ?? inv.total_price_incl_vat ?? 0);
+      const excl = inv.totals?.excl_vat != null ? Number(inv.totals.excl_vat) : Math.round((incl / 1.21) * 100) / 100;
+      const supplier = (relationsCache && relationsCache[String(inv.relation_id)]?.name) || `Leverancier #${inv.relation_id || "?"}`;
+      const date = (inv.invoice_date && inv.invoice_date !== "0000-00-00") ? inv.invoice_date : (inv.date || "");
+      return { supplier, number: inv.number || "?", date, excl };
+    }).filter(x => x.excl > 0).slice(0, 40);
+    if (!dbInformerCache[id].length) { cont.innerHTML = '<div class="empty">Geen inkoopfacturen gevonden in Informer.</div>'; return; }
+    cont.innerHTML = `<div class="muted" style="margin:8px 0 4px;">Kies de inkoopfactuur om door te belasten:</div>` +
+      dbInformerCache[id].map((x, i) => `<div class="entry-row" style="cursor:pointer;" onclick="pickDoorbelastingInformer('${id}',${i})">
+        <span class="e-date">${escapeHtml(x.date)}</span>
+        <span class="e-desc">${escapeHtml(x.supplier)} · ${escapeHtml(x.number)}</span>
+        <span class="e-hrs" style="min-width:120px;">${fmtEur(x.excl)} excl</span>
+      </div>`).join("");
+  } catch (e) { cont.innerHTML = `<div class="empty">Ophalen mislukt: ${escapeHtml(e.message || String(e))}</div>`; }
+}
+
+function pickDoorbelastingInformer(id, idx) {
+  const x = (dbInformerCache[id] || [])[idx];
+  if (!x) return;
+  const hours = Math.round((x.excl / DOORBELAST_INKOOP) * 100) / 100;
+  dbPending[id] = { supplier: x.supplier, number: x.number, date: x.date || new Date().toISOString().slice(0, 10), exclTotal: x.excl, hours };
+  renderDbPreview(id, `aantal uren berekend als totaal ÷ €${DOORBELAST_INKOOP} (Informer bewaart geen aantal per regel) — controleer.`);
+}
 
 async function importDoorbelasting(id) {
   const fileInput = $("db-file-" + id);
@@ -2919,7 +2958,7 @@ async function importDoorbelasting(id) {
       : Math.round(((Number(ex.invoice_total) || 0) / 1.21) * 100) / 100;
     let hours = lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
     let note = "";
-    if (!(hours > 0)) { hours = Math.round((exclTotal / 80) * 100) / 100; note = "geen aantal op de factuur gevonden — geschat als totaal ÷ €80; controleer het aantal uren."; }
+    if (!(hours > 0)) { hours = Math.round((exclTotal / DOORBELAST_INKOOP) * 100) / 100; note = `geen aantal op de factuur gevonden — geschat als totaal ÷ €${DOORBELAST_INKOOP}; controleer het aantal uren.`; }
     dbPending[id] = { supplier: ex.supplier_name || "", number: ex.number || "", date: ex.invoice_date || new Date().toISOString().slice(0, 10), exclTotal, hours };
     setS("");
     renderDbPreview(id, note);
@@ -2937,12 +2976,15 @@ function renderDbPreview(id, note) {
       <div class="field date" style="margin:0;"><label>Datum</label><input type="date" id="db-d-${id}" value="${escapeHtml(d.date)}"></div>
       <div class="field hrs" style="margin:0;"><label>Uren</label><input type="number" min="0" step="0.25" id="db-h-${id}" value="${d.hours}"></div>
       <div class="field desc" style="margin:0;"><label>Omschrijving</label><input type="text" id="db-desc-${id}" value="Doorbelasting ${escapeHtml(d.supplier || "Nova Trinity")} factuur ${escapeHtml(d.number || "")}"></div>
-      <button class="btn primary" onclick="addDoorbelastingEntry('${id}')">Toevoegen (€${DOORBELAST_RATE}/uur)</button>
+    </div>
+    <div class="row-btns" style="margin-top:8px;">
+      <button class="btn" onclick="addDoorbelastingEntry('${id}', false)">Toevoegen als uren (€${DOORBELAST_RATE}/uur)</button>
+      <button class="btn primary" onclick="addDoorbelastingEntry('${id}', true)">Toevoegen + factureren (concept) &rarr;</button>
     </div>
   </div>`;
 }
 
-function addDoorbelastingEntry(id) {
+function addDoorbelastingEntry(id, andInvoice) {
   const p = projFindById(id);
   if (!p) return;
   const date = $("db-d-" + id).value;
@@ -2959,6 +3001,7 @@ function addDoorbelastingEntry(id) {
   saveProjects();
   renderProjects();
   showToast(`Doorbelasting toegevoegd: ${fmtHrs(hours)} × €${DOORBELAST_RATE}`, "ok");
+  if (andInvoice) invoiceProject(id);   // direct doorzetten: concept aanmaken
 }
 
 const projExpanded = new Set();      // welke projectkaarten zijn uitgeklapt
@@ -3127,9 +3170,12 @@ function renderProjects() {
       </div>
       <details style="margin-top:12px;">
         <summary class="muted" style="cursor:pointer;font-size:12px;">📄 Doorbelasting importeren (inkoopfactuur → uren @ €${DOORBELAST_RATE})</summary>
-        <p class="muted" style="margin:8px 0 4px;">Lees een inkoopfactuur (bv. Nova Trinity) in: het aantal uren wordt overgenomen en als doorbelasting tegen €${DOORBELAST_RATE}/uur klaargezet.</p>
-        <div class="field" style="margin:0;"><input type="file" id="db-file-${p.id}" accept="application/pdf,.pdf"></div>
-        <div class="row-btns"><button class="btn" onclick="importDoorbelasting('${p.id}')">Inlezen</button><span class="muted" id="db-status-${p.id}" style="align-self:center;"></span></div>
+        <p class="muted" style="margin:8px 0 4px;">Bron: upload een PDF óf kies een bestaande inkoopfactuur uit Informer. Het aantal uren wordt overgenomen en als doorbelasting tegen €${DOORBELAST_RATE}/uur klaargezet; daarna kun je 'm direct doorzetten naar een concept.</p>
+        <div class="field" style="margin:0;"><label style="font-size:11px;">Bron A — PDF uploaden</label><input type="file" id="db-file-${p.id}" accept="application/pdf,.pdf"></div>
+        <div class="row-btns"><button class="btn" onclick="importDoorbelasting('${p.id}')">Inlezen uit PDF</button>
+          <button class="btn" onclick="loadDoorbelastingInformer('${p.id}')">Bron B — kies uit Informer</button>
+          <span class="muted" id="db-status-${p.id}" style="align-self:center;"></span></div>
+        <div id="db-informer-${p.id}"></div>
         <div id="db-preview-${p.id}"></div>
       </details>
       <div class="row-btns" style="margin-top:12px;">
