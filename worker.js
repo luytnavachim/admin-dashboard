@@ -164,7 +164,9 @@ const PURCHASE_INVOICE_TOOL = {
           type: "object",
           properties: {
             description: { type: "string", description: "Korte omschrijving van de regel." },
-            amount:      { type: "number", description: "Bedrag exclusief BTW." },
+            qty:         { type: "number", description: "Aantal/hoeveelheid van de regel (bv. aantal uren of stuks) zoals op de factuur. 0 als geen aantal vermeld." },
+            amount:      { type: "number", description: "Bedrag exclusief BTW (totaal voor deze regel)." },
+            unit_price:  { type: "number", description: "Stukprijs/tarief per eenheid excl. BTW als vermeld (bv. uurtarief). 0 als niet vermeld." },
             vat_amount:  { type: "number", description: "BTW-bedrag op deze regel." },
             vat_rate:    { type: "number", description: "BTW-percentage (21, 9, 0, ...). 0 als BTW-vrij of buiten EU." }
           },

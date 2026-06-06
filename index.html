@@ -2888,6 +2888,79 @@ function unInvoiceEntry(projId, entryId) {
   renderProjects();
 }
 
+// ---- Doorbelasting: inkoopfactuur (PDF) → uren tegen vast tarief ----
+const DOORBELAST_RATE = 100;            // vast doorbelasttarief €/uur
+const DOORBELAST_LABEL = "Doorbelasting";
+const dbPending = {};                   // projectId -> geëxtraheerde factuur
+
+async function importDoorbelasting(id) {
+  const fileInput = $("db-file-" + id);
+  const statusEl = $("db-status-" + id);
+  const setS = (t) => { if (statusEl) statusEl.textContent = t; };
+  const file = fileInput && fileInput.files && fileInput.files[0];
+  if (!file) { showToast("Kies eerst een PDF", "err"); return; }
+  if (!projWorkerBase()) { showToast("Geen Worker-URL bekend", "err"); return; }
+  setS("PDF lezen…");
+  try {
+    const b64 = arrayBufferToBase64(await file.arrayBuffer());
+    setS("Factuur extraheren via Claude…");
+    const res = await fetch(projWorkerBase() + "/extract", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pdf_base64: b64 })
+    });
+    const txt = await res.text();
+    let body = null; try { body = JSON.parse(txt); } catch {}
+    if (!res.ok) throw new Error((body && body.error) || ("HTTP " + res.status));
+    const ex = body && body.extracted;
+    if (!ex) throw new Error("Geen data uit factuur gehaald.");
+    const lines = Array.isArray(ex.lines) ? ex.lines : [];
+    const exclTotal = lines.length
+      ? Math.round(lines.reduce((s, l) => s + (Number(l.amount) || 0), 0) * 100) / 100
+      : Math.round(((Number(ex.invoice_total) || 0) / 1.21) * 100) / 100;
+    let hours = lines.reduce((s, l) => s + (Number(l.qty) || 0), 0);
+    let note = "";
+    if (!(hours > 0)) { hours = Math.round((exclTotal / 80) * 100) / 100; note = "geen aantal op de factuur gevonden — geschat als totaal ÷ €80; controleer het aantal uren."; }
+    dbPending[id] = { supplier: ex.supplier_name || "", number: ex.number || "", date: ex.invoice_date || new Date().toISOString().slice(0, 10), exclTotal, hours };
+    setS("");
+    renderDbPreview(id, note);
+  } catch (e) { setS(""); showToast("Inlezen mislukt: " + (e.message || e), "err"); }
+}
+
+function renderDbPreview(id, note) {
+  const wrap = $("db-preview-" + id);
+  const d = dbPending[id];
+  if (!wrap || !d) return;
+  wrap.innerHTML = `<div class="warn-box" style="margin-top:10px;">
+    <div><strong>${escapeHtml(d.supplier || "Leverancier")}</strong> · factuur ${escapeHtml(d.number || "?")} · ${escapeHtml(d.date)} · ${fmtEur(d.exclTotal)} excl. btw</div>
+    ${note ? `<div class="muted" style="margin-top:4px;">⚠ ${escapeHtml(note)}</div>` : ""}
+    <div class="entry-add" style="margin-top:8px;">
+      <div class="field date" style="margin:0;"><label>Datum</label><input type="date" id="db-d-${id}" value="${escapeHtml(d.date)}"></div>
+      <div class="field hrs" style="margin:0;"><label>Uren</label><input type="number" min="0" step="0.25" id="db-h-${id}" value="${d.hours}"></div>
+      <div class="field desc" style="margin:0;"><label>Omschrijving</label><input type="text" id="db-desc-${id}" value="Doorbelasting ${escapeHtml(d.supplier || "Nova Trinity")} factuur ${escapeHtml(d.number || "")}"></div>
+      <button class="btn primary" onclick="addDoorbelastingEntry('${id}')">Toevoegen (€${DOORBELAST_RATE}/uur)</button>
+    </div>
+  </div>`;
+}
+
+function addDoorbelastingEntry(id) {
+  const p = projFindById(id);
+  if (!p) return;
+  const date = $("db-d-" + id).value;
+  const hours = parseFloat($("db-h-" + id).value);
+  const desc = ($("db-desc-" + id).value || "").trim();
+  if (!date) { showToast("Kies een datum", "err"); return; }
+  if (!(hours > 0)) { showToast("Ongeldig aantal uren", "err"); return; }
+  p.entries.push({
+    id: projGenId("e"), date, hours, description: desc || "Doorbelasting",
+    rateAmount: DOORBELAST_RATE, rateLabel: DOORBELAST_LABEL, invoiced: false, invoiceId: null
+  });
+  delete dbPending[id];
+  projExpanded.add(id);
+  saveProjects();
+  renderProjects();
+  showToast(`Doorbelasting toegevoegd: ${fmtHrs(hours)} × €${DOORBELAST_RATE}`, "ok");
+}
+
 const projExpanded = new Set();      // welke projectkaarten zijn uitgeklapt
 const projShowHistory = new Set();   // welke kaarten tonen gefactureerde historie
 function toggleProjExpand(id) { projExpanded.has(id) ? projExpanded.delete(id) : projExpanded.add(id); renderProjects(); }
@@ -3052,6 +3125,13 @@ function renderProjects() {
         <div class="field desc"><label>Omschrijving</label><input type="text" id="entry-desc-${p.id}" placeholder="bv. Serveronderhoud"></div>
         <button class="btn" onclick="addEntry('${p.id}')">+ Uren</button>
       </div>
+      <details style="margin-top:12px;">
+        <summary class="muted" style="cursor:pointer;font-size:12px;">📄 Doorbelasting importeren (inkoopfactuur → uren @ €${DOORBELAST_RATE})</summary>
+        <p class="muted" style="margin:8px 0 4px;">Lees een inkoopfactuur (bv. Nova Trinity) in: het aantal uren wordt overgenomen en als doorbelasting tegen €${DOORBELAST_RATE}/uur klaargezet.</p>
+        <div class="field" style="margin:0;"><input type="file" id="db-file-${p.id}" accept="application/pdf,.pdf"></div>
+        <div class="row-btns"><button class="btn" onclick="importDoorbelasting('${p.id}')">Inlezen</button><span class="muted" id="db-status-${p.id}" style="align-self:center;"></span></div>
+        <div id="db-preview-${p.id}"></div>
+      </details>
       <div class="row-btns" style="margin-top:12px;">
         <label class="muted" style="display:flex;align-items:center;gap:4px;">Regels:
           <select onchange="setProjectLineMode('${p.id}', this.value)" style="font:inherit;font-size:12px;padding:4px 6px;border:0.5px solid var(--border-strong);border-radius:6px;">
