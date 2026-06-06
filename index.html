@@ -2876,6 +2876,30 @@ function setProjectVatShifted(id, checked) {
   renderProjects();
 }
 
+// Markeer open uren als gefactureerd (definitief) ZONDER een Informer-concept
+// aan te maken — voor uren die al elders/eerder gefactureerd zijn.
+function markProjectInvoiced(id) {
+  const p = projFindById(id);
+  if (!p) return;
+  const open = projOpenEntries(p);
+  if (!open.length) { showToast("Geen open uren", "err"); return; }
+  if (!confirm(`Alle ${open.length} open boeking(en) van "${p.name}" markeren als gefactureerd (definitief)?\n\nDit maakt GEEN factuur in Informer aan — gebruik dit als de factuur al bestaat.`)) return;
+  const inv = computeProjectInvoice(p, open, cfg);
+  const invId = "handmatig_" + Date.now().toString(36);
+  const stamp = new Date().toISOString();
+  open.forEach(e => { e.invoiced = true; e.invoiceId = invId; e.invoicedAt = stamp; });
+  if (!Array.isArray(projectsData.invoices)) projectsData.invoices = [];
+  projectsData.invoices.unshift({
+    id: invId, url: "", status: "definitief", manual: true,
+    projectId: p.id, projectName: p.name, projectNumber: p.projectNumber || "",
+    relationName: p.relationName || "", date: inv.invDate, periodFrom: inv.periodFrom, periodTo: inv.periodTo,
+    amountExcl: inv.amountExcl, amountIncl: inv.totalIncl, hours: inv.totalHours, entryCount: open.length, createdAt: stamp
+  });
+  saveProjects();
+  renderProjects();
+  showToast(`${open.length} boeking(en) gemarkeerd als gefactureerd`, "ok");
+}
+
 function deleteProject(id) {
   const p = projFindById(id);
   if (!p) return;
@@ -3149,9 +3173,11 @@ function renderInvoicesOverview() {
   if (sum) sum.textContent = `Gefactureerd (${invs.length}) · ${fmtEur(total)} excl. btw`;
   list.innerHTML = invs.map(iv => {
     const proj = iv.projectNumber ? `${escapeHtml(iv.projectName || "")} (${escapeHtml(iv.projectNumber)})` : escapeHtml(iv.projectName || "");
-    const idLink = iv.url
-      ? `<a href="${escapeHtml(iv.url)}" target="_blank" rel="noopener">#${escapeHtml(String(iv.id))}</a>`
-      : `#${escapeHtml(String(iv.id))}`;
+    const idLink = iv.manual
+      ? `<span class="muted">handmatig</span>`
+      : (iv.url
+        ? `<a href="${escapeHtml(iv.url)}" target="_blank" rel="noopener">#${escapeHtml(String(iv.id))}</a>`
+        : `#${escapeHtml(String(iv.id))}`);
     const isFinal = iv.status === "definitief";
     const statusBadge = `<span class="badge ${isFinal ? "ok" : "info"}">${isFinal ? "definitief" : "concept"}</span>`;
     const finalBtn = `<button class="icon-btn" title="${isFinal ? "Terug naar concept" : "Markeer als definitief (verstuurd in Informer)"}" onclick="toggleInvoiceFinal('${escapeHtml(String(iv.id))}')" style="color:var(--ok-text);">${isFinal ? "↺" : "✓"}</button>`;
@@ -3287,6 +3313,7 @@ function renderProjects() {
         <label class="muted" style="display:flex;align-items:center;gap:4px;cursor:pointer;">
           <input type="checkbox" ${p.vatShifted ? "checked" : ""} onchange="setProjectVatShifted('${p.id}', this.checked)"> BTW verlegd
         </label>
+        <button class="btn" onclick="markProjectInvoiced('${p.id}')" ${openHrs > 0 ? "" : "disabled"} title="Markeer open uren als gefactureerd zonder een Informer-concept aan te maken">Markeer als gefactureerd</button>
         <button class="btn danger" onclick="deleteProject('${p.id}')">Project verwijderen</button>
         <span class="muted" id="proj-status-${p.id}" style="align-self:center;"></span>
       </div>
