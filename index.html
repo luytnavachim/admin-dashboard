@@ -465,6 +465,10 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
           </select>
         </div>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px;margin:4px 0 10px;">
+        <input type="checkbox" id="proj-vatshift">
+        <span><strong>BTW verlegd</strong> — voor buitenland/EU B2B (bv. België). 0% reverse-charge i.p.v. 21%. (Gaat automatisch aan bij een buitenlandse relatie.)</span>
+      </label>
       <div class="field">
         <label for="proj-comment">Opmerking op factuur (optioneel — komt in het Opmerking-veld)</label>
         <textarea id="proj-comment" rows="2" placeholder="bv. Uren gemaakt door Mohsen&#10;Hours worked by Mohsen"></textarea>
@@ -2519,6 +2523,7 @@ async function startSalesMigration() {
 // ============================================================
 const PROJ_LS_KEY = "projects_v1";              // offline-cache (laatste server-staat)
 const PROJ_SALES_VAT_ID_21 = 1478830;          // sales 21% NL (zelfde als migratie)
+const PROJ_VAT_VERLEGD_ID = 1478832;           // "BTW verlegd" (0%, reverse charge) — EU/buitenland B2B
 let projectsData = loadProjectsCache();
 let projRelationsLoaded = false;
 let projRelationMap = {};                        // lowercased name -> {id, name, email}
@@ -2636,7 +2641,9 @@ function computeProjectInvoice(p, openEntries, cfg) {
   const defLabel = ratesList[0].label || "";
   const projLabel = p.projectNumber ? `${p.name} (${p.projectNumber})` : p.name;
   const ledgerId = Number(cfg.salesLedgerId) || 15302629;
-  const vatId = p.vatId || PROJ_SALES_VAT_ID_21;
+  // BTW verlegd (buitenland/EU B2B, bv. België) → 0% reverse-charge code, anders 21%.
+  const vatId = p.vatShifted ? PROJ_VAT_VERLEGD_ID : (p.vatId || PROJ_SALES_VAT_ID_21);
+  const vatRate = p.vatShifted ? 0 : 0.21;
 
   const hLabel = (n) => (Number.isInteger(n) ? n.toString() : n.toFixed(2).replace(/\.?0+$/, "")) + " u";
 
@@ -2683,7 +2690,7 @@ function computeProjectInvoice(p, openEntries, cfg) {
 
   const totalHours = lines.reduce((s, l) => s + l.qty, 0);
   const amountExcl = Math.round(lines.reduce((s, l) => s + l.qty * l.amount, 0) * 100) / 100;
-  const totalIncl = Math.round(amountExcl * 1.21 * 100) / 100;
+  const totalIncl = Math.round(amountExcl * (1 + vatRate) * 100) / 100;
   const allDates = openEntries.map(e => e.date).filter(Boolean).sort();
   const periodFrom = allDates[0] || "", periodTo = allDates[allDates.length - 1] || "";
   const breakdown = groups.map(g => ({ label: g.label, hours: g.hours, amount: g.amount, lineTotal: Math.round(g.hours * g.amount * 100) / 100 }));
@@ -2749,7 +2756,8 @@ async function loadProjectRelations() {
         projRelationMap[name.toLowerCase().trim()] = {
           id, name,
           email: rel.email_invoice || rel.email || "",
-          templateId: rel.sales_invoice_template_id || ""
+          templateId: rel.sales_invoice_template_id || "",
+          country: String(rel.country || "").toUpperCase()
         };
         opts += `<option value="${escapeHtml(name)}"></option>`;
       }
@@ -2770,6 +2778,9 @@ function onProjKlantChange() {
   if (rel && rel.templateId && sel && projTemplates[String(rel.templateId)]) {
     sel.value = String(rel.templateId);
   }
+  // Buitenlandse relatie (niet NL) → BTW verlegd automatisch aanvinken.
+  const vchk = $("proj-vatshift");
+  if (rel && rel.country && vchk) vchk.checked = (rel.country !== "NL");
 }
 
 function refreshProjectenConfigWarn() {
@@ -2818,12 +2829,14 @@ function addProject() {
   const templateId = ($("proj-template") && $("proj-template").value) || "";
   const lineMode = ($("proj-linemode") && $("proj-linemode").value) || "summary";
   const invoiceComment = ($("proj-comment") && $("proj-comment").value || "").trim();
+  const vatShifted = !!($("proj-vatshift") && $("proj-vatshift").checked);
   projectsData.projects.unshift({
     id: projGenId("p"), projectNumber: nummer, name: naam,
     relationId: rel ? rel.id : null,
     relationName: rel ? rel.name : klant,
     relationEmail: rel ? rel.email : "",
-    rates: rates, hourlyRate: rates[0].amount, vatId: PROJ_SALES_VAT_ID_21,
+    relationCountry: rel ? (rel.country || "") : "",
+    rates: rates, hourlyRate: rates[0].amount, vatId: PROJ_SALES_VAT_ID_21, vatShifted: vatShifted,
     templateId: templateId,
     templateName: templateId && projTemplates[templateId] ? projTemplates[templateId] : "",
     lineMode: lineMode, invoiceComment: invoiceComment,
@@ -2832,6 +2845,7 @@ function addProject() {
   saveProjects();
   $("proj-nummer").value = ""; $("proj-naam").value = ""; $("proj-klant").value = "";
   if ($("proj-comment")) $("proj-comment").value = "";
+  if ($("proj-vatshift")) $("proj-vatshift").checked = false;
   if ($("proj-rates")) { $("proj-rates").innerHTML = ""; addRateRow(); }
   if ($("proj-template")) $("proj-template").value = String(cfg.salesTemplateId || "");
   if ($("proj-linemode")) $("proj-linemode").value = "summary";
@@ -2852,6 +2866,14 @@ function setProjectComment(id, val) {
   if (!p) return;
   p.invoiceComment = (val || "").trim();
   saveProjects();   // geen re-render: focus in het tekstvak behouden
+}
+
+function setProjectVatShifted(id, checked) {
+  const p = projFindById(id);
+  if (!p) return;
+  p.vatShifted = !!checked;
+  saveProjects();
+  renderProjects();
 }
 
 function deleteProject(id) {
@@ -3200,12 +3222,13 @@ function renderProjects() {
     const nummerBadge = p.projectNumber ? `<span class="badge info">${escapeHtml(p.projectNumber)}</span> ` : "";
     const tmplName = p.templateName || (p.templateId && projTemplates[p.templateId]) || "";
     const tmplPart = tmplName ? ` · ${escapeHtml(tmplName)}` : "";
+    const vatPart = p.vatShifted ? ` · <span class="badge">BTW verlegd</span>` : "";
 
     const head = `<div class="proj-head" onclick="toggleProjExpand('${p.id}')">
       <span class="chevron">▸</span>
       <div class="meta">
         <div class="proj-title">${nummerBadge}${escapeHtml(p.name)}</div>
-        <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${escapeHtml(projRatesLabel(p))}${tmplPart}</div>
+        <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${escapeHtml(projRatesLabel(p))}${tmplPart}${vatPart}</div>
       </div>
       <div class="proj-total">
         <div class="amt">${fmtEur(openAmt)}</div>
@@ -3260,6 +3283,9 @@ function renderProjects() {
             <option value="summary" ${p.lineMode === "perEntry" ? "" : "selected"}>samengevat per tarief</option>
             <option value="perEntry" ${p.lineMode === "perEntry" ? "selected" : ""}>aparte regel per boeking</option>
           </select>
+        </label>
+        <label class="muted" style="display:flex;align-items:center;gap:4px;cursor:pointer;">
+          <input type="checkbox" ${p.vatShifted ? "checked" : ""} onchange="setProjectVatShifted('${p.id}', this.checked)"> BTW verlegd
         </label>
         <button class="btn danger" onclick="deleteProject('${p.id}')">Project verwijderen</button>
         <span class="muted" id="proj-status-${p.id}" style="align-self:center;"></span>
