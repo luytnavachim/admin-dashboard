@@ -465,6 +465,10 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
           </select>
         </div>
       </div>
+      <div class="field">
+        <label for="proj-comment">Opmerking op factuur (optioneel — komt in het Opmerking-veld)</label>
+        <textarea id="proj-comment" rows="2" placeholder="bv. Uren gemaakt door Mohsen&#10;Hours worked by Mohsen"></textarea>
+      </div>
       <div class="row-btns">
         <button class="btn primary" onclick="addProject()">Project toevoegen</button>
         <span class="muted" id="proj-add-status" style="align-self:center;"></span>
@@ -2694,6 +2698,7 @@ function computeProjectInvoice(p, openEntries, cfg) {
     vat_option: cfg.salesVatOption || "excl",
     lines
   };
+  if (p.invoiceComment && p.invoiceComment.trim()) payload.comment = p.invoiceComment.trim();
   return { totalHours, amountExcl, totalIncl, periodFrom, periodTo, lines, breakdown, payload, invDate };
 }
 if (typeof module !== "undefined" && module.exports) module.exports = { computeProjectInvoice };
@@ -2812,6 +2817,7 @@ function addProject() {
   const rel = projRelationMap[klant.toLowerCase().trim()] || null;
   const templateId = ($("proj-template") && $("proj-template").value) || "";
   const lineMode = ($("proj-linemode") && $("proj-linemode").value) || "summary";
+  const invoiceComment = ($("proj-comment") && $("proj-comment").value || "").trim();
   projectsData.projects.unshift({
     id: projGenId("p"), projectNumber: nummer, name: naam,
     relationId: rel ? rel.id : null,
@@ -2820,11 +2826,12 @@ function addProject() {
     rates: rates, hourlyRate: rates[0].amount, vatId: PROJ_SALES_VAT_ID_21,
     templateId: templateId,
     templateName: templateId && projTemplates[templateId] ? projTemplates[templateId] : "",
-    lineMode: lineMode,
+    lineMode: lineMode, invoiceComment: invoiceComment,
     createdAt: new Date().toISOString(), entries: []
   });
   saveProjects();
   $("proj-nummer").value = ""; $("proj-naam").value = ""; $("proj-klant").value = "";
+  if ($("proj-comment")) $("proj-comment").value = "";
   if ($("proj-rates")) { $("proj-rates").innerHTML = ""; addRateRow(); }
   if ($("proj-template")) $("proj-template").value = String(cfg.salesTemplateId || "");
   if ($("proj-linemode")) $("proj-linemode").value = "summary";
@@ -2838,6 +2845,13 @@ function setProjectLineMode(id, mode) {
   p.lineMode = (mode === "perEntry") ? "perEntry" : "summary";
   saveProjects();
   renderProjects();
+}
+
+function setProjectComment(id, val) {
+  const p = projFindById(id);
+  if (!p) return;
+  p.invoiceComment = (val || "").trim();
+  saveProjects();   // geen re-render: focus in het tekstvak behouden
 }
 
 function deleteProject(id) {
@@ -3218,6 +3232,10 @@ function renderProjects() {
         <div id="db-informer-${p.id}"></div>
         <div id="db-preview-${p.id}"></div>
       </details>
+      <div class="field" style="margin-top:12px;">
+        <label>Opmerking op factuur (komt in het Opmerking-veld van Informer)</label>
+        <textarea rows="2" onchange="setProjectComment('${p.id}', this.value)" placeholder="bv. Uren gemaakt door Mohsen&#10;Hours worked by Mohsen">${escapeHtml(p.invoiceComment || "")}</textarea>
+      </div>
       <div class="row-btns" style="margin-top:12px;">
         <label class="muted" style="display:flex;align-items:center;gap:4px;">Regels:
           <select onchange="setProjectLineMode('${p.id}', this.value)" style="font:inherit;font-size:12px;padding:4px 6px;border:0.5px solid var(--border-strong);border-radius:6px;">
