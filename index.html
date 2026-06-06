@@ -168,6 +168,21 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
 .entry-add .field.desc { flex: 1; min-width: 160px; }
 .icon-btn { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 14px; padding: 2px 6px; border-radius: 6px; }
 .icon-btn:hover { color: var(--danger-text); background: var(--danger-bg); }
+/* ---- Projecten: accordion + totaalbalk ---- */
+.proj-summary { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; background: var(--surface); border: 0.5px solid var(--border); border-radius: 12px; padding: 12px 16px; margin-bottom: 14px; }
+.proj-summary .big { font-size: 22px; font-weight: 500; }
+.proj-summary .lbl { font-size: 12px; color: var(--muted); }
+.proj-summary .spacer { flex: 1; }
+.proj-card { padding: 0; overflow: hidden; }
+.proj-card > .proj-head { padding: 14px 18px; margin: 0; cursor: pointer; user-select: none; }
+.proj-card > .proj-head:hover { background: var(--bg); }
+.proj-card .chevron { color: var(--muted); font-size: 12px; width: 14px; flex-shrink: 0; transition: transform .15s; }
+.proj-card.open .chevron { transform: rotate(90deg); }
+.proj-title { font-size: 15px; font-weight: 500; }
+.proj-body { padding: 0 18px 16px; border-top: 0.5px solid var(--border); }
+.proj-head .head-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.history-toggle { font-size: 12px; color: var(--accent); cursor: pointer; display: inline-block; margin: 8px 0; user-select: none; }
+.history-toggle:hover { text-decoration: underline; }
 /* ---- Dev console ---- */
 #dev-console {
   position: fixed;
@@ -403,9 +418,11 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       </div>
     </div>
 
-    <div class="section">
-      <h2>Nieuw project</h2>
-      <p class="muted">Neem een project uit Informer over (projectnummer, naam, relatie, uurtarief). Daarna boek je uren en factureer je met één klik: er wordt een verkoopfactuur in Informer aangemaakt én verstuurd.</p>
+    <div id="projecten-summary"></div>
+
+    <details class="section" id="proj-new-details">
+      <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">+ Nieuw project</summary>
+      <p class="muted" style="margin-top:10px;">Neem een project uit Informer over (projectnummer, naam, relatie, tarief). Daarna boek je uren en maak je met één klik een concept-factuur aan.</p>
       <div class="warn-box" id="projecten-config-warn" style="display:none">
         <strong>Eerst even Instellingen invullen.</strong> Sales endpoint en ledger-ID staan leeg — vul ze in onder de Instellingen-tab en kom terug.
       </div>
@@ -447,7 +464,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         <button class="btn primary" onclick="addProject()">Project toevoegen</button>
         <span class="muted" id="proj-add-status" style="align-self:center;"></span>
       </div>
-    </div>
+    </details>
 
     <div id="projecten-list"></div>
   </section>
@@ -2540,13 +2557,26 @@ function manualSync() {
     .catch(e => setProjSyncStatus("⚠ " + (e.message || e), "err"));
 }
 
+// Eén fetch-helper die ook de foutmelding van de Worker (bv. welk e-mailadres
+// geweigerd is) doorgeeft, zodat je weet wat je moet toestaan.
+async function projFetch(method, body) {
+  const base = projWorkerBase();
+  if (!base || !account) throw new Error("niet ingelogd");
+  const headers = await projAuthHeaders(body ? { "Content-Type": "application/json" } : undefined);
+  const res = await fetch(base + "/projects", { method, headers, body: body ? JSON.stringify(body) : undefined });
+  if (!res.ok) {
+    let detail = "";
+    try { const j = await res.json(); if (j && j.error) detail = " — " + j.error; } catch {}
+    throw new Error(projSyncErr(res.status) + detail);
+  }
+  return res.json();
+}
+
 // Haalt de centrale staat op en overschrijft de lokale cache.
 async function syncLoadProjects() {
   const base = projWorkerBase();
   if (!base || !account) return false;
-  const res = await fetch(base + "/projects", { headers: await projAuthHeaders() });
-  if (!res.ok) throw new Error(projSyncErr(res.status));
-  const data = await res.json();
+  const data = await projFetch("GET");
   projectsData = (data && Array.isArray(data.projects)) ? data : { projects: [] };
   localStorage.setItem(PROJ_LS_KEY, JSON.stringify(projectsData));
   return true;
@@ -2558,12 +2588,9 @@ function saveProjects() {
   const base = projWorkerBase();
   if (!base || !account) { setProjSyncStatus("⚠ niet ingelogd — niet gesynct", "err"); return; }
   setProjSyncStatus("opslaan…");
-  projAuthHeaders({ "Content-Type": "application/json" })
-    .then(headers => fetch(base + "/projects", { method: "PUT", headers, body: JSON.stringify(projectsData) }))
-    .then(res => {
-      if (!res.ok) throw new Error(projSyncErr(res.status));
-      setProjSyncStatus("✓ gesynct " + new Date().toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }), "ok");
-    }).catch(e => setProjSyncStatus("⚠ sync mislukt: " + (e.message || e), "err"));
+  projFetch("PUT", projectsData)
+    .then(() => setProjSyncStatus("✓ gesynct " + new Date().toLocaleTimeString("nl-NL", { hour: "2-digit", minute: "2-digit" }), "ok"))
+    .catch(e => setProjSyncStatus("⚠ sync mislukt: " + (e.message || e), "err"));
 }
 function projGenId(prefix) { return prefix + "_" + Date.now().toString(36) + Math.random().toString(36).slice(2, 6); }
 function projFindById(id) { return projectsData.projects.find(p => p.id === id) || null; }
@@ -2856,52 +2883,95 @@ function unInvoiceEntry(projId, entryId) {
   renderProjects();
 }
 
+const projExpanded = new Set();      // welke projectkaarten zijn uitgeklapt
+const projShowHistory = new Set();   // welke kaarten tonen gefactureerde historie
+function toggleProjExpand(id) { projExpanded.has(id) ? projExpanded.delete(id) : projExpanded.add(id); renderProjects(); }
+function toggleProjHistory(id) { projShowHistory.has(id) ? projShowHistory.delete(id) : projShowHistory.add(id); renderProjects(); }
+
+function projEntryRowHtml(p, e) {
+  const rAmt = entryRateAmount(p, e);
+  const rTag = `${fmtHrs(e.hours)} × ${fmtEur(rAmt)}${e.rateLabel ? ` <span class="muted">(${escapeHtml(e.rateLabel)})</span>` : ""}`;
+  return `<div class="entry-row ${e.invoiced ? "invoiced" : ""}">
+    <span class="e-date">${escapeHtml(e.date)}</span>
+    <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${e.invoiced ? ' · <span class="badge ok">gefactureerd</span>' : ""}</span>
+    <span class="e-hrs" style="min-width:150px;">${rTag}</span>
+    ${e.invoiced
+      ? `<button class="icon-btn" title="Terugzetten naar open (bv. als je het concept in Informer hebt verwijderd)" onclick="unInvoiceEntry('${p.id}','${e.id}')" style="color:var(--muted);">↩</button>`
+      : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
+  </div>`;
+}
+
 function renderProjects() {
   const wrap = $("projecten-list");
   if (!wrap) return;
   refreshProjectenConfigWarn();
-  if (!projectsData.projects.length) {
+  const projs = projectsData.projects;
+
+  // Totaalbalk bovenaan
+  const summaryEl = $("projecten-summary");
+  if (summaryEl) {
+    if (!projs.length) { summaryEl.innerHTML = ""; }
+    else {
+      const totHrs = projs.reduce((s, p) => s + projOpenHours(p), 0);
+      const totAmt = projs.reduce((s, p) => s + projOpenAmount(p), 0);
+      const nOpen = projs.filter(p => projOpenHours(p) > 0).length;
+      summaryEl.innerHTML = `<div class="proj-summary">
+        <div><div class="big">${fmtEur(totAmt)}</div><div class="lbl">openstaand te factureren</div></div>
+        <div><div class="big">${fmtHrs(totHrs)}</div><div class="lbl">open uren</div></div>
+        <div class="spacer"></div>
+        <div class="lbl">${projs.length} project${projs.length === 1 ? "" : "en"} · ${nOpen} met open uren</div>
+      </div>`;
+    }
+  }
+
+  if (!projs.length) {
     wrap.innerHTML = `<div class="section"><div class="empty">Nog geen projecten. Maak er hierboven één aan.</div></div>`;
     return;
   }
+
   const today = new Date().toISOString().slice(0, 10);
-  wrap.innerHTML = projectsData.projects.map(p => {
+  wrap.innerHTML = projs.map(p => {
     const openHrs = projOpenHours(p);
     const openAmt = projOpenAmount(p);
     const rates = projRatesOf(p);
-    const entries = (p.entries || []).slice().sort((a, b) => (a.date < b.date ? 1 : -1));
-    const entriesHtml = entries.length ? entries.map(e => {
-      const rAmt = entryRateAmount(p, e);
-      const rTag = `${fmtHrs(e.hours)} × ${fmtEur(rAmt)}${e.rateLabel ? ` <span class="muted">(${escapeHtml(e.rateLabel)})</span>` : ""}`;
-      return `
-      <div class="entry-row ${e.invoiced ? "invoiced" : ""}">
-        <span class="e-date">${escapeHtml(e.date)}</span>
-        <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${e.invoiced ? ' · <span class="badge ok">gefactureerd</span>' : ""}</span>
-        <span class="e-hrs" style="min-width:150px;">${rTag}</span>
-        ${e.invoiced
-          ? `<button class="icon-btn" title="Terugzetten naar open (bv. als je het concept in Informer hebt verwijderd)" onclick="unInvoiceEntry('${p.id}','${e.id}')" style="color:var(--muted);">↩</button>`
-          : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
-      </div>`;
-    }).join("") : `<div class="empty">Nog geen uren geboekt.</div>`;
+    const expanded = projExpanded.has(p.id);
     const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Informer-koppeling</span>';
     const nummerBadge = p.projectNumber ? `<span class="badge info">${escapeHtml(p.projectNumber)}</span> ` : "";
     const tmplName = p.templateName || (p.templateId && projTemplates[p.templateId]) || "";
-    const tmplPart = tmplName ? ` · template: ${escapeHtml(tmplName)}` : "";
+    const tmplPart = tmplName ? ` · ${escapeHtml(tmplName)}` : "";
+
+    const head = `<div class="proj-head" onclick="toggleProjExpand('${p.id}')">
+      <span class="chevron">▸</span>
+      <div class="meta">
+        <div class="proj-title">${nummerBadge}${escapeHtml(p.name)}</div>
+        <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${escapeHtml(projRatesLabel(p))}${tmplPart}</div>
+      </div>
+      <div class="proj-total">
+        <div class="amt">${fmtEur(openAmt)}</div>
+        <div class="hrs">${fmtHrs(openHrs)} open</div>
+      </div>
+      <div class="head-actions">
+        <button class="btn primary" onclick="event.stopPropagation(); invoiceProject('${p.id}')" ${openHrs > 0 ? "" : "disabled"}>Factureren &rarr;</button>
+      </div>
+    </div>`;
+
+    if (!expanded) return `<div class="section proj-card" data-proj="${p.id}">${head}</div>`;
+
+    const openEntries = (p.entries || []).filter(e => !e.invoiced).sort((a, b) => (a.date < b.date ? 1 : -1));
+    const invEntries = (p.entries || []).filter(e => e.invoiced).sort((a, b) => (a.date < b.date ? 1 : -1));
+    const openHtml = openEntries.length ? openEntries.map(e => projEntryRowHtml(p, e)).join("") : `<div class="empty">Nog geen open uren.</div>`;
+    const showHist = projShowHistory.has(p.id);
+    const histToggle = invEntries.length
+      ? `<div class="history-toggle" onclick="toggleProjHistory('${p.id}')">${showHist ? "▾ verberg" : "▸ toon"} gefactureerde historie (${invEntries.length})</div>`
+      : "";
+    const histHtml = (showHist && invEntries.length) ? invEntries.map(e => projEntryRowHtml(p, e)).join("") : "";
     const rateSelect = rates.length > 1
       ? `<div class="field" style="margin:0;min-width:150px;"><label>Tarief</label><select id="entry-rate-${p.id}">${rates.map((r, i) => `<option value="${i}">${escapeHtml((r.label ? r.label + " — " : "") + fmtEur(r.amount))}</option>`).join("")}</select></div>`
       : "";
-    return `<div class="section" data-proj="${p.id}">
-      <div class="proj-head">
-        <div class="meta">
-          <h2>${nummerBadge}${escapeHtml(p.name)}</h2>
-          <div class="proj-sub">${escapeHtml(p.relationName || "?")}${koppelWarn} · ${escapeHtml(projRatesLabel(p))}${tmplPart}</div>
-        </div>
-        <div class="proj-total">
-          <div class="amt">${fmtEur(openAmt)}</div>
-          <div class="hrs">${fmtHrs(openHrs)} open</div>
-        </div>
-      </div>
-      <div style="margin-top:12px;">${entriesHtml}</div>
+
+    const body = `<div class="proj-body">
+      <div style="margin-top:12px;">${openHtml}</div>
+      ${histToggle}${histHtml}
       <div class="entry-add">
         <div class="field date"><label>Datum</label><input type="date" id="entry-date-${p.id}" value="${today}"></div>
         <div class="field hrs"><label>Uren</label><input type="number" min="0" step="0.25" id="entry-hrs-${p.id}" placeholder="2"></div>
@@ -2910,7 +2980,6 @@ function renderProjects() {
         <button class="btn" onclick="addEntry('${p.id}')">+ Uren</button>
       </div>
       <div class="row-btns" style="margin-top:12px;">
-        <button class="btn primary" onclick="invoiceProject('${p.id}')" ${openHrs > 0 ? "" : "disabled"}>Factureren (${fmtEur(openAmt)}) &rarr;</button>
         <label class="muted" style="display:flex;align-items:center;gap:4px;">Regels:
           <select onchange="setProjectLineMode('${p.id}', this.value)" style="font:inherit;font-size:12px;padding:4px 6px;border:0.5px solid var(--border-strong);border-radius:6px;">
             <option value="summary" ${p.lineMode === "perEntry" ? "" : "selected"}>samengevat per tarief</option>
@@ -2921,6 +2990,8 @@ function renderProjects() {
         <span class="muted" id="proj-status-${p.id}" style="align-self:center;"></span>
       </div>
     </div>`;
+
+    return `<div class="section proj-card open" data-proj="${p.id}">${head}${body}</div>`;
   }).join("");
 }
 
