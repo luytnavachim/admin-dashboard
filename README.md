@@ -18,7 +18,7 @@ Een dashboard met zes tabs:
 - **Overzicht** — live status over alle gemonitorde mailboxen: facturen die verwerkt/betaald moeten worden, mails die antwoord vragen, openstaande inkoopfacturen uit Informer, en je agenda voor de komende 2 dagen. Per factuurrij een `→ Informer`-knop en een `Verwerkt ✓`-knop die de mail naar `MoneyMonk Verwerkt` verplaatst.
 - **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt de relation in Informer, maakt de inkoopfactuur aan mét PDF als bijlage, en verplaatst de mail naar `MoneyMonk Verwerkt`. Ook een **losse-PDF-upload** voor facturen die niet in je inbox zitten.
 - **Verkoop migreren** — bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Informer (per PDF: Claude extraheert klant + bedragen → klant matchen/aanmaken → POST naar het sales-endpoint).
-- **Projecten** — uren registreren per project en factureren met één klik. Je neemt een project uit Informer over (projectnummer + naam + relatie + vast uurtarief), boekt er uren op (datum, uren, omschrijving), en met `Factureren` bouwt het dashboard er één samenvattende verkoopfactuurregel van (totaal open uren × tarief), maakt de factuur aan via `/invoice/sales/` en maakt 'm definitief/verstuurt 'm via `/invoice/sales/send/` (het projectnummer komt als referentie op de factuur). Gefactureerde uren blijven als historie staan, gemarkeerd zodat ze niet dubbel op een volgende factuur komen. Informer-projecten zelf zijn API-afgeschermd, daarom voer je ze hier één keer in. De data wordt **cross-device** bewaard in **Cloudflare Workers KV** (endpoint `/projects` op de Worker, beveiligd via je **Microsoft-login** — de Worker verifieert je token bij Microsoft Graph); `localStorage` dient alleen als offline-cache.
+- **Projecten** — uren registreren per project en er met één klik een verkoopfactuur (concept) van maken. Zie [Projecten & facturen](#projecten--facturen-uren--verkoopfactuur) hieronder voor de volledige werking (meerdere tarieven, doorbelasting, BTW verlegd, concept/definitief-status, enz.). Data staat **cross-device** in **Cloudflare Workers KV** (`/projects`), beveiligd via je **Microsoft-login**.
 - **Instellingen** — Informer-verbinding (base URL via de Worker, endpoints, sales ledger-/product-/template-/currency-IDs, BTW-optie).
 - **Geavanceerd** — API-sandbox: verbinding testen, bestaande inkoopfacturen ophalen, test-inkoopfactuur aanmaken, plus een debug-log van de laatste Informer request/response.
 
@@ -31,21 +31,53 @@ Verder: persistente login (MSAL-token in `localStorage`, automatische refresh) e
 ```
 Browser  ←─ index.html geserveerd door Apache op de Hetzner-server (95.217.203.120)
   ├── MSAL OAuth → Microsoft Graph        (mail + agenda + mappen, direct)
-  ├── localStorage                        (Informer-config + projecten/uren)
+  ├── localStorage                        (Informer-config + projecten-cache)
   └── Cloudflare Worker (…workers.dev)     — alleen API-backend
         ├── /api/<path> → Informer API     (CORS-proxy, auth server-side)
-        └── /extract  /extract-sales       (PDF → Claude Haiku → JSON)
+        ├── /extract  /extract-sales       (PDF → Claude Haiku → JSON)
+        └── /projects → Workers KV         (projecten/uren, cross-device; auth via Graph-token)
 ```
 
 De frontend (statische HTML/JS) draait dus op je eigen Hetzner-box; de Cloudflare Worker is puur de backend. Informer staat geen directe browser-calls toe (CORS) en de API-key mag niet in de frontend staan — daarom loopt al het Informer-verkeer via de Worker, die de key server-side bewaart. Diezelfde Worker draait ook de Claude-extractie, zodat de Anthropic-key eveneens server-side blijft.
 
 | Bestand | Doel |
 |---|---|
-| `index.html` | De hele app (single-file, ~2400 regels). MSAL-login, Graph-calls, alle tabs, Informer-flow. |
-| `worker.js` | Cloudflare Worker: Informer-proxy (`/api/*`) + PDF-extractie (`/extract`, `/extract-sales`). |
+| `index.html` | De hele app (single-file). MSAL-login, Graph-calls, alle tabs, Informer-flow, projecten/uren. |
+| `worker.js` | Cloudflare Worker: Informer-proxy (`/api/*`), PDF-extractie (`/extract`, `/extract-sales`) en projecten-opslag (`/projects` → KV). |
 | `worker.test.mjs` | Tests voor de Worker. |
 | `informer.html` | Losse API-sandbox om Informer-endpoints te testen (los van het dashboard). |
-| `wrangler.jsonc` | Worker deploy-config. |
+| `wrangler.jsonc` | Worker deploy-config (incl. KV-binding `PROJECTS_KV`). |
+
+---
+
+## Projecten & facturen (uren → verkoopfactuur)
+
+Informer-projecten/uren zijn API-afgeschermd, dus je neemt projecten hier één keer over en registreert de uren in het dashboard. Bij factureren maakt het dashboard **altijd alleen een concept** in Informer (`POST /invoice/sales/`) — versturen doe je zelf vanuit Informer (zo kun je er eventueel een bijlage aan koppelen, wat de API niet ondersteunt).
+
+**Een project aanmaken** (inklapbaar formulier "+ Nieuw project"):
+
+- **Projectnummer** (uit Informer) — komt als referentie op de factuur.
+- **Relatie/klant** — gekozen uit je Informer-relaties (autocomplete). Bepaalt ook de standaard-template en of BTW verlegd nodig is.
+- **Tarieven** — één of meer (`label` + bedrag). Bij meerdere kun je per urenboeking kiezen welk tarief geldt.
+- **Factuur-template** — wordt automatisch op de standaard-template van de relatie gezet (bv. "Politie", "Belgie OCD"); zelf overschrijven kan.
+- **Factuurregels** — `samengevat per tarief` (één regel per tarief, met de datums in de specificatie) óf `aparte regel per boeking` (één factuurregel per urenboeking).
+- **BTW verlegd** — voor buitenland/EU B2B (bv. België): 0% reverse-charge (`vat_id 1478832`) i.p.v. 21% (`1478830`). Gaat automatisch aan bij een niet-NL relatie.
+- **Opmerking op factuur** — vrije tekst die in het Opmerking-veld van de Informer-factuur komt (bv. "Uren gemaakt door Mohsen / Hours worked by Mohsen").
+
+De meeste van deze instellingen zijn ook achteraf per project aan te passen op de (uitklapbare) projectkaart.
+
+**Uren boeken & factureren:**
+
+- Boek uren (datum, uren, tarief, omschrijving). Per project zie je het totaal openstaand.
+- **Factureren** maakt het concept aan en markeert de uren als gefactureerd (terugdraaibaar met ↩). Met het **Testfactuur**-vinkje blijft het een dry-run (uren blijven open).
+- **Markeer als gefactureerd** markeert open uren als gefactureerd *zonder* een Informer-concept aan te maken — voor uren die al elders gefactureerd zijn.
+- Rekenkern = `computeProjectInvoice()` (unit-getest): groepeert per tarief, of maakt regels per boeking.
+
+**Doorbelasting** (bv. Nova Trinity → Orange): in een project kun je een inkoopfactuur inlezen — via **PDF-upload** (Claude leest aantal + omschrijvingen per regel) óf **uit Informer** (bestaande inkoopfactuur kiezen; regels komen uit de lijst). Elke factuurregel wordt een uren-boeking (aantal = uren, omschrijving overgenomen zonder "Stuksprijs"-tekst), tegen een vast doorbelasttarief (€100/uur; inkoop €80). Daarna direct doorzetten naar een concept kan.
+
+**Gefactureerd-overzicht** (boven in de tab): alle aangemaakte facturen met datum, factuur-id (link naar Informer), project, klant en bedrag. Per factuur een statusbadge **concept/definitief** met een ✓-knop om 'm op definitief te zetten zodra je 'm in Informer hebt verstuurd, en een ↩ om 'm terug te draaien (uren weer open).
+
+**Opslag:** alles staat **cross-device** in **Workers KV** via `/projects` (GET/PUT), beveiligd via je Microsoft-login — de Worker verifieert je token bij Graph `/me` tegen toegestane gebruikers. `localStorage` is alleen offline-cache.
 
 ---
 
@@ -180,6 +212,7 @@ Informer-endpoints en sales-IDs worden in de UI (Instellingen-tab) ingesteld en 
 ## Wat dit dashboard NIET doet
 
 - **Geen auto-forward naar MoneyMonk** — de browser kan geen mails inclusief bijlage forwarden via Graph. Workaround: een Outlook server-side rule of handmatig doorsturen. (De Informer-flow vervangt dit grotendeels: facturen gaan rechtstreeks de boekhouding in.)
-- **Geen Informer-banktransacties** — niet via de API beschikbaar; koppelen blijft handmatig in Informer-web ("Open in Informer"-knop per openstaande factuur).
+- **Geen Informer-banktransacties + geen projecten/uren via API** — projecten/uren worden daarom in het dashboard bijgehouden (KV).
+- **Verkoopfacturen worden niet automatisch verstuurd** — het dashboard maakt alleen een concept; versturen (en evt. een bijlage koppelen) doe je zelf in Informer. De API ondersteunt geen bijlage op verkoopfacturen.
 - **Geen agenda-sync** — alleen lezen.
 - **Geen pushnotificaties** — laat een tab open of installeer als PWA.
