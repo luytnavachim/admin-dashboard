@@ -2940,7 +2940,7 @@ async function loadDoorbelastingInformer(id) {
       const excl = inv.totals?.excl_vat != null ? Number(inv.totals.excl_vat) : Math.round((incl / 1.21) * 100) / 100;
       const supplier = (relationsCache && relationsCache[String(inv.relation_id)]?.name) || `Leverancier #${inv.relation_id || "?"}`;
       const date = (inv.invoice_date && inv.invoice_date !== "0000-00-00") ? inv.invoice_date : (inv.date || "");
-      return { invId: inv.id, supplier, number: inv.number || "?", date, excl };
+      return { invId: inv.id, supplier, number: inv.number || "?", date, excl, rawLines: inv.line || inv.lines || null };
     }).filter(x => x.excl > 0).slice(0, 40);
     if (!dbInformerCache[id].length) { cont.innerHTML = '<div class="empty">Geen inkoopfacturen gevonden in Informer.</div>'; return; }
     cont.innerHTML = `<div class="muted" style="margin:8px 0 4px;">Kies de inkoopfactuur om door te belasten:</div>` +
@@ -2952,26 +2952,19 @@ async function loadDoorbelastingInformer(id) {
   } catch (e) { cont.innerHTML = `<div class="empty">Ophalen mislukt: ${escapeHtml(e.message || String(e))}</div>`; }
 }
 
-async function pickDoorbelastingInformer(id, idx) {
+function pickDoorbelastingInformer(id, idx) {
   const x = (dbInformerCache[id] || [])[idx];
   if (!x) return;
-  const cont = $("db-preview-" + id);
-  if (cont) cont.innerHTML = '<div class="loading">Factuurregels ophalen…</div>';
-  let lines = [];
-  try {
-    if (x.invId) {
-      const det = await informerFetch("GET", `/invoice/purchase/${x.invId}/`);
-      const inv = det?.purchase || det?.invoice || det;
-      const raw = inv?.lines || inv?.line || [];
-      const arr = Array.isArray(raw) ? raw : Object.values(raw || {});
-      arr.forEach(l => {
-        const amt = Number(l.amount ?? l.price ?? 0) || 0;
-        const q = Number(l.qty) || 0;
-        const qty = q > 0 ? q : Math.round((amt / DOORBELAST_INKOOP) * 100) / 100;
-        if (qty > 0) lines.push({ qty, description: dbCleanDesc(l.description || l.text || ""), date: dbParseDate(l.description || "") || x.date, amount: amt });
-      });
-    }
-  } catch (e) { /* val terug op totaal hieronder */ }
+  // Informer-lijst bevat de factuurregels al (key "line"). Geen aantal opgeslagen,
+  // dus uren = bedrag ÷ inkooptarief (€80). Beschrijving wordt overgenomen.
+  const raw = x.rawLines || {};
+  const arr = Array.isArray(raw) ? raw : Object.values(raw || {});
+  let lines = arr.map(l => {
+    const amt = Number(l.amount) || 0;
+    const q = Number(l.qty) || 0;
+    const qty = q > 0 ? q : Math.round((amt / DOORBELAST_INKOOP) * 100) / 100;
+    return { qty, description: dbCleanDesc(l.description || ""), date: dbParseDate(l.description || "") || x.date, amount: amt };
+  }).filter(l => l.qty > 0);
   if (!lines.length) {
     lines = [{ qty: Math.round((x.excl / DOORBELAST_INKOOP) * 100) / 100, description: `Doorbelasting ${x.supplier} factuur ${x.number}`, date: x.date, amount: x.excl }];
   }
