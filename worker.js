@@ -317,6 +317,10 @@ function hasErrorPayload(err) {
 // ---------------------------------------------------------------------------
 function isAllowedProjectsUser(email, env) {
   if (!email) return false;
+  email = email.toLowerCase().trim();
+  // Eigenaar-accounts die altijd toegang hebben (los van env-config).
+  const ALWAYS = ["micha@vantuyl.it", "micha@triplet-it.nl"];
+  if (ALWAYS.includes(email)) return true;
   const list = (env.PROJECTS_ALLOWED_USERS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
   if (list.length) return list.includes(email);
   return email.endsWith("@triplet-it.nl");   // default: eigen bedrijfsdomein
