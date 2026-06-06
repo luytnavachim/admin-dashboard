@@ -313,6 +313,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
     <button class="tab" data-tab="projecten">Projecten</button>
     <button class="tab" data-tab="instellingen">Instellingen</button>
     <button class="tab" data-tab="geavanceerd">Geavanceerd</button>
+    <button class="tab" data-tab="uitleg">Uitleg</button>
   </nav>
 
   <div id="alert-area"></div>
@@ -347,7 +348,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <section id="tab-facturen" class="tab-panel">
     <div class="section">
       <h2>Facturen verwerken</h2>
-      <p class="muted">Kies een factuur-mail uit Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) maakt/koppelt de relation in Informer, (4) maakt de inkoopfactuur aan met PDF als bijlage, (5) verplaatst de mail naar <em>MoneyMonk Verwerkt</em>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur aan te maken.</p>
 
       <div class="field">
         <label>Onverwerkte facturen in Inbox (zelfde lijst als Overzicht, alleen die met PDF)</label>
@@ -366,7 +366,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
 
     <div class="section">
       <h2>Losse PDF uploaden</h2>
-      <p class="muted">Heb je een factuur-PDF die niet in je inbox zit (bv. download uit een portaal of scan)? Upload 'm hier — zelfde extractie + Informer-flow, zonder Outlook-stappen.</p>
       <div class="field">
         <label for="pdf-upload">PDF-bestand</label>
         <input id="pdf-upload" type="file" accept="application/pdf,.pdf" onchange="onPdfPicked()">
@@ -382,7 +381,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <section id="tab-migratie" class="tab-panel">
     <div class="section">
       <h2>Verkoopfacturen migreren naar Informer</h2>
-      <p class="muted">Bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Informer. Per PDF: (1) Claude extraheert klant + bedragen, (2) klant matchen of aanmaken in Informer relations, (3) POST naar het verkoop-endpoint. Doorloopt alle bestanden serieel; errors blijven in beeld zodat je ze daarna kan oppakken.</p>
       <div class="warn-box" id="migratie-config-warn" style="display:none">
         <strong>Eerst even Instellingen invullen.</strong> Sales endpoint en ledger-ID staan leeg — vul ze in onder de Instellingen-tab en kom terug.
       </div>
@@ -402,21 +400,15 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <section id="tab-projecten" class="tab-panel">
     <div class="section">
       <h2>Synchronisatie <span class="muted" id="proj-sync-status" style="font-weight:400;"></span></h2>
-      <p class="muted">Projecten en uren worden centraal in je Cloudflare Worker (KV) bewaard en automatisch gesynchroniseerd op elk apparaat. Beveiligd via je Microsoft-login — geen wachtwoord nodig.</p>
       <div class="row-btns">
         <button class="btn" onclick="manualSync()">Nu synchroniseren</button>
       </div>
     </div>
 
-    <div class="help" style="display:flex;align-items:flex-start;gap:10px;">
-      <span style="margin-top:1px;">ℹ️</span>
-      <div><strong>Factureren</strong> maakt altijd een <em>concept</em> in Informer aan — je verstuurt 'm zelf vanuit Informer (zodat je er evt. een bijlage aan kunt koppelen). Normaal worden de geboekte uren daarbij als gefactureerd gemarkeerd.
-        <label style="display:flex;align-items:center;gap:6px;margin-top:8px;cursor:pointer;">
-          <input type="checkbox" id="proj-test-mode" onchange="saveTestMode()">
-          <span><strong>Testfactuur</strong> — alleen ter controle: maak het concept aan maar laat de uren open (verwijder het concept daarna in Informer).</span>
-        </label>
-      </div>
-    </div>
+    <label style="display:flex;align-items:center;gap:6px;margin:0 0 14px;cursor:pointer;font-size:13px;">
+      <input type="checkbox" id="proj-test-mode" onchange="saveTestMode()">
+      <span><strong>Testfactuur</strong> — alleen concept aanmaken, uren blijven open</span>
+    </label>
 
     <div id="projecten-summary"></div>
 
@@ -427,7 +419,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
 
     <details class="section" id="proj-new-details">
       <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">+ Nieuw project</summary>
-      <p class="muted" style="margin-top:10px;">Neem een project uit Informer over (projectnummer, naam, relatie, tarief). Daarna boek je uren en maak je met één klik een concept-factuur aan.</p>
       <div class="warn-box" id="projecten-config-warn" style="display:none">
         <strong>Eerst even Instellingen invullen.</strong> Sales endpoint en ledger-ID staan leeg — vul ze in onder de Instellingen-tab en kom terug.
       </div>
@@ -486,9 +477,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <section id="tab-instellingen" class="tab-panel">
     <div class="section">
       <h2>Informer-verbinding</h2>
-      <div class="warn-box">
-        <strong>Werkt via een Cloudflare Worker.</strong> Informer staat geen directe browser-calls toe (CORS), dus we routeren via een Worker die de API-key server-side bewaart. Setup-stappen staan in <code>worker.js</code>; deploy via de "Push" knop in je Deploy Dashboard.
-      </div>
       <div class="grid-2">
         <div class="field">
           <label for="cfg-base">Base URL</label>
@@ -567,7 +555,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <section id="tab-geavanceerd" class="tab-panel">
     <div class="section">
       <h2>Verbinding testen</h2>
-      <p class="muted">Doet een GET op het opgegeven endpoint. Default <code>/administration/</code> — geeft details van de administratie die bij je API-key hoort.</p>
       <div class="field">
         <label for="test-path">Endpoint</label>
         <input id="test-path" type="text" value="/administration/">
@@ -580,7 +567,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
 
     <div class="section">
       <h2>Bestaande inkoopfacturen ophalen</h2>
-      <p class="muted">GET op het inkoopfacturen-endpoint uit Instellingen.</p>
       <div class="row-btns">
         <button class="btn primary" onclick="listPurchases()">GET inkoopfacturen</button>
       </div>
@@ -589,7 +575,6 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
 
     <div class="section">
       <h2>Test-inkoopfactuur aanmaken</h2>
-      <p class="muted">POST met onderstaande JSON. Pas IDs aan via <code>/relations/</code>, <code>/vat/</code>, <code>/ledgers/</code> en <code>/costs/</code>.</p>
       <div class="field">
         <label for="create-body">Request body (JSON)</label>
         <textarea id="create-body" spellcheck="false"></textarea>
@@ -607,6 +592,56 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
         <summary>Laatste Informer request/response</summary>
         <pre id="debug-log" class="response" style="display:block; margin-top:8px;">Nog geen request gedaan.</pre>
       </details>
+    </div>
+  </section>
+
+  <!-- ====== TAB: Uitleg (alle begeleidende teksten gebundeld) ====== -->
+  <section id="tab-uitleg" class="tab-panel">
+    <div class="section">
+      <h2>Uitleg per onderdeel</h2>
+      <p class="muted">Korte handleiding bij de tabs. De werk-tabs zelf zijn bewust kaal gehouden — hier staat de toelichting.</p>
+    </div>
+
+    <div class="section">
+      <h2>Overzicht</h2>
+      <p class="muted">Live status over alle mailboxen: te verwerken/betalen facturen, mails die antwoord vragen, openstaande inkoopfacturen uit Informer en je agenda. <strong>Workflow inkoopfactuur:</strong> klik <em>Open</em> om de mail door te sturen naar het MoneyMonk-inkoopadres, en klik daarna <em>Verwerkt ✓</em> om 'm naar <code>MoneyMonk Verwerkt</code> te verplaatsen.</p>
+    </div>
+
+    <div class="section">
+      <h2>Facturen verwerken</h2>
+      <p class="muted">Kies een factuur-mail uit de Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) maakt/koppelt de relatie in Informer, (4) maakt de inkoopfactuur aan mét PDF als bijlage, (5) verplaatst de mail naar <code>MoneyMonk Verwerkt</code>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur. Met <em>Losse PDF uploaden</em> verwerk je een factuur die niet in je inbox zit (download/scan) via dezelfde flow, zonder Outlook-stappen.</p>
+    </div>
+
+    <div class="section">
+      <h2>Verkoop migreren</h2>
+      <p class="muted">Bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Informer. Per PDF: Claude extraheert klant + bedragen → klant matchen/aanmaken → POST naar het verkoop-endpoint. Doorloopt alle bestanden serieel; fouten blijven in beeld zodat je ze daarna kunt oppakken. Vul eerst de sales-instellingen in (Instellingen-tab).</p>
+    </div>
+
+    <div class="section">
+      <h2>Projecten</h2>
+      <p class="muted">Informer-projecten/uren zijn API-afgeschermd, dus je neemt projecten hier één keer over en registreert de uren in het dashboard. Bij <strong>Factureren</strong> wordt altijd alleen een <em>concept</em> in Informer aangemaakt — versturen (en evt. een bijlage koppelen) doe je zelf vanuit Informer.</p>
+      <ul class="muted" style="margin-top:0;">
+        <li><strong>Tarieven</strong> — één of meer per project; bij meerdere kies je per urenboeking welk tarief geldt.</li>
+        <li><strong>Factuur-template</strong> — wordt automatisch op de standaard-template van de relatie gezet; zelf overschrijven kan.</li>
+        <li><strong>Factuurregels</strong> — "samengevat per tarief" (1 regel per tarief, datums in de specificatie) of "aparte regel per boeking".</li>
+        <li><strong>BTW verlegd</strong> — voor buitenland/EU B2B (bv. België): 0% reverse-charge i.p.v. 21%. Gaat automatisch aan bij een niet-NL relatie.</li>
+        <li><strong>Opmerking op factuur</strong> — vrije tekst die in het Opmerking-veld van Informer komt (bv. "Uren gemaakt door Mohsen / Hours worked by Mohsen").</li>
+        <li><strong>Testfactuur</strong> (vinkje) — maakt het concept aan maar laat de uren open (dry-run).</li>
+        <li><strong>Markeer als gefactureerd</strong> — markeert open uren als gefactureerd zónder een Informer-concept aan te maken (voor uren die al gefactureerd zijn).</li>
+        <li><strong>Doorbelasting importeren</strong> — lees een inkoopfactuur in (PDF-upload óf bestaande uit Informer): elke regel wordt een uren-boeking (aantal = uren, omschrijving overgenomen) tegen een vast doorbelasttarief, met optie om direct door te zetten naar een concept.</li>
+        <li><strong>Gefactureerd-overzicht</strong> — alle aangemaakte facturen met status <em>concept/definitief</em> (✓ om op definitief te zetten, ↩ om terug te draaien).</li>
+      </ul>
+      <p class="muted">Projecten en uren worden centraal in Cloudflare Workers KV bewaard en automatisch gesynchroniseerd op elk apparaat — beveiligd via je Microsoft-login, geen wachtwoord nodig.</p>
+    </div>
+
+    <div class="section">
+      <h2>Instellingen</h2>
+      <p class="muted">De Informer-verbinding loopt via een Cloudflare Worker (Informer staat geen directe browser-calls toe en de API-key mag niet in de frontend staan). Vul de base-URL (<code>&lt;worker&gt;/api</code>) en de sales-IDs (ledger, product, template, betaalconditie, currency) in. Setup-details staan in <code>worker.js</code>/<code>README.md</code>.</p>
+    </div>
+
+    <div class="section">
+      <h2>Geavanceerd</h2>
+      <p class="muted">API-sandbox om Informer rechtstreeks te testen: verbinding testen (GET <code>/administration/</code>), bestaande inkoopfacturen ophalen, en een test-inkoopfactuur aanmaken (POST met aanpasbare JSON; pas IDs aan via <code>/relations/</code>, <code>/vat/</code>, <code>/ledgers/</code>, <code>/costs/</code>). Onderaan een debug-log van de laatste Informer request/response.</p>
     </div>
   </section>
 </div>
@@ -1259,13 +1294,7 @@ async function markHandled(btn, id, mboxEmail) {
 async function loadAll() {
   devLog(`loadAll: ${MAILBOXES.length} mailboxen ophalen`, "info");
   $("today-line").textContent = new Date().toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  $("alert-area").innerHTML = `
-    <div class="help">
-      <strong>Workflow:</strong> klik <em>Open</em> om de mail door te sturen naar
-      <code style="background:#fff;padding:1px 6px;border-radius:4px;border:0.5px solid #c2d6ec;cursor:pointer"
-        onclick="navigator.clipboard.writeText('${MONEYMONK_ADDRESS}'); this.textContent='gekopieerd ✓'; setTimeout(()=>this.textContent='${MONEYMONK_ADDRESS}',1500)">${MONEYMONK_ADDRESS}</code>
-      (klik = kopiëren). Klik daarna <em>Verwerkt ✓</em>.
-    </div>`;
+  $("alert-area").innerHTML = "";   // alleen voor foutmeldingen; uitleg staat op de Uitleg-tab
   setStatus("data ophalen…", true);
 
   try {
@@ -3291,8 +3320,7 @@ function renderProjects() {
       </div>
       <details style="margin-top:12px;">
         <summary class="muted" style="cursor:pointer;font-size:12px;">📄 Doorbelasting importeren (inkoopfactuur → uren @ €${DOORBELAST_RATE})</summary>
-        <p class="muted" style="margin:8px 0 4px;">Bron: upload een PDF óf kies een bestaande inkoopfactuur uit Informer. Het aantal uren wordt overgenomen en als doorbelasting tegen €${DOORBELAST_RATE}/uur klaargezet; daarna kun je 'm direct doorzetten naar een concept.</p>
-        <div class="field" style="margin:0;"><label style="font-size:11px;">Bron A — PDF uploaden</label><input type="file" id="db-file-${p.id}" accept="application/pdf,.pdf"></div>
+        <div class="field" style="margin:8px 0 0;"><label style="font-size:11px;">Bron A — PDF uploaden</label><input type="file" id="db-file-${p.id}" accept="application/pdf,.pdf"></div>
         <div class="row-btns"><button class="btn" onclick="importDoorbelasting('${p.id}')">Inlezen uit PDF</button>
           <button class="btn" onclick="loadDoorbelastingInformer('${p.id}')">Bron B — kies uit Informer</button>
           <span class="muted" id="db-status-${p.id}" style="align-self:center;"></span></div>
