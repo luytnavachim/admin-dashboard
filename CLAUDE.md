@@ -22,8 +22,8 @@ Standalone web-dashboard voor Micha (eenmans-IT-bedrijf Triplet IT). Vervangt he
 Browser (Apache @ Hetzner) → MSAL OAuth → Microsoft Graph (mail/calendar/folders direct).
 Browser → Cloudflare Worker `/api/*` → Informer API (CORS-proxy, key server-side).
 Browser → Cloudflare Worker `/extract` `/extract-sales` → Anthropic API (PDF → JSON).
-Browser → Cloudflare Worker `/projects` → Workers KV (projecten/uren, cross-device, beveiligd met `PROJECTS_KEY`).
-Browser → `localStorage` (Informer-config `informer_cfg_v1` + projecten-cache `projects_v1` + sync-key `projects_sync_v1`).
+Browser → Cloudflare Worker `/projects` → Workers KV (projecten/uren, cross-device, beveiligd via Microsoft-login: Worker checkt Graph `/me`).
+Browser → `localStorage` (Informer-config `informer_cfg_v1` + projecten-offline-cache `projects_v1` + testfactuur-vinkje `proj-test-mode`).
 
 ## Belangrijke beslissingen
 
@@ -33,7 +33,7 @@ Browser → `localStorage` (Informer-config `informer_cfg_v1` + projecten-cache 
 - **Verwerk-flow (inkoop)**: factuurmail → submap per leverancier onder `MoneyMonk Verwerkt` in dezelfde mailbox. Map+submap auto-aangemaakt (`findFolderId` + `findOrCreateSubfolder`).
 - **Informer inkoop-flow**: PDF → Worker `/extract` → Claude extract → leverancier matchen/aanmaken → POST `/invoice/purchase/` (met PDF) → mail naar Verwerkt-map. Als rij-knop `→ Informer` op Overzicht en als wizard op Facturen-tab.
 - **Verkoop migreren**: bulk MoneyMonk-PDF's → `/extract-sales` → klant matchen/aanmaken → POST `/invoice/sales/`.
-- **Projecten (uren → factuur)**: Informer-projecten/uren zijn API-afgeschermd, dus projecten worden hier handmatig overgenomen (projectnummer + naam + relation_id + vast uurtarief). Opslag **cross-device in Workers KV** via Worker-endpoint `/projects` (GET/PUT, beveiligd met header `X-Projects-Key` == env `PROJECTS_KEY`); `localStorage` is alleen offline-cache + sync-wachtwoord per apparaat. Uren boeken → knop `Factureren` bouwt **één samenvattende regel** (totaal open uren × tarief), POST `/invoice/sales/` + POST `/invoice/sales/send/` (definitief/versturen); projectnummer = factuur-referentie. Gefactureerde boekingen worden gemarkeerd (`invoiced`), blijven als historie staan. Pure rekenkern = `computeProjectInvoice()` (unit-getest). Sales-btw 21% = `vat_id 1478830`. KV-binding `PROJECTS_KV` in `wrangler.jsonc`.
+- **Projecten (uren → factuur)**: Informer-projecten/uren zijn API-afgeschermd, dus projecten worden hier handmatig overgenomen (projectnummer + naam + relation_id). Per project: **meerdere tarieven** (`rates[]` label+bedrag, keuze per urenboeking), een **factuur-template** (auto = standaard-template van de relatie) en **regelmodus** (`lineMode`: `summary` = 1 regel per tarief mét datums in omschrijving, of `perEntry` = 1 regel per boeking). Opslag **cross-device in Workers KV** via Worker-endpoint `/projects` (GET/PUT), **beveiligd via Microsoft-login**: frontend stuurt Graph-token mee, Worker verifieert via Graph `/me` tegen `PROJECTS_ALLOWED_USERS` (default: domein `@triplet-it.nl`). `localStorage` = offline-cache. `Factureren` maakt **altijd alleen een concept** in Informer (`POST /invoice/sales/`) — NIET versturen; gebruiker verstuurt zelf vanuit Informer (ivm bijlagen, die de API niet ondersteunt op verkoopfacturen). Normaal worden de uren gemarkeerd als `invoiced` (terugdraaibaar via ↩); "Testfactuur"-vinkje laat ze open. Projectnummer = factuur-referentie. Pure rekenkern = `computeProjectInvoice()` (unit-getest, groepeert per tarief). Sales-btw 21% = `vat_id 1478830`. KV-binding `PROJECTS_KV` in `wrangler.jsonc`.
 - **Sales-config in Instellingen-tab**: base URL (`<worker>/api`), ledger-/product-/template-/payment-/currency-ID, btw-optie. Defaults in `defaultConfig()`.
 - **Claude model**: `claude-haiku-4-5` (was Opus, ~15x duurder). In `worker.js`.
 - **Dev console**: rechts op Overzicht-tab, log van alle Graph + Informer calls. Toggle via `console`-knop.

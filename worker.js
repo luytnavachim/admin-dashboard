@@ -307,19 +307,38 @@ function hasErrorPayload(err) {
 // ---------------------------------------------------------------------------
 // /projects — cross-device opslag van projecten + uren in Workers KV.
 // Eén key ("projects_v1") met de hele JSON-blob (single-user tool).
-// Beveiligd met een gedeeld wachtwoord: de frontend stuurt header
-// X-Projects-Key, die moet matchen met env.PROJECTS_KEY (Secret).
+// Beveiliging via Microsoft-login: de frontend stuurt z'n Graph-token mee als
+// `Authorization: Bearer <token>`. De Worker vraagt Microsoft Graph /me wie de
+// gebruiker is en staat alleen toegestane gebruikers toe (env
+// PROJECTS_ALLOWED_USERS, komma-gescheiden; default: domein triplet-it.nl).
 //   GET  /projects  → { projects: [...] , updatedAt }
 //   PUT  /projects  → body { projects: [...] }  (POST mag ook)
 // Vereist KV-binding env.PROJECTS_KV (zie wrangler.jsonc).
 // ---------------------------------------------------------------------------
+function isAllowedProjectsUser(email, env) {
+  if (!email) return false;
+  const list = (env.PROJECTS_ALLOWED_USERS || "").split(",").map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (list.length) return list.includes(email);
+  return email.endsWith("@triplet-it.nl");   // default: eigen bedrijfsdomein
+}
+
 async function handleProjects(request, env, cors) {
-  if (!env.PROJECTS_KEY) {
-    return json({ error: "Worker mist PROJECTS_KEY in Variables (Secret)." }, 500, cors);
+  // Identiteit verifiëren via Microsoft (Graph /me met het meegestuurde token).
+  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) return json({ error: "Unauthorized — geen Microsoft-token meegestuurd." }, 401, cors);
+  let me;
+  try {
+    const r = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,id", {
+      headers: { Authorization: "Bearer " + token }
+    });
+    if (!r.ok) return json({ error: "Unauthorized — Microsoft-token ongeldig of verlopen (" + r.status + ")." }, 401, cors);
+    me = await r.json();
+  } catch (e) {
+    return json({ error: "Microsoft-verificatie faalde: " + e.message }, 502, cors);
   }
-  const provided = request.headers.get("X-Projects-Key") || "";
-  if (provided !== env.PROJECTS_KEY) {
-    return json({ error: "Unauthorized — onjuiste of ontbrekende X-Projects-Key." }, 401, cors);
+  const email = String(me.mail || me.userPrincipalName || "").toLowerCase().trim();
+  if (!isAllowedProjectsUser(email, env)) {
+    return json({ error: "Geen toegang voor " + (email || "onbekende gebruiker") + "." }, 403, cors);
   }
   if (!env.PROJECTS_KV) {
     return json({ error: "Worker mist PROJECTS_KV binding (kv_namespaces in wrangler.jsonc)." }, 500, cors);
