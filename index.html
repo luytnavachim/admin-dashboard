@@ -958,15 +958,20 @@ function isOwnInvoice(email) {
 }
 function looksLikeInvoice(email) {
   const subj = (email.subject || "").toLowerCase();
-  const body = (email.bodyPreview || "").toLowerCase();
+  const body = (email.bodyPreview || "").toLowerCase().slice(0, 400);
   const from = senderEmail(email).toLowerCase();
-  // "receipt" pakt mails à la "Your receipt from <SaaS> #..." waar de
-  // PDF-bijlage feitelijk de factuur is. From-adressen zoals
-  // invoice@..., facturatie@..., billing@..., factuur+statements@...
-  // zijn ook sterke factuur-signalen al gebruikt de subject ander woord.
-  return /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov|receipt/.test(subj)
-    || /factuur|invoice|vervaldatum|te betalen|betaaldatum|betalingsherinnering/.test(body.slice(0, 300))
-    || /(^|[+._-])(invoice|factuur|facturatie|billing|facturen|invoices)([+._-]|@)/.test(from);
+  const att = !!email.hasAttachments;
+  // Sterke signalen: altijd raak (subject of body).
+  const strong = /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov|receipt|betaalbewijs|betaalbevestiging|creditnota|credit ?note|vervaldatum|te betalen|betaaldatum/;
+  if (strong.test(subj) || strong.test(body)) return true;
+  // Afzender-adres dat op facturatie/orders wijst + een bijlage → factuur/bon.
+  const fromPat = /(^|[+._-])(invoice|invoices|factuur|facturen|facturatie|billing|orders?|sales|shop|webshop)([+._-]|@)/;
+  if (att && fromPat.test(from)) return true;
+  // Zwakkere woorden (bestelling/order/bon/betaling) tellen alleen mét bijlage,
+  // zodat marketing ("bestel nu!") niet meekomt.
+  const loose = /bestelbevestiging|orderbevestiging|bestelling|\border\b|kassabon|\bbon\b|ontvangstbevestiging|aankoop|purchase|statement|payment|betaling|betaald/;
+  if (att && (loose.test(subj) || loose.test(body))) return true;
+  return false;
 }
 function looksLikePayment(email) {
   const subj = (email.subject || "").toLowerCase();
@@ -1298,13 +1303,13 @@ async function loadAll() {
   setStatus("data ophalen…", true);
 
   try {
-    const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning", "receipt"];
+    const queries = ["factuur", "invoice", "rekening", "betalingsherinnering", "herinnering", "premie", "aanmaning", "receipt", "bestelbevestiging", "betaalbewijs", "order"];
 
 // Per mailbox: serieel ophalen (om MailboxConcurrency-limiet te respecteren).
 // Tussen mailboxen: parallel.
 async function fetchMailbox(m) {
   try {
-    const inbox = await listInbox(m, 30);
+    const inbox = await listInbox(m, 50);
     const invoices = [];
     for (const q of queries) {
       try {
@@ -1325,7 +1330,10 @@ const [perMbox, events] = await Promise.all([
 ]);
 
 const allInbox = perMbox.flatMap(x => x.inbox);
-const allInvoiceCandidates = perMbox.flatMap(x => x.invoices);
+// Kandidaten = keyword-zoekresultaten ÉN de recente inbox-mails. Zo vallen
+// facturen/bonnen die de zoekwoorden missen (bv. "Bestelbevestiging") niet
+// meer buiten de boot; looksLikeInvoice (incl. bijlage-signaal) filtert.
+const allInvoiceCandidates = perMbox.flatMap(x => x.invoices.concat(x.inbox));
 
     // Dedupe by id (within a mailbox, ids are unique; across mailboxes they should also be unique)
     const seen = new Set();
