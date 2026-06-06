@@ -3060,15 +3060,18 @@ function addDoorbelastingEntry(id, andInvoice) {
 
 const projExpanded = new Set();      // welke projectkaarten zijn uitgeklapt
 const projShowHistory = new Set();   // welke kaarten tonen gefactureerde historie
+let projInvStatus = {};              // invoiceId -> "concept" | "definitief"
 function toggleProjExpand(id) { projExpanded.has(id) ? projExpanded.delete(id) : projExpanded.add(id); renderProjects(); }
 function toggleProjHistory(id) { projShowHistory.has(id) ? projShowHistory.delete(id) : projShowHistory.add(id); renderProjects(); }
 
 function projEntryRowHtml(p, e) {
   const rAmt = entryRateAmount(p, e);
   const rTag = `${fmtHrs(e.hours)} × ${fmtEur(rAmt)}${e.rateLabel ? ` <span class="muted">(${escapeHtml(e.rateLabel)})</span>` : ""}`;
+  const isFinal = projInvStatus[String(e.invoiceId)] === "definitief";
+  const statusBadge = e.invoiced ? ` · <span class="badge ${isFinal ? "ok" : "info"}">${isFinal ? "definitief" : "concept"}</span>` : "";
   return `<div class="entry-row ${e.invoiced ? "invoiced" : ""}">
     <span class="e-date">${escapeHtml(e.date)}</span>
-    <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${e.invoiced ? ' · <span class="badge ok">gefactureerd</span>' : ""}</span>
+    <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${statusBadge}</span>
     <span class="e-hrs" style="min-width:150px;">${rTag}</span>
     ${e.invoiced
       ? `<button class="icon-btn" title="Terugzetten naar open (bv. als je het concept in Informer hebt verwijderd)" onclick="unInvoiceEntry('${p.id}','${e.id}')" style="color:var(--muted);">↩</button>`
@@ -3115,6 +3118,9 @@ function renderInvoicesOverview() {
   if (!det || !list) return;
   backfillInvoiceRecords();
   const invs = Array.isArray(projectsData.invoices) ? projectsData.invoices : [];
+  // status-map (invoiceId -> concept/definitief) voor de badges in de projectkaarten
+  projInvStatus = {};
+  invs.forEach(iv => { projInvStatus[String(iv.id)] = iv.status === "definitief" ? "definitief" : "concept"; });
   if (!invs.length) { det.style.display = "none"; list.innerHTML = ""; return; }
   det.style.display = "";
   const total = invs.reduce((s, iv) => s + (Number(iv.amountExcl) || 0), 0);
@@ -3124,13 +3130,25 @@ function renderInvoicesOverview() {
     const idLink = iv.url
       ? `<a href="${escapeHtml(iv.url)}" target="_blank" rel="noopener">#${escapeHtml(String(iv.id))}</a>`
       : `#${escapeHtml(String(iv.id))}`;
+    const isFinal = iv.status === "definitief";
+    const statusBadge = `<span class="badge ${isFinal ? "ok" : "info"}">${isFinal ? "definitief" : "concept"}</span>`;
+    const finalBtn = `<button class="icon-btn" title="${isFinal ? "Terug naar concept" : "Markeer als definitief (verstuurd in Informer)"}" onclick="toggleInvoiceFinal('${escapeHtml(String(iv.id))}')" style="color:var(--ok-text);">${isFinal ? "↺" : "✓"}</button>`;
     return `<div class="entry-row">
       <span class="e-date">${escapeHtml(iv.date || "")}</span>
-      <span class="e-desc">${idLink} · ${proj} · <span class="muted">${escapeHtml(iv.relationName || "")}</span></span>
+      <span class="e-desc">${idLink} · ${proj} · <span class="muted">${escapeHtml(iv.relationName || "")}</span> ${statusBadge}</span>
       <span class="e-hrs" style="min-width:170px;">${fmtEur(iv.amountExcl)} <span class="muted">(${fmtHrs(iv.hours || 0)})</span></span>
+      ${finalBtn}
       <button class="icon-btn" title="Terugdraaien: uit overzicht halen en de uren terugzetten naar open" onclick="removeInvoiceRecord('${escapeHtml(String(iv.id))}')" style="color:var(--muted);">↩</button>
     </div>`;
   }).join("");
+}
+
+function toggleInvoiceFinal(invId) {
+  const iv = (projectsData.invoices || []).find(x => String(x.id) === String(invId));
+  if (!iv) return;
+  iv.status = (iv.status === "definitief") ? "concept" : "definitief";
+  saveProjects();
+  renderProjects();
 }
 
 function removeInvoiceRecord(invId) {
