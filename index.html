@@ -420,6 +420,11 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
 
     <div id="projecten-summary"></div>
 
+    <details class="section" id="proj-invoices-details" style="display:none;">
+      <summary id="proj-invoices-summary" style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Gefactureerd</summary>
+      <div id="proj-invoices-list" style="margin-top:10px;"></div>
+    </details>
+
     <details class="section" id="proj-new-details">
       <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">+ Nieuw project</summary>
       <p class="muted" style="margin-top:10px;">Neem een project uit Informer over (projectnummer, naam, relatie, tarief). Daarna boek je uren en maak je met één klik een concept-factuur aan.</p>
@@ -2901,10 +2906,78 @@ function projEntryRowHtml(p, e) {
   </div>`;
 }
 
+// Reconstrueer factuur-records voor reeds gefactureerde uren die nog geen
+// record hebben (bv. facturen van vóór deze functie). Idempotent.
+function backfillInvoiceRecords() {
+  if (!Array.isArray(projectsData.invoices)) projectsData.invoices = [];
+  const have = new Set(projectsData.invoices.map(iv => String(iv.id)));
+  const groups = {};
+  projectsData.projects.forEach(p => (p.entries || []).forEach(e => {
+    if (!e.invoiced || !e.invoiceId) return;
+    const k = String(e.invoiceId);
+    if (have.has(k)) return;
+    if (!groups[k]) groups[k] = { id: e.invoiceId, projectId: p.id, projectName: p.name, projectNumber: p.projectNumber || "", relationName: p.relationName || "", hours: 0, amountExcl: 0, dates: [], stamps: [] };
+    const amt = entryRateAmount(p, e);
+    groups[k].hours += Number(e.hours) || 0;
+    groups[k].amountExcl += (Number(e.hours) || 0) * amt;
+    if (e.date) groups[k].dates.push(e.date);
+    if (e.invoicedAt) groups[k].stamps.push(e.invoicedAt);
+  }));
+  const added = Object.values(groups);
+  if (!added.length) return false;
+  added.forEach(g => {
+    const ds = g.dates.sort(), st = g.stamps.sort();
+    projectsData.invoices.push({
+      id: g.id, url: "", projectId: g.projectId, projectName: g.projectName, projectNumber: g.projectNumber,
+      relationName: g.relationName, date: (st[0] || "").slice(0, 10) || ds[ds.length - 1] || "",
+      periodFrom: ds[0] || "", periodTo: ds[ds.length - 1] || "",
+      amountExcl: Math.round(g.amountExcl * 100) / 100, amountIncl: Math.round(g.amountExcl * 1.21 * 100) / 100,
+      hours: g.hours, entryCount: 0, createdAt: st[0] || ""
+    });
+  });
+  projectsData.invoices.sort((a, b) => String(b.createdAt || b.date).localeCompare(String(a.createdAt || a.date)));
+  saveProjects();
+  return true;
+}
+
+function renderInvoicesOverview() {
+  const det = $("proj-invoices-details"), list = $("proj-invoices-list"), sum = $("proj-invoices-summary");
+  if (!det || !list) return;
+  backfillInvoiceRecords();
+  const invs = Array.isArray(projectsData.invoices) ? projectsData.invoices : [];
+  if (!invs.length) { det.style.display = "none"; list.innerHTML = ""; return; }
+  det.style.display = "";
+  const total = invs.reduce((s, iv) => s + (Number(iv.amountExcl) || 0), 0);
+  if (sum) sum.textContent = `Gefactureerd (${invs.length}) · ${fmtEur(total)} excl. btw`;
+  list.innerHTML = invs.map(iv => {
+    const proj = iv.projectNumber ? `${escapeHtml(iv.projectName || "")} (${escapeHtml(iv.projectNumber)})` : escapeHtml(iv.projectName || "");
+    const idLink = iv.url
+      ? `<a href="${escapeHtml(iv.url)}" target="_blank" rel="noopener">#${escapeHtml(String(iv.id))}</a>`
+      : `#${escapeHtml(String(iv.id))}`;
+    return `<div class="entry-row">
+      <span class="e-date">${escapeHtml(iv.date || "")}</span>
+      <span class="e-desc">${idLink} · ${proj} · <span class="muted">${escapeHtml(iv.relationName || "")}</span></span>
+      <span class="e-hrs" style="min-width:170px;">${fmtEur(iv.amountExcl)} <span class="muted">(${fmtHrs(iv.hours || 0)})</span></span>
+      <button class="icon-btn" title="Terugdraaien: uit overzicht halen en de uren terugzetten naar open" onclick="removeInvoiceRecord('${escapeHtml(String(iv.id))}')" style="color:var(--muted);">↩</button>
+    </div>`;
+  }).join("");
+}
+
+function removeInvoiceRecord(invId) {
+  if (!confirm("Factuur uit het overzicht verwijderen en de bijbehorende uren terugzetten naar open?\n\n(Doe dit als je het concept in Informer hebt weggegooid.)")) return;
+  projectsData.projects.forEach(p => (p.entries || []).forEach(e => {
+    if (e.invoiced && String(e.invoiceId) === String(invId)) { e.invoiced = false; e.invoiceId = null; e.invoicedAt = null; }
+  }));
+  projectsData.invoices = (projectsData.invoices || []).filter(iv => String(iv.id) !== String(invId));
+  saveProjects();
+  renderProjects();
+}
+
 function renderProjects() {
   const wrap = $("projecten-list");
   if (!wrap) return;
   refreshProjectenConfigWarn();
+  renderInvoicesOverview();
   const projs = projectsData.projects;
 
   // Totaalbalk bovenaan
@@ -3055,6 +3128,16 @@ async function invoiceProject(id) {
       // Boekingen markeren als gefactureerd (concept ís de factuur; jij verstuurt zelf).
       const stamp = new Date().toISOString();
       open.forEach(e => { e.invoiced = true; e.invoiceId = invId; e.invoicedAt = stamp; });
+      // Factuur registreren voor het Gefactureerd-overzicht.
+      if (!Array.isArray(projectsData.invoices)) projectsData.invoices = [];
+      projectsData.invoices.unshift({
+        id: invId, url: invUrl || "",
+        projectId: p.id, projectName: p.name, projectNumber: p.projectNumber || "",
+        relationName: p.relationName || "",
+        date: inv.invDate, periodFrom: inv.periodFrom, periodTo: inv.periodTo,
+        amountExcl: inv.amountExcl, amountIncl: inv.totalIncl, hours: inv.totalHours,
+        entryCount: open.length, createdAt: stamp
+      });
       saveProjects();
     }
     renderProjects();
