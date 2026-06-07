@@ -361,6 +361,19 @@ h1 { font-size: 21px; font-weight: 650; letter-spacing: -.01em; }
 
 /* Dev console blijft donker; in dark mode iets bijtrekken */
 :root.dark .config-warning code, :root.dark code { background: var(--surface-2); }
+
+/* Projecten-polish (fase 2) */
+h2 .count { background: var(--accent-bg); color: var(--accent); font-weight: 600; }
+.proj-summary { gap: 22px; box-shadow: var(--shadow-sm); }
+.psum-item { display: flex; align-items: center; gap: 12px; }
+.psum-ic { width: 40px; height: 40px; border-radius: 11px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-bg); color: var(--accent); flex-shrink: 0; }
+.psum-ic svg { width: 20px; height: 20px; }
+.proj-summary .big { font-weight: 650; letter-spacing: -.02em; }
+.proj-card { box-shadow: var(--shadow-sm); }
+.proj-card > .proj-head:hover { background: var(--surface-2); }
+.proj-title { font-weight: 600; }
+.history-toggle { font-weight: 500; }
+.proj-invoices-list .entry-row, #proj-invoices-list .entry-row { border-color: var(--border); }
 </style>
 <script>try{if(localStorage.getItem("admin-theme")==="dark")document.documentElement.classList.add("dark");}catch(e){}</script>
 </head>
@@ -3376,8 +3389,14 @@ function renderProjects() {
       const totAmt = projs.reduce((s, p) => s + projOpenAmount(p), 0);
       const nOpen = projs.filter(p => projOpenHours(p) > 0).length;
       summaryEl.innerHTML = `<div class="proj-summary">
-        <div><div class="big">${fmtEur(totAmt)}</div><div class="lbl">openstaand te factureren</div></div>
-        <div><div class="big">${fmtHrs(totHrs)}</div><div class="lbl">open uren</div></div>
+        <div class="psum-item">
+          <span class="psum-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M17 8.5C16 7 14.2 6 12 6 8.7 6 6 8.7 6 12s2.7 6 6 6c2.2 0 4-1 5-2.5"/><path d="M4 10.5h8M4 13.5h8"/></svg></span>
+          <div><div class="big">${fmtEur(totAmt)}</div><div class="lbl">openstaand te factureren</div></div>
+        </div>
+        <div class="psum-item">
+          <span class="psum-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+          <div><div class="big">${fmtHrs(totHrs)}</div><div class="lbl">open uren</div></div>
+        </div>
         <div class="spacer"></div>
         <div class="lbl">${projs.length} project${projs.length === 1 ? "" : "en"} · ${nOpen} met open uren</div>
       </div>`;
