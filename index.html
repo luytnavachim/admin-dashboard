@@ -7,22 +7,53 @@
 <style>
 :root {
   color-scheme: light;
-  --bg: #fafaf7;
+  --bg: #f4f6fa;
   --surface: #ffffff;
-  --border: #e8e6df;
-  --border-strong: #d3d1c7;
-  --text: #1a1a1a;
-  --muted: #5f5e5a;
-  --accent: #185fa5;
-  --accent-bg: #e6f1fb;
-  --warn-bg: #faeeda;
-  --warn-text: #854f0b;
-  --danger-bg: #fcebeb;
-  --danger-text: #a32d2d;
-  --ok-bg: #eaf3de;
-  --ok-text: #3b6d11;
-  --info-bg: #eeedfe;
-  --info-text: #534ab7;
+  --surface-2: #f1f4f9;
+  --border: #e6e9ef;
+  --border-strong: #d2d8e2;
+  --text: #161a22;
+  --muted: #646d7d;
+  --accent: #3366ff;
+  --accent-strong: #244fd6;
+  --accent-bg: #eaf0ff;
+  --accent-text: #ffffff;
+  --warn-bg: #fdf0dc;
+  --warn-text: #92560a;
+  --danger-bg: #fdeaea;
+  --danger-text: #c23434;
+  --ok-bg: #e7f5e3;
+  --ok-text: #2f7d2f;
+  --info-bg: #ecebfe;
+  --info-text: #5249c4;
+  --shadow-sm: 0 1px 2px rgba(20,28,46,.05), 0 1px 1px rgba(20,28,46,.04);
+  --shadow-md: 0 4px 16px rgba(20,28,46,.07);
+  --radius: 14px;
+  --radius-sm: 9px;
+}
+:root.dark {
+  color-scheme: dark;
+  --bg: #0e1016;
+  --surface: #161922;
+  --surface-2: #1d212c;
+  --border: #262b38;
+  --border-strong: #353c4c;
+  --text: #e8ebf2;
+  --muted: #98a1b3;
+  --accent: #5b85ff;
+  --accent-strong: #6f96ff;
+  --accent-bg: #1a2438;
+  --accent-text: #0e1016;
+  --warn-bg: #3a2c10;
+  --warn-text: #f0c069;
+  --danger-bg: #3a1d1d;
+  --danger-text: #f08a8a;
+  --ok-bg: #16301c;
+  --ok-text: #84d68e;
+  --info-bg: #221f3e;
+  --info-text: #b3aef5;
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.3);
+  --shadow-md: 0 6px 22px rgba(0,0,0,.4);
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; }
@@ -261,7 +292,77 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   #dev-console.show { display: none; }
   #dev-console.show.force { display: flex; right: 12px; left: 12px; width: auto; top: 60px; bottom: 60px; }
 }
+
+/* ============================================================
+   MODERN RESTYLE (fase 1) — accent + iconen + dark mode
+   ============================================================ */
+html { -webkit-font-smoothing: antialiased; }
+body { max-width: 1040px; transition: background .2s ease, color .2s ease; }
+a, button, input, select, textarea, .section, .stat, .row, .entry-row, .badge { transition: background .15s ease, border-color .15s ease, color .15s ease, box-shadow .15s ease, transform .1s ease; }
+
+/* Header */
+.header-row { padding-bottom: 14px; margin-bottom: 16px; border-bottom: 1px solid var(--border); align-items: center; }
+h1 { font-size: 21px; font-weight: 650; letter-spacing: -.01em; }
+.header-actions { gap: 10px; }
+.header-actions a { font-weight: 500; }
+.icon-pill { display: inline-flex; align-items: center; justify-content: center; width: 34px; height: 34px; border-radius: 10px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); cursor: pointer; }
+.icon-pill:hover { color: var(--accent); border-color: var(--accent); background: var(--accent-bg); }
+.icon-pill svg { width: 17px; height: 17px; }
+
+/* Cards & sections */
+.section { border: 1px solid var(--border); border-radius: var(--radius); box-shadow: var(--shadow-sm); }
+.section:has(> h2) > h2:first-child { letter-spacing: -.005em; }
+
+/* Tabs — pill-stijl */
+.tabs { gap: 4px; border-bottom: none; flex-wrap: wrap; background: var(--surface-2); padding: 5px; border-radius: 12px; border: 1px solid var(--border); }
+.tab { border: none; border-radius: 8px; padding: 7px 14px; font-weight: 500; color: var(--muted); }
+.tab:hover { color: var(--text); background: var(--surface); }
+.tab.active { color: var(--accent); background: var(--surface); border-bottom: none; box-shadow: var(--shadow-sm); font-weight: 600; }
+
+/* Stat-kaarten met icoon-chip + accent */
+.stats { gap: 12px; }
+.stat { display: flex; align-items: center; gap: 12px; border-radius: var(--radius); box-shadow: var(--shadow-sm); padding: 14px; }
+.stat .stat-ic { width: 38px; height: 38px; flex-shrink: 0; border-radius: 10px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent-bg); color: var(--accent); }
+.stat .stat-ic svg { width: 19px; height: 19px; }
+.stat.warn .stat-ic { background: var(--warn-bg); color: var(--warn-text); }
+.stat.danger .stat-ic { background: var(--danger-bg); color: var(--danger-text); }
+.stat.ok .stat-ic { background: var(--ok-bg); color: var(--ok-text); }
+.stat .stat-body { min-width: 0; }
+.stat .value { font-size: 24px; font-weight: 650; letter-spacing: -.02em; }
+.stat .label { font-size: 12px; }
+
+/* Knoppen */
+.btn { border-radius: var(--radius-sm); font-weight: 550; padding: 7px 13px; box-shadow: var(--shadow-sm); }
+.btn:hover { transform: translateY(-1px); }
+.btn:active { transform: translateY(0); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-text); }
+.btn.danger { color: var(--danger-text); border-color: var(--border-strong); background: var(--surface); box-shadow: none; }
+.btn.danger:hover { background: var(--danger-bg); border-color: var(--danger-text); }
+.btn:disabled { transform: none; box-shadow: none; }
+
+/* Badges */
+.badge { font-weight: 600; letter-spacing: .01em; }
+
+/* Inputs */
+.field input, .field select, .field textarea, #test-path, #create-body { border-radius: var(--radius-sm); background: var(--surface); }
+.field input:focus, .field select:focus, .field textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+
+/* Rijen */
+.row, .entry-row { border-color: var(--border); }
+.section .row:hover { background: var(--surface-2); border-radius: 8px; }
+
+/* Skeleton-loader */
+.skel { display: flex; flex-direction: column; gap: 10px; padding: 6px 0; }
+.skel-row { height: 16px; border-radius: 6px; background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; animation: shimmer 1.4s ease infinite; }
+.skel-row.w70 { width: 70%; } .skel-row.w45 { width: 45%; } .skel-row.w90 { width: 90%; }
+@keyframes shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+.empty { font-style: normal; color: var(--muted); }
+
+/* Dev console blijft donker; in dark mode iets bijtrekken */
+:root.dark .config-warning code, :root.dark code { background: var(--surface-2); }
 </style>
+<script>try{if(localStorage.getItem("admin-theme")==="dark")document.documentElement.classList.add("dark");}catch(e){}</script>
 </head>
 <body>
 <button id="dev-console-toggle" onclick="toggleDevConsole()" title="Toggle dev console">console</button>
@@ -299,6 +400,7 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
       </p>
     </div>
     <div class="header-actions">
+      <button class="icon-pill" id="theme-toggle" onclick="toggleTheme()" title="Licht/donker"></button>
       <a onclick="loadAll()">Verversen</a>
       <span>·</span>
       <span id="user-label"></span>
@@ -321,26 +423,38 @@ h2 .num { font-size: 11px; font-weight: 600; background: var(--accent); color: w
   <!-- ====== TAB: Overzicht ====== -->
   <section id="tab-overzicht" class="tab-panel active">
     <div class="stats">
-      <div class="stat warn"><div class="label">Te verwerken / betalen</div><div class="value" id="stat-invoices">–</div></div>
-      <div class="stat danger"><div class="label">Wacht op antwoord</div><div class="value" id="stat-reply">–</div></div>
-      <div class="stat"><div class="label">Openstaand in Informer</div><div class="value" id="stat-deadlines">–</div></div>
-      <div class="stat ok"><div class="label">Komende afspraken</div><div class="value" id="stat-events">–</div></div>
+      <div class="stat warn">
+        <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>
+        <div class="stat-body"><div class="label">Te verwerken / betalen</div><div class="value" id="stat-invoices">–</div></div>
+      </div>
+      <div class="stat danger">
+        <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/></svg></span>
+        <div class="stat-body"><div class="label">Wacht op antwoord</div><div class="value" id="stat-reply">–</div></div>
+      </div>
+      <div class="stat">
+        <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
+        <div class="stat-body"><div class="label">Openstaand in Informer</div><div class="value" id="stat-deadlines">–</div></div>
+      </div>
+      <div class="stat ok">
+        <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>
+        <div class="stat-body"><div class="label">Komende afspraken</div><div class="value" id="stat-events">–</div></div>
+      </div>
     </div>
     <div class="section">
       <h2>Te verwerken / te betalen <span class="count" id="invoices-count">0</span></h2>
-      <div id="invoices-list"><div class="loading">Laden…</div></div>
+      <div id="invoices-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
     </div>
     <div class="section">
       <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
-      <div id="reply-list"><div class="loading">Laden…</div></div>
+      <div id="reply-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
     </div>
     <div class="section">
       <h2>Openstaande inkoopfacturen (Informer) <span class="count" id="deadlines-count">0</span></h2>
-      <div id="deadlines-list"><div class="loading">Laden…</div></div>
+      <div id="deadlines-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
     </div>
     <div class="section">
       <h2>Komende 2 dagen <span class="count" id="events-count">0</span></h2>
-      <div id="events-list"><div class="loading">Laden…</div></div>
+      <div id="events-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
     </div>
   </section>
 
@@ -3444,6 +3558,29 @@ async function invoiceProject(id) {
 // ============================================================
 //  INIT
 // ============================================================
+// ---- Thema (licht/donker) ----
+const THEME_ICONS = {
+  dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
+  light: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>'
+};
+function applyTheme(t) {
+  const dark = t === "dark";
+  document.documentElement.classList.toggle("dark", dark);
+  const el = document.getElementById("theme-toggle");
+  if (el) { el.innerHTML = dark ? THEME_ICONS.dark : THEME_ICONS.light; el.title = dark ? "Naar lichte modus" : "Naar donkere modus"; }
+}
+function toggleTheme() {
+  const dark = !document.documentElement.classList.contains("dark");
+  try { localStorage.setItem("admin-theme", dark ? "dark" : "light"); } catch (e) {}
+  applyTheme(dark ? "dark" : "light");
+}
+function initTheme() {
+  let saved = "light";
+  try { saved = localStorage.getItem("admin-theme") || "light"; } catch (e) {}
+  applyTheme(saved === "dark" ? "dark" : "light");
+}
+initTheme();
+
 (async function init() {
   const ok = await initAuth();
   if (!ok) return;
