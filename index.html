@@ -774,7 +774,7 @@ body { max-width: 1280px; }
         <div class="actions"><button class="btn" id="mb-mig-contacts" onclick="migrateContacts()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
       </div>
       <div class="row">
-        <div class="info"><div class="from">2. Verkoopfacturen</div><div class="meta">Historische verkoopfacturen → ingeboekt in Moneybird.</div></div>
+        <div class="info"><div class="from">2. Verkoopfacturen</div><div class="meta">Historische verkoopfacturen → Moneybird. <label style="cursor:pointer;"><input type="checkbox" id="mb-sales-book"> direct inboeken (anders als concept)</label></div></div>
         <div class="actions"><button class="btn" id="mb-mig-sales" onclick="migrateSales()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
       </div>
       <div class="row">
@@ -3688,8 +3688,100 @@ function mbMigStub(naam) {
   const log = $("mb-mig-log");
   if (log) log.innerHTML = `<div class="warn-box">De migratie "${escapeHtml(naam)}" volgt als volgende stap (na de relaties). Verkoop- en inkoopfacturen worden alleen ingeboekt, niet verstuurd.</div>`;
 }
-function migrateSales() { mbMigStub("Verkoopfacturen"); }
 function migratePurchase() { mbMigStub("Inkoopfacturen"); }
+
+// Moneybird-config (deze administratie) — opgehaald via /mb/tax_rates + /ledger_accounts.
+const MB_SALES_TAX = { "21": "489478495131403774", "9": "489478495134549503", "0": "489478495137695232" };
+const MB_SALES_LEDGER = "489478494297785771";   // grootboek "Omzet"
+
+function mbFlatten(obj, key) {
+  const c = (obj && obj[key]) || obj;
+  if (Array.isArray(c)) return c;
+  if (c && typeof c === "object") return Object.entries(c).filter(([, v]) => v && typeof v === "object").map(([id, v]) => ({ id, ...v }));
+  return [];
+}
+const mbCleanDesc = (s) => String(s || "").replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+
+// Pure mapping: Informer-verkoopfactuur → Moneybird sales_invoice payload (unit-testbaar).
+function mbSalesInvoicePayload(inv, contactId) {
+  const lines = Object.values(inv.line || {})
+    .filter(l => String(l.info) !== "1")                 // info/koptekst-regels overslaan
+    .filter(l => (Number(l.amount) || 0) !== 0 || (Number(l.qty) || 0) !== 0);
+  const details = lines.map(l => {
+    const pct = String(parseInt(l.vat_percentage, 10) || 0);
+    return {
+      description: mbCleanDesc(l.description) || "Regel",
+      amount: String(Number(l.qty) || 1),
+      price: Number(l.amount) || 0,
+      tax_rate_id: MB_SALES_TAX[pct] || MB_SALES_TAX["0"],
+      ledger_account_id: MB_SALES_LEDGER
+    };
+  });
+  return {
+    sales_invoice: {
+      contact_id: contactId,
+      reference: inv.number || inv.reference || "",
+      invoice_date: inv.date,
+      details_attributes: details
+    }
+  };
+}
+
+async function mbLoadExistingSalesRefs() {
+  const refs = new Set();
+  for (let p = 1; p <= 60; p++) {
+    const b = await mbFetch(`sales_invoices.json?per_page=100&page=${p}`);
+    if (!Array.isArray(b) || !b.length) break;
+    b.forEach(iv => { if (iv.reference) refs.add(String(iv.reference).trim()); });
+    if (b.length < 100) break;
+  }
+  return refs;
+}
+
+async function migrateSales() {
+  if (mbBusy) return;
+  const log = $("mb-mig-log"); const setLog = (h) => { if (log) log.innerHTML = h; };
+  const onlyBook = !!($("mb-sales-book") && $("mb-sales-book").checked);
+  try {
+    setLog(`<div class="muted">Verkoopfacturen + relaties + contacten ophalen…</div>`);
+    const [salesData, rels] = await Promise.all([informerFetch("GET", "/invoices/sales/"), loadRelationsCache()]);
+    const invs = mbFlatten(salesData, "sales");
+    if (!invs.length) { showToast("Geen verkoopfacturen gevonden", "err"); setLog(""); return; }
+    if (!confirm(`${invs.length} verkoopfacturen overzetten naar Moneybird?\n\n` +
+      (onlyBook ? "Ze worden aangemaakt ÉN ingeboekt (gemarkeerd als verstuurd, zónder e-mail)." : "Ze worden als CONCEPT aangemaakt — je boekt ze daarna zelf in Moneybird.") +
+      `\nBestaande facturen (zelfde referentie) worden overgeslagen.`)) { setLog(""); return; }
+    mbBusy = true;
+    const relById = {}; Object.values(rels).forEach(r => { relById[r.id] = { num: String(r.raw.relation_number || ""), name: (r.raw.company_name || "") }; });
+    const contacts = await mbLoadAllContacts();
+    const byCust = {}, byName = {};
+    contacts.forEach(c => { if (c.customer_id) byCust[String(c.customer_id)] = c.id; if (c.company_name) byName[c.company_name.toLowerCase().trim()] = c.id; });
+    const existingRefs = await mbLoadExistingSalesRefs();
+    let created = 0, skipped = 0, failed = 0; const lines = [];
+    for (let i = 0; i < invs.length; i++) {
+      const inv = invs[i]; const ref = (inv.number || "").trim();
+      if (ref && existingRefs.has(ref)) { skipped++; lines.push(`↷ ${escapeHtml(ref)} — bestaat al`); }
+      else {
+        const rel = relById[inv.relation_id];
+        const cid = (rel && byCust[rel.num]) || (rel && byName[(rel.name || "").toLowerCase().trim()]) || null;
+        if (!cid) { failed++; lines.push(`✗ ${escapeHtml(ref)} — geen Moneybird-contact (${escapeHtml(rel ? rel.name : inv.relation_id)})`); }
+        else {
+          try {
+            const res = await mbFetch("sales_invoices.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbSalesInvoicePayload(inv, cid)) });
+            if (onlyBook && res && res.id) {
+              await mbFetch(`sales_invoices/${res.id}/send_invoice.json`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sales_invoice_sending: { delivery_method: "Manual" } }) });
+            }
+            created++; if (ref) existingRefs.add(ref);
+            lines.push(`✓ ${escapeHtml(ref)} → ${escapeHtml(rel.name)}${onlyBook ? " (ingeboekt)" : " (concept)"}`);
+          } catch (e) { failed++; lines.push(`✗ ${escapeHtml(ref)} — ${escapeHtml(e.message || String(e))}`); }
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+      setLog(`<div class="muted">Verwerkt ${i + 1}/${invs.length} · aangemaakt ${created} · overgeslagen ${skipped} · fout ${failed}</div><div class="response" style="display:block;max-height:300px;">${lines.slice(-60).join("<br>")}</div>`);
+    }
+    showToast(`Verkoopfacturen klaar: ${created} aangemaakt, ${skipped} bestond al, ${failed} fout`, failed ? "err" : "ok");
+  } catch (e) { setLog(`<div class="err">Migratie mislukt: ${escapeHtml(e.message || String(e))}</div>`); }
+  finally { mbBusy = false; }
+}
 
 let mbBusy = false;
 
