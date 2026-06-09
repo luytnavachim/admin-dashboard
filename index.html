@@ -581,7 +581,7 @@ body { max-width: 1280px; }
       </div>
       <div class="grid-2">
         <div class="field">
-          <label for="proj-nummer">Projectnummer (Informer)</label>
+          <label for="proj-nummer">Projectnummer</label>
           <input id="proj-nummer" type="text" placeholder="bv. 2026F740123">
         </div>
         <div class="field">
@@ -590,10 +590,10 @@ body { max-width: 1280px; }
         </div>
       </div>
       <div class="field">
-        <label for="proj-klant">Relatie / klant (Informer)</label>
+        <label for="proj-klant">Relatie / klant (Moneybird)</label>
         <input id="proj-klant" type="text" list="proj-klant-list" placeholder="Begin te typen om te zoeken…" autocomplete="off" onchange="onProjKlantChange()" oninput="onProjKlantChange()">
         <datalist id="proj-klant-list"></datalist>
-        <span class="muted" id="proj-klant-hint" style="font-size:11px;">Relaties laden…</span>
+        <span class="muted" id="proj-klant-hint" style="font-size:11px;">Contacten laden…</span>
       </div>
       <div class="field">
         <label>Tarieven (€ excl. btw) — voeg er meerdere toe om per urenboeking te kiezen</label>
@@ -1631,7 +1631,7 @@ function switchTab(name) {
     } else {
       setProjSyncStatus("niet ingelogd", "err");
     }
-    if (account && cfg.baseUrl) loadProjectRelations().catch(e => console.warn("loadProjectRelations:", e));
+    if (account) loadProjectRelations().catch(e => console.warn("loadProjectRelations:", e));
   }
 }
 document.addEventListener("click", (ev) => {
@@ -2987,31 +2987,26 @@ async function loadProjectRelations() {
   if (projRelationsLoaded) return;
   const hint = $("proj-klant-hint");
   try {
-    await loadProjectTemplates();
-    const data = await informerFetch("GET", "/relations/");
-    const container = data?.relation || data?.relations || data;
+    const all = await mbLoadAllContacts();
     const dl = $("proj-klant-list");
     let opts = "";
     projRelationMap = {};
-    if (container && typeof container === "object") {
-      for (const [id, rel] of Object.entries(container)) {
-        if (!rel || typeof rel !== "object") continue;
-        const name = rel.company_name || rel.name || "";
-        if (!name) continue;
-        projRelationMap[name.toLowerCase().trim()] = {
-          id, name,
-          email: rel.email_invoice || rel.email || "",
-          templateId: rel.sales_invoice_template_id || "",
-          country: String(rel.country || "").toUpperCase()
-        };
-        opts += `<option value="${escapeHtml(name)}"></option>`;
-      }
-    }
+    (all || []).forEach(c => {
+      const name = c.company_name || [c.firstname, c.lastname].filter(Boolean).join(" ").trim() || "";
+      if (!name) return;
+      projRelationMap[name.toLowerCase().trim()] = {
+        id: c.id, name,
+        email: c.send_invoices_to_email || c.email || "",
+        templateId: c.invoice_workflow_id || "",
+        country: String(c.country || "").toUpperCase()
+      };
+      opts += `<option value="${escapeHtml(name)}"></option>`;
+    });
     if (dl) dl.innerHTML = opts;
     projRelationsLoaded = true;
-    if (hint) hint.textContent = Object.keys(projRelationMap).length + " relaties geladen — kies of typ exact de bedrijfsnaam.";
+    if (hint) hint.textContent = Object.keys(projRelationMap).length + " Moneybird-contacten geladen — kies of typ exact de bedrijfsnaam.";
   } catch (e) {
-    if (hint) hint.textContent = "Relaties laden mislukt (" + (e.message || e) + ") — je kunt de klantnaam handmatig typen.";
+    if (hint) hint.textContent = "Contacten laden mislukt (" + (e.message || e) + ") — je kunt de klantnaam handmatig typen.";
   }
 }
 
@@ -3029,8 +3024,9 @@ function onProjKlantChange() {
 }
 
 function refreshProjectenConfigWarn() {
+  // Moneybird-config (token + admin-id) staat in de Worker, niet in de frontend.
   const w = $("projecten-config-warn");
-  if (w) w.style.display = (cfg.salesCreatePath && cfg.baseUrl) ? "none" : "block";
+  if (w) w.style.display = "none";
 }
 
 // ---- Tarief-rijen in het nieuw-project-formulier ----
