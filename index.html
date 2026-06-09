@@ -3671,7 +3671,7 @@ async function mbAttachPdfToPurchase(invId, pdfB64, filename) {
   for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
   const fd = new FormData();
   fd.append("file", new Blob([bytes], { type: "application/pdf" }), filename || "factuur.pdf");
-  await mbFetch(`documents/purchase_invoices/${invId}/attachment.json`, { method: "POST", body: fd });
+  await mbFetch(`documents/purchase_invoices/${invId}/attachments.json`, { method: "POST", body: fd });
 }
 
 // Kern van de verwerk-flow: extracted + PDF → contact (match/aanmaken) → inkoopfactuur
