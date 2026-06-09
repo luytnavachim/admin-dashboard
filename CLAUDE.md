@@ -1,42 +1,55 @@
 # Admin Dashboard — context for Claude
 
-Standalone web-dashboard voor Micha (eenmans-IT-bedrijf Triplet IT). Vervangt het inkoop-/verkoop-administratie-process. In productie geen Cowork-afhankelijkheid: de frontend praat rechtstreeks met Microsoft Graph (OAuth/MSAL) en met Informer via een eigen Cloudflare Worker. Claude Haiku wordt server-side (in de Worker) gebruikt voor PDF-extractie.
+Standalone web-dashboard voor Micha (eenmans-IT-bedrijf Triplet IT). Vervangt het inkoop-/verkoop-administratie-proces. In productie geen Cowork-afhankelijkheid: de frontend praat rechtstreeks met Microsoft Graph (OAuth/MSAL) en met **Moneybird** via een eigen Cloudflare Worker. Claude Haiku wordt server-side (in de Worker) gebruikt voor PDF-extractie.
 
 **Live op:** `https://admin.triplet-it.nl/` — frontend draait op **Apache, eigen Hetzner-server** (`95.217.203.120`, webroot `/var/www/admin-dashboard`). GEEN GitHub Pages.
 **Worker (API-backend):** `https://admin-dashboard.michavantuyl.workers.dev/`
 **Repo:** `github.com/luytnavachim/admin-dashboard` (lokaal: `~/Documents/admin-standalone`)
 
+> **Boekhouding = Moneybird.** Informer is volledig uitgefaseerd (juni 2026). Alle live flows lopen nu via Moneybird (`/mb/*`-proxy). De oude Informer-helpers staan deels nog ongebruikt in `index.html` (informerFetch, migrateContacts/Sales/Purchase, e.d.) maar worden nergens meer aangeroepen — mogen later weg.
+
 ## Files
 
 | File | Doel |
 |---|---|
-| `index.html` | Hoofd-dashboard. Single-file (~2600 regels). MSAL.js voor Microsoft-login, Graph API direct. Tabs: Overzicht / Facturen verwerken / Verkoop migreren / Projecten / Instellingen / Geavanceerd. |
-| `informer.html` | API-sandbox voor Informer — losse pagina om endpoints te testen. |
-| `worker.js` | Cloudflare Worker — CORS-proxy naar Informer API (`/api/*`) + `/extract` & `/extract-sales` (PDF → Claude Haiku → JSON). |
+| `index.html` | Hoofd-dashboard. Single-file (~3700 regels). MSAL.js voor Microsoft-login, Graph API direct, Moneybird via de Worker. Tabs: Overzicht / Facturen verwerken / Verkoop migreren / Projecten / Instellingen / Uitleg. |
+| `worker.js` | Cloudflare Worker — CORS-proxy naar Moneybird (`/mb/*`) + `/extract` & `/extract-sales` (PDF → Claude Haiku → JSON) + `/projects` (Workers KV). Bevat nog een ongebruikte Informer-proxy (`/api/*`). |
 | `worker.test.mjs` | Tests voor de Worker. |
-| `wrangler.jsonc` | Cloudflare Worker deploy config (Worker draait ook als static-asset host, maar die kant wordt NIET gebruikt — de live site komt van Hetzner). |
+| `informer.html` | Oude API-sandbox voor Informer — niet meer in gebruik. |
+| `wrangler.jsonc` | Cloudflare Worker deploy config. |
 | `README.md` | User-facing setup + deploy instructies. |
 
 ## Architectuur
 
-Browser (Apache @ Hetzner) → MSAL OAuth → Microsoft Graph (mail/calendar/folders direct).
-Browser → Cloudflare Worker `/api/*` → Informer API (CORS-proxy, key server-side).
+Browser (Apache @ Hetzner) → MSAL OAuth → Microsoft Graph (mail/agenda/mappen direct).
+Browser → Cloudflare Worker `/mb/*` → Moneybird API v2 (CORS-proxy, token server-side).
 Browser → Cloudflare Worker `/extract` `/extract-sales` → Anthropic API (PDF → JSON).
 Browser → Cloudflare Worker `/projects` → Workers KV (projecten/uren, cross-device, beveiligd via Microsoft-login: Worker checkt Graph `/me`).
-Browser → `localStorage` (Informer-config `informer_cfg_v1` + projecten-offline-cache `projects_v1` + testfactuur-vinkje `proj-test-mode`).
+Browser → `localStorage` (projecten-offline-cache `projects_v1` + testfactuur-vinkje `proj-test-mode` + thema `admin-theme`).
+
+## Moneybird — vaste ID's (deze administratie)
+
+Administratie-ID `489478494017815934` (ook in `wrangler.jsonc` als `MONEYBIRD_ADMIN_ID`). Owner/user-ID voor tijdregistratie `211695746093679828`.
+
+- Sales-btw-tarieven (`MB_SALES_TAX`): 21% `489478495131403774`, 9% `489478495134549503`, 0% `489478495137695232`. Sales-grootboek "Omzet" `489478494297785771`.
+- Inkoop-btw-tarieven (`MB_PURCHASE_TAX`): 21% `489478495139792385`, 9% `489478495142938114`. Inkoop-grootboek "Ongecategoriseerde uitgaven" `489478494294640040`. 0%/buitenlandse btw → 0%-inkooptarief opgezocht via `mbFindPurchase0Rate()` (Moneybird laat btw-tarieven NIET via API aanmaken; bestaat 'm niet, dan nette foutmelding).
 
 ## Belangrijke beslissingen
 
-- **Hosting gesplitst**: frontend (statische HTML/JS) op Hetzner via Apache; Worker is puur de API-backend. Informer-key en Anthropic-key staan alleen in de Worker (Secrets), nooit in de frontend.
+- **Hosting gesplitst**: frontend (statische HTML/JS) op Hetzner via Apache; Worker is puur de API-backend. Moneybird-token en Anthropic-key staan alleen in de Worker (Secrets), nooit in de frontend.
 - **MSAL met Single-page-app type** in Azure. Redirect URI = `https://admin.triplet-it.nl/`. Scopes: `Mail.ReadWrite Mail.ReadWrite.Shared Calendars.Read User.Read`. `CLIENT_ID` staat bovenaan het script.
-- **Multi-mailbox**: `MAILBOXES` bovenaan script = micha@, info@, administratie@, inkoop@, finance@ (triplet-it.nl). Eerste = primair (agenda). `/me` voor primaire, `/users/{email}` voor shared.
-- **Verwerk-flow (inkoop)**: factuurmail → submap per leverancier onder `MoneyMonk Verwerkt` in dezelfde mailbox. Map+submap auto-aangemaakt (`findFolderId` + `findOrCreateSubfolder`).
-- **Informer inkoop-flow**: PDF → Worker `/extract` → Claude extract → leverancier matchen/aanmaken → POST `/invoice/purchase/` (met PDF) → mail naar Verwerkt-map. Als rij-knop `→ Informer` op Overzicht en als wizard op Facturen-tab.
-- **Verkoop migreren**: bulk MoneyMonk-PDF's → `/extract-sales` → klant matchen/aanmaken → POST `/invoice/sales/`.
-- **Projecten (uren → factuur)**: Informer-projecten/uren zijn API-afgeschermd, dus projecten worden hier handmatig overgenomen (projectnummer + naam + relation_id). Per project: **meerdere tarieven** (`rates[]` label+bedrag, keuze per urenboeking), een **factuur-template** (auto = standaard-template van de relatie) en **regelmodus** (`lineMode`: `summary` = 1 regel per tarief mét datums in omschrijving, of `perEntry` = 1 regel per boeking). Opslag **cross-device in Workers KV** via Worker-endpoint `/projects` (GET/PUT), **beveiligd via Microsoft-login**: frontend stuurt Graph-token mee, Worker verifieert via Graph `/me` tegen `PROJECTS_ALLOWED_USERS` (default: domein `@triplet-it.nl`). `localStorage` = offline-cache. `Factureren` maakt **altijd alleen een concept** in Informer (`POST /invoice/sales/`) — NIET versturen; gebruiker verstuurt zelf vanuit Informer (ivm bijlagen, die de API niet ondersteunt op verkoopfacturen). Normaal worden de uren gemarkeerd als `invoiced` (terugdraaibaar via ↩); "Testfactuur"-vinkje laat ze open. Projectnummer = factuur-referentie. Pure rekenkern = `computeProjectInvoice()` (unit-getest, groepeert per tarief). Sales-btw 21% = `vat_id 1478830`. KV-binding `PROJECTS_KV` in `wrangler.jsonc`.
-- **Sales-config in Instellingen-tab**: base URL (`<worker>/api`), ledger-/product-/template-/payment-/currency-ID, btw-optie. Defaults in `defaultConfig()`.
-- **Claude model**: `claude-haiku-4-5` (was Opus, ~15x duurder). In `worker.js`.
-- **Dev console**: rechts op Overzicht-tab, log van alle Graph + Informer calls. Toggle via `console`-knop.
+- **Multi-mailbox**: `MAILBOXES` bovenaan script = micha@vantuyl.it + micha@, info@, administratie@, inkoop@, finance@ (triplet-it.nl). Eerste = primair (agenda). `/me` voor primaire, `/users/{email}` voor shared.
+- **Moneybird-proxy**: `mbFetch(path, opts)` → `<worker>/mb/<path>`. De Worker forwardt body + content-type ongewijzigd (dus ook multipart voor bijlagen) en zet `Authorization: Bearer MONEYBIRD_TOKEN`. `mbBase()` leidt de Worker-origin af via `projWorkerBase()` (niet meer uit de oude Informer-config).
+- **Facturen verwerken (inkoop)**: factuurmail (of losse PDF) → PDF/UBL lezen → `/extract` (Claude) → `mbBookPurchaseFromExtracted()`: contact zoeken op naam (`mbContactId`) of aanmaken (`mbContactIdOrCreate`) → `POST /mb/documents/purchase_invoices.json` (ingeboekt, niet betaald) → PDF als bijlage via `POST /mb/documents/purchase_invoices/{id}/attachments.json` (multipart, veld `file`, **meervoud** "attachments") → mail naar `MoneyMonk Verwerkt`. Knop `→ Moneybird` op Overzicht (`sendRowToMoneybird`) en wizard op Facturen-tab (`sendSelectedToMoneybird`) delen dezelfde kern. Losse upload = `sendUploadedPdfToMoneybird`.
+- **Verkoop migreren**: bulk MoneyMonk-PDF's → `/extract-sales` → `mbBookSalesFromExtracted()`: contact match/aanmaken → `POST /mb/sales_invoices.json`. Vinkje "Direct inboeken" → daarna `POST /mb/sales_invoices/{id}/send_invoice.json` met `delivery_method: "Manual"` (gemarkeerd verstuurd, zonder e-mail); anders blijft het een concept. Dedupe op `reference` via `mbLoadExistingSalesRefs()`.
+- **Overzicht — openstaande inkoop**: `loadOpenInvoices()` haalt `GET /mb/documents/purchase_invoices.json` op, filtert `state !== "paid"`, sorteert op vervaldatum.
+- **Projecten (uren → factuur)**: projecten worden hier handmatig overgenomen (projectnummer + naam + klant). Per project: **meerdere tarieven** (`rates[]` label+bedrag, keuze per urenboeking), een **factuur-template** (cosmetisch — Moneybird-payload gebruikt 'm niet) en **regelmodus** (`lineMode`: `summary` of `perEntry`). Klant-picker laadt **Moneybird-contacten** (`loadProjectRelations` → `mbLoadAllContacts`). Opslag **cross-device in Workers KV** via `/projects` (GET/PUT), beveiligd via Microsoft-login (`PROJECTS_ALLOWED_USERS`, default domein `@triplet-it.nl`). `Factureren` maakt **altijd alleen een concept** in Moneybird (`POST /mb/sales_invoices.json`) — NIET versturen; gebruiker verstuurt zelf vanuit Moneybird (ivm bijlagen). Pure rekenkern = `computeProjectInvoice()` (unit-getest, groepeert per tarief). Sales 21% = `MB_SALES_TAX["21"]`, btw verlegd → `MB_SALES_TAX["0"]`.
+- **Uren → Moneybird-tijdregistratie**: elke uren-boeking (`addEntry`) maakt óók een time entry in Moneybird (`mbCreateTimeEntry`): gekoppeld aan het contact + het juiste Moneybird-project (gematcht op projectnummer-prefix én budget==uurtarief via `mbFindProjectId`), start 09:00 + duur = aantal uren, `billable: true`. De Moneybird-id wordt op de boeking bewaard (`entry.mbTimeEntryId`). Knop **"Bestaande uren → Moneybird"** (`backfillTimeEntries`) zet bestaande boekingen zonder id alsnog over (idempotent).
+- **Doorbelasting**: in een project een inkoopfactuur inlezen — PDF-upload óf bestaande **uit Moneybird** (`loadDoorbelastingInformer` → `GET /mb/documents/purchase_invoices.json`); elke regel → uren-boeking (aantal = bedrag/80) tegen vast doorbelasttarief.
+- **Instellingen-tab**: alleen nog een Moneybird-verbindingstest (`testMoneybird`). De Moneybird-config (token + admin-id) zit in de Worker, niet in de frontend.
+- **Claude model**: `claude-haiku-4-5`. In `worker.js`.
+- **Thema**: licht/donker via `:root.dark` + localStorage `admin-theme`. App-shell-layout (zijbalk-nav + topbar).
+- **Dev console**: rechts op Overzicht-tab, log van alle Graph + Moneybird calls. Toggle via `console`-knop.
 - **Throttle**: Graph mailbox-concurrency ~4. `loadAll` per mailbox serieel, tussen mailboxen parallel. `graph()` retry't bij 429/503.
 
 ## Deployen — BELANGRIJK
@@ -50,11 +63,10 @@ Let op: het Deploy Dashboard heeft voor admin-standalone een `AUTO_MERGE` die `c
 
 ## Bekende beperkingen / wensen
 
-- **Informer banktransacties** + **projecten/uren** niet via API — projecten daarom lokaal in de browser (zie boven).
-- **Forward naar MoneyMonk-inkoopadres** niet via Graph met bijlage. Outlook server-side rule of handmatig is de workaround. (Informer-flow vervangt dit grotendeels.)
-- **Projecten-data is browser-lokaal** (localStorage) — single-device, geen sync/backup.
-- **Tab overlap**: Overzicht (snelle rij-acties) en Facturen verwerken (wizard met flow-log) overlappen deels.
-- **Lokale LLM via Mac Mini** (LM Studio/llama.cpp) — open: cloudflared-tunnel + `worker.js` naar local OpenAI-compatible endpoint. Nog niet voltooid.
+- **Moneybird-btw-tarieven niet via API aan te maken** — een ontbrekend 0%-inkooptarief moet handmatig in Moneybird gemaakt worden (de inkoop-flow geeft dan een nette melding).
+- **Forward naar MoneyMonk-inkoopadres** niet meer nodig: de inkoop-flow boekt rechtstreeks in Moneybird inclusief PDF-bijlage.
+- **Verkoopfactuur-bijlagen** ondersteunt de Moneybird-API niet → daarom blijft "Factureren" een concept dat je zelf in Moneybird verstuurt.
+- **Dode Informer-code** in `index.html`/`worker.js` mag opgeruimd worden (informerFetch, migrate*, `/api`-proxy, `informer.html`).
 
 ## Common commands
 
@@ -64,7 +76,7 @@ cd ~/Documents/admin-standalone
 # Lokaal testen (8000 → http://localhost:8000)
 python3 -m http.server 8000
 
-# Worker lokaal draaien (incl. /api en /extract)
+# Worker lokaal draaien (incl. /mb en /extract)
 npx wrangler dev
 
 # Worker deployen (alleen bij worker.js-wijziging)
@@ -83,6 +95,7 @@ ssh root@95.217.203.120 "cd /var/www/admin-dashboard && git pull --ff-only"
 - Externe libs via jsDelivr (MSAL).
 - Comments in code zijn beknopt en functioneel.
 - `devLog()` calls toevoegen bij nieuwe user-acties zodat ze in de console verschijnen.
+- Na wijziging aan `index.html`: even syntax-checken (`new Function` over de `<script>`-inhoud) vóór deploy.
 
 ## Volgende sessie
 
