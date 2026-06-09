@@ -3686,11 +3686,86 @@ async function testMoneybird() {
 }
 function mbMigStub(naam) {
   const log = $("mb-mig-log");
-  if (log) log.innerHTML = `<div class="warn-box">De migratie "${escapeHtml(naam)}" wordt in de volgende stap geïmplementeerd. Daarvoor haal ik eerst je Moneybird-config op (btw-tarieven, grootboekrekeningen) zodat de facturen correct worden ingeboekt.</div>`;
+  if (log) log.innerHTML = `<div class="warn-box">De migratie "${escapeHtml(naam)}" volgt als volgende stap (na de relaties). Verkoop- en inkoopfacturen worden alleen ingeboekt, niet verstuurd.</div>`;
 }
-function migrateContacts() { mbMigStub("Relaties / contacten"); }
 function migrateSales() { mbMigStub("Verkoopfacturen"); }
 function migratePurchase() { mbMigStub("Inkoopfacturen"); }
+
+let mbBusy = false;
+
+// Pure mapping: Informer-relation → Moneybird-contact payload (unit-testbaar).
+function mbContactPayload(rel) {
+  const lastname = [rel.surname_prefix, rel.surname].filter(s => s && String(s).trim()).join(" ").trim();
+  const addr = [rel.street, rel.house_number, rel.house_number_suffix].filter(s => s && String(s).trim()).join(" ").trim();
+  const email = (rel.email_invoice || rel.email || "").trim();
+  const c = {
+    company_name: (rel.company_name || "").trim(),
+    firstname: (rel.firstname || "").trim(),
+    lastname: lastname,
+    address1: addr,
+    zipcode: (rel.zip || "").replace(/\s+/g, " ").trim(),
+    city: (rel.city || "").trim(),
+    country: (rel.country || "").trim().toUpperCase(),
+    phone: (rel.phone || "").trim(),
+    tax_number: (rel.vat || "").trim(),
+    chamber_of_commerce: (rel.coc || "").trim(),
+    customer_id: rel.relation_number ? String(rel.relation_number) : ""
+  };
+  if (email) { c.send_invoices_to_email = email; c.delivery_method = "Email"; }
+  Object.keys(c).forEach(k => { if (c[k] === "" || c[k] == null) delete c[k]; });
+  return { contact: c };
+}
+
+async function mbLoadAllContacts() {
+  const all = [];
+  for (let page = 1; page <= 60; page++) {
+    const batch = await mbFetch(`contacts.json?per_page=100&page=${page}`);
+    if (!Array.isArray(batch) || !batch.length) break;
+    all.push(...batch);
+    if (batch.length < 100) break;
+  }
+  return all;
+}
+
+async function migrateContacts() {
+  if (mbBusy) return;
+  const log = $("mb-mig-log");
+  const setLog = (html) => { if (log) log.innerHTML = html; };
+  try {
+    setLog(`<div class="muted">Relaties uit Informer ophalen…</div>`);
+    const rels = await loadRelationsCache(true);
+    const list = Object.values(rels).map(r => r.raw).filter(r => (r.company_name || "").trim());
+    if (!list.length) { showToast("Geen relaties gevonden in Informer", "err"); setLog(""); return; }
+    if (!confirm(`${list.length} relaties uit Informer overzetten naar Moneybird-contacten?\n\nBestaande contacten (zelfde klantnummer of bedrijfsnaam) worden overgeslagen.`)) { setLog(""); return; }
+    mbBusy = true;
+    setLog(`<div class="muted">Bestaande Moneybird-contacten ophalen…</div>`);
+    const existing = await mbLoadAllContacts();
+    const seenCust = new Set(existing.map(c => String(c.customer_id || "").trim()).filter(Boolean));
+    const seenName = new Set(existing.map(c => (c.company_name || "").toLowerCase().trim()).filter(Boolean));
+    let created = 0, skipped = 0, failed = 0; const lines = [];
+    for (let i = 0; i < list.length; i++) {
+      const rel = list[i];
+      const cust = rel.relation_number ? String(rel.relation_number) : "";
+      const name = (rel.company_name || "").toLowerCase().trim();
+      if ((cust && seenCust.has(cust)) || seenName.has(name)) {
+        skipped++; lines.push(`↷ ${escapeHtml(rel.company_name)} — bestaat al`);
+      } else {
+        try {
+          await mbFetch("contacts.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbContactPayload(rel)) });
+          created++; seenName.add(name); if (cust) seenCust.add(cust);
+          lines.push(`✓ ${escapeHtml(rel.company_name)}`);
+        } catch (e) { failed++; lines.push(`✗ ${escapeHtml(rel.company_name)} — ${escapeHtml(e.message || String(e))}`); }
+        await new Promise(r => setTimeout(r, 350));   // Moneybird rate-limit ontzien
+      }
+      setLog(`<div class="muted">Verwerkt ${i + 1}/${list.length} · aangemaakt ${created} · overgeslagen ${skipped} · fout ${failed}</div><div class="response" style="display:block;max-height:300px;">${lines.slice(-60).join("<br>")}</div>`);
+    }
+    showToast(`Relaties klaar: ${created} aangemaakt, ${skipped} bestond al, ${failed} fout`, failed ? "err" : "ok");
+  } catch (e) {
+    setLog(`<div class="err">Migratie mislukt: ${escapeHtml(e.message || String(e))}</div>`);
+  } finally {
+    mbBusy = false;
+  }
+}
 
 // ---- Thema (licht/donker) ----
 const THEME_ICONS = {
