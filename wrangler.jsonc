@@ -20,6 +20,9 @@
 	"vars": {
 		"INFORMER_AUTH_METHOD": "apikey",
 		"INFORMER_BASE_URL": "https://api.informer.eu/v1",
-		"ALLOWED_ORIGIN": "*"
+		"ALLOWED_ORIGIN": "*",
+		// Moneybird-administratie-ID (niet geheim). Vul je administratie-ID in.
+		// De token zet je als Secret:  npx wrangler secret put MONEYBIRD_TOKEN
+		"MONEYBIRD_ADMIN_ID": ""
 	}
 }

@@ -45,6 +45,10 @@ export default {
       return await handleProjects(request, env, cors);
     }
 
+    if (url.pathname === "/mb" || url.pathname.startsWith("/mb/")) {
+      return await handleMoneybird(request, env, cors, url);
+    }
+
     const prefix = "/api/";
     if (!url.pathname.startsWith(prefix)) {
       return json({ error: "Use /api/<path>" }, 404, cors);
@@ -372,6 +376,41 @@ async function handleProjects(request, env, cors) {
   }
 
   return json({ error: "Alleen GET of PUT." }, 405, cors);
+}
+
+// ---------------------------------------------------------------------------
+// /mb/<path> — proxy naar de Moneybird API (migratie van Informer → Moneybird).
+//   <worker>/mb/contacts.json  →  https://moneybird.com/api/v2/<admin>/contacts.json
+// Token (Bearer) en administratie-ID staan server-side:
+//   MONEYBIRD_TOKEN     (Secret)  — personal API token
+//   MONEYBIRD_ADMIN_ID  (Var)     — administratie-ID
+// ---------------------------------------------------------------------------
+async function handleMoneybird(request, env, cors, url) {
+  if (!env.MONEYBIRD_TOKEN) return json({ error: "Worker mist MONEYBIRD_TOKEN (Secret)." }, 500, cors);
+  if (!env.MONEYBIRD_ADMIN_ID) return json({ error: "Worker mist MONEYBIRD_ADMIN_ID (Variable)." }, 500, cors);
+  const rest = url.pathname.replace(/^\/mb\/?/, "");
+  const target = "https://moneybird.com/api/v2/" + env.MONEYBIRD_ADMIN_ID + "/" + rest + url.search;
+  const headers = new Headers();
+  headers.set("Authorization", "Bearer " + env.MONEYBIRD_TOKEN);
+  headers.set("Accept", "application/json");
+  const ct = request.headers.get("content-type");
+  if (ct) headers.set("Content-Type", ct);
+  let body = null;
+  if (!["GET", "HEAD"].includes(request.method)) {
+    body = await request.arrayBuffer();
+    if (body.byteLength === 0) body = null;
+  }
+  let upstream;
+  try {
+    upstream = await fetch(target, { method: request.method, headers, body });
+  } catch (e) {
+    return json({ error: "Moneybird fetch failed: " + e.message, target }, 502, cors);
+  }
+  const out = new Headers();
+  for (const h of ["content-type", "etag"]) { const v = upstream.headers.get(h); if (v) out.set(h, v); }
+  for (const [k, v] of Object.entries(cors)) out.set(k, v);
+  const bytes = await upstream.arrayBuffer();
+  return new Response(bytes, { status: upstream.status, statusText: upstream.statusText, headers: out });
 }
 
 function buildCors(origin, env) {

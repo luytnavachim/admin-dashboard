@@ -439,6 +439,7 @@ body { max-width: 1280px; }
         <button class="tab" data-tab="projecten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M7 8V6a1 1 0 0 1 1-1h4l2 2"/></svg>Projecten</button>
         <button class="tab" data-tab="instellingen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M4.2 7l2.1 1.2M17.7 15.8l2.1 1.2M4.2 17l2.1-1.2M17.7 8.2l2.1-1.2"/></svg>Instellingen</button>
         <button class="tab" data-tab="geavanceerd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>Geavanceerd</button>
+        <button class="tab" data-tab="moneybird"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>Moneybird</button>
         <button class="tab" data-tab="uitleg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1 .9-1 1.6M12 16.8h.01"/></svg>Uitleg</button>
       </nav>
       <div class="side-foot"><span class="dot live" id="status-dot"></span><span id="status-text">verbinden…</span></div>
@@ -749,6 +750,41 @@ body { max-width: 1280px; }
     </div>
   </section>
 
+  <!-- ====== TAB: Moneybird-migratie (Informer → Moneybird) ====== -->
+  <section id="tab-moneybird" class="tab-panel">
+    <div class="section">
+      <h2>Verbinding met Moneybird</h2>
+      <div class="warn-box">
+        Zet in de Cloudflare Worker: <code>MONEYBIRD_TOKEN</code> (Secret — je personal API-token) en <code>MONEYBIRD_ADMIN_ID</code> (variabele — je administratie-ID), en deploy de Worker. Test daarna hier de verbinding.
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" onclick="testMoneybird()">Test verbinding</button>
+        <span class="muted" id="mb-test-status" style="align-self:center;"></span>
+      </div>
+      <div id="mb-test-out" class="response" style="display:none;"></div>
+    </div>
+
+    <div class="section">
+      <h2>Migreren naar Moneybird</h2>
+      <div class="warn-box">
+        Facturen worden alleen <strong>ingeboekt</strong> in Moneybird (niet verstuurd) — ze zijn al verstuurd via Informer/MoneyMonk.
+      </div>
+      <div class="row">
+        <div class="info"><div class="from">1. Relaties / contacten</div><div class="meta">Informer-relaties → Moneybird-contacten (basis voor de facturen).</div></div>
+        <div class="actions"><button class="btn" id="mb-mig-contacts" onclick="migrateContacts()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
+      </div>
+      <div class="row">
+        <div class="info"><div class="from">2. Verkoopfacturen</div><div class="meta">Historische verkoopfacturen → ingeboekt in Moneybird.</div></div>
+        <div class="actions"><button class="btn" id="mb-mig-sales" onclick="migrateSales()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
+      </div>
+      <div class="row">
+        <div class="info"><div class="from">3. Inkoopfacturen</div><div class="meta">Historische inkoopfacturen → ingeboekt in Moneybird.</div></div>
+        <div class="actions"><button class="btn" id="mb-mig-purchase" onclick="migratePurchase()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
+      </div>
+      <div id="mb-mig-log" style="margin-top:12px;"></div>
+    </div>
+  </section>
+
   <!-- ====== TAB: Uitleg (alle begeleidende teksten gebundeld) ====== -->
   <section id="tab-uitleg" class="tab-panel">
     <div class="section">
@@ -796,6 +832,11 @@ body { max-width: 1280px; }
     <div class="section">
       <h2>Geavanceerd</h2>
       <p class="muted">API-sandbox om Informer rechtstreeks te testen: verbinding testen (GET <code>/administration/</code>), bestaande inkoopfacturen ophalen, en een test-inkoopfactuur aanmaken (POST met aanpasbare JSON; pas IDs aan via <code>/relations/</code>, <code>/vat/</code>, <code>/ledgers/</code>, <code>/costs/</code>). Onderaan een debug-log van de laatste Informer request/response.</p>
+    </div>
+
+    <div class="section">
+      <h2>Moneybird-migratie</h2>
+      <p class="muted">Voor de overstap van Informer naar Moneybird. Zet eerst in de Worker <code>MONEYBIRD_TOKEN</code> (Secret) en <code>MONEYBIRD_ADMIN_ID</code> (variabele) en test de verbinding. Daarna migreer je in volgorde: relaties/contacten → verkoopfacturen → inkoopfacturen. Facturen worden alleen <strong>ingeboekt</strong> in Moneybird (niet verstuurd), want ze zijn al verstuurd via Informer/MoneyMonk. De API loopt via de Worker-proxy <code>/mb/*</code>.</p>
     </div>
   </section>
     </main>
@@ -1560,7 +1601,7 @@ function showApp() {
 //  TAB SWITCHING
 // ============================================================
 let facturenLoaded = false;
-const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", instellingen: "Instellingen", geavanceerd: "Geavanceerd", uitleg: "Uitleg" };
+const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", instellingen: "Instellingen", geavanceerd: "Geavanceerd", moneybird: "Moneybird-migratie", uitleg: "Uitleg" };
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
@@ -3613,6 +3654,44 @@ async function invoiceProject(id) {
 // ============================================================
 //  INIT
 // ============================================================
+// ============================================================
+//  MONEYBIRD-MIGRATIE (Informer → Moneybird)
+// ============================================================
+function mbBase() { return projWorkerBase() + "/mb"; }
+async function mbFetch(path, opts) {
+  const res = await fetch(mbBase() + "/" + path.replace(/^\//, ""), opts || {});
+  const txt = await res.text();
+  let body = null; try { body = JSON.parse(txt); } catch {}
+  if (!res.ok) {
+    const msg = (body && (body.error || body.message)) || ("HTTP " + res.status);
+    const err = new Error(msg); err.status = res.status; err.body = body || txt; throw err;
+  }
+  return body;
+}
+async function testMoneybird() {
+  const st = $("mb-test-status"), out = $("mb-test-out");
+  st.textContent = "testen…"; st.style.color = "var(--muted)"; out.style.display = "none";
+  try {
+    const data = await mbFetch("contacts.json?per_page=1");
+    st.textContent = "✓ verbonden"; st.style.color = "var(--ok-text)";
+    out.style.display = "block"; out.classList.remove("err"); out.classList.add("ok");
+    out.textContent = "Verbinding OK — token + administratie-ID werken. (Test gaf " + (Array.isArray(data) ? data.length : 0) + " contact terug.)";
+    ["mb-mig-contacts", "mb-mig-sales", "mb-mig-purchase"].forEach(id => { const b = $(id); if (b) b.disabled = false; });
+  } catch (e) {
+    st.textContent = "";
+    out.style.display = "block"; out.classList.remove("ok"); out.classList.add("err");
+    out.textContent = "Verbinding mislukt: " + (e.message || e) +
+      "\n\nControleer in de Worker: MONEYBIRD_TOKEN (Secret) en MONEYBIRD_ADMIN_ID (variabele), en of je 'npx wrangler deploy' hebt gedraaid.";
+  }
+}
+function mbMigStub(naam) {
+  const log = $("mb-mig-log");
+  if (log) log.innerHTML = `<div class="warn-box">De migratie "${escapeHtml(naam)}" wordt in de volgende stap geïmplementeerd. Daarvoor haal ik eerst je Moneybird-config op (btw-tarieven, grootboekrekeningen) zodat de facturen correct worden ingeboekt.</div>`;
+}
+function migrateContacts() { mbMigStub("Relaties / contacten"); }
+function migrateSales() { mbMigStub("Verkoopfacturen"); }
+function migratePurchase() { mbMigStub("Inkoopfacturen"); }
+
 // ---- Thema (licht/donker) ----
 const THEME_ICONS = {
   dark: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
