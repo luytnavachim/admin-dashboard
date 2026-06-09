@@ -437,6 +437,7 @@ body { max-width: 1280px; }
         <button class="tab" data-tab="facturen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l4 4v16H6z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>Facturen verwerken</button>
         <button class="tab" data-tab="migratie"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/><path d="M3 4h2l2.4 11.5h9.6L19 7H6.5"/></svg>Verkoop migreren</button>
         <button class="tab" data-tab="projecten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M7 8V6a1 1 0 0 1 1-1h4l2 2"/></svg>Projecten</button>
+        <button class="tab" data-tab="afboeken"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6 14h4"/></svg>Afboeken</button>
         <button class="tab" data-tab="instellingen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M4.2 7l2.1 1.2M17.7 15.8l2.1 1.2M4.2 17l2.1-1.2M17.7 8.2l2.1-1.2"/></svg>Instellingen</button>
         <button class="tab" data-tab="uitleg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1 .9-1 1.6M12 16.8h.01"/></svg>Uitleg</button>
       </nav>
@@ -630,6 +631,42 @@ body { max-width: 1280px; }
     <div id="projecten-list"></div>
   </section>
 
+  <!-- ====== TAB: Afboeken (banktransacties → grootboek koppelen) ====== -->
+  <section id="tab-afboeken" class="tab-panel">
+    <div class="section">
+      <h2>Banktransacties afboeken op de juiste categorie</h2>
+      <p class="muted">Haalt de nog niet-geboekte transacties uit Moneybird op. Per transactie stelt het dashboard op basis van jouw regels een grootboek-categorie voor — controleer en klik <em>Boek</em>. Zo houdt je boekhouder een sluitend jaar. Komt er nog niets binnen? Dan moet je eerst de bankkoppeling in Moneybird activeren.</p>
+    </div>
+
+    <details class="section" id="afboek-rules-details">
+      <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Regels (trefwoord → categorie)</summary>
+      <p class="muted" style="margin-top:8px;">Een regel matcht op de omschrijving én de tegenrekening van een transactie. De eerste regel die matcht bepaalt de voorgestelde categorie. Regels staan lokaal in deze browser.</p>
+      <div id="afboek-rules-list"></div>
+      <div class="entry-add" style="margin-top:8px;">
+        <div class="field desc" style="margin:0;"><input id="afboek-rule-keyword" type="text" placeholder="Trefwoord, bv. 'belastingdienst' of 'salaris'"></div>
+        <div class="field" style="margin:0;min-width:220px;"><select id="afboek-rule-cat"></select></div>
+        <button class="btn" onclick="addAfboekRule()">+ Regel</button>
+      </div>
+    </details>
+
+    <div class="section">
+      <div class="row-btns" style="align-items:center;">
+        <label style="font-size:13px;">Periode
+          <select id="afboek-period" style="margin-left:6px;">
+            <option value="this_year">Dit jaar</option>
+            <option value="prev_year">Vorig jaar</option>
+            <option value="this_quarter">Dit kwartaal</option>
+            <option value="this_month">Deze maand</option>
+          </select>
+        </label>
+        <button class="btn primary" onclick="loadAfboekTransactions()">Transacties laden</button>
+        <button class="btn" onclick="bookAllSuggested()" id="afboek-bookall-btn" disabled title="Boekt alle transacties die een voorgestelde categorie hebben">Boek alle met suggestie</button>
+        <span class="muted" id="afboek-summary" style="align-self:center;"></span>
+      </div>
+      <div id="afboek-list" style="margin-top:12px;"><p class="muted">Klik "Transacties laden" om de openstaande banktransacties op te halen.</p></div>
+    </div>
+  </section>
+
   <!-- ====== TAB: Instellingen ====== -->
   <section id="tab-instellingen" class="tab-panel">
     <div class="section">
@@ -680,6 +717,17 @@ body { max-width: 1280px; }
         <li><strong>Gefactureerd-overzicht</strong> — alle aangemaakte facturen met status <em>concept/definitief</em> (✓ om op definitief te zetten, ↩ om terug te draaien).</li>
       </ul>
       <p class="muted">Projecten en uren worden centraal in Cloudflare Workers KV bewaard en automatisch gesynchroniseerd op elk apparaat — beveiligd via je Microsoft-login, geen wachtwoord nodig.</p>
+    </div>
+
+    <div class="section">
+      <h2>Afboeken</h2>
+      <p class="muted">Hier koppel je nog niet-geboekte banktransacties uit Moneybird aan de juiste grootboek-categorie, zodat je boekhouder een sluitend jaar heeft. Je stelt <strong>regels</strong> in (trefwoord → categorie); per transactie stelt het dashboard de categorie voor, jij controleert en klikt <em>Boek</em> (of <em>Boek alle met suggestie</em>). Het boekt steeds het volledige openstaande bedrag op één categorie — splitsen doe je in Moneybird zelf.</p>
+      <ul class="muted" style="margin-top:0;">
+        <li><strong>Voorwaarde</strong> — er moeten transacties in Moneybird staan. Activeer eerst je bankkoppeling in Moneybird (Instellingen → Bankkoppelingen); zonder feed is er niets af te boeken.</li>
+        <li><strong>Categorieën aanmaken</strong> — maak in Moneybird (of laat je boekhouder dat doen) de categorieën die je nodig hebt en die nog niet bestaan: bv. <em>Lonen en salarissen</em>, <em>Loonheffingen</em>, <em>Pensioenlasten</em>, <em>Vennootschapsbelasting</em>, <em>Rekening-courant DGA</em>, <em>Bankkosten</em>, <em>Rentelasten</em>. Een regel die naar een nog niet bestaande categorie wijst, toont een waarschuwing.</li>
+        <li><strong>Btw & belastingen</strong> — btw-betalingen/-teruggaven boek je op de categorie <em>Betaalde en/of ontvangen btw</em>; vennootschapsbelasting op een eigen categorie. Laat de fiscale posten zo nodig door je boekhouder narekenen.</li>
+      </ul>
+      <p class="muted">Tip: Moneybird heeft zelf ook <strong>automatische boekingsregels</strong> (Instellingen → Boekhouding → Boekingsregels) die transacties op basis van omschrijving/tegenrekening automatisch boeken. Dat is een prima aanvulling — gebruik de dashboard-tab voor overzicht en controle, en de Moneybird-regels voor het echt automatische werk.</p>
     </div>
 
     <div class="section">
@@ -1451,7 +1499,7 @@ function showApp() {
 //  TAB SWITCHING
 // ============================================================
 let facturenLoaded = false;
-const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", instellingen: "Instellingen", uitleg: "Uitleg" };
+const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", afboeken: "Afboeken", instellingen: "Instellingen", uitleg: "Uitleg" };
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
@@ -1478,6 +1526,9 @@ function switchTab(name) {
       setProjSyncStatus("niet ingelogd", "err");
     }
     if (account) loadProjectRelations().catch(e => console.warn("loadProjectRelations:", e));
+  }
+  if (name === "afboeken" && account) {
+    renderAfboekUI().catch(e => console.warn("afboeken:", e));
   }
 }
 document.addEventListener("click", (ev) => {
@@ -2431,6 +2482,189 @@ async function mbBookSalesFromExtracted(ex, onlyBook) {
   if (!invId) throw new Error("Verkoopfactuur aangemaakt maar geen ID teruggekregen.");
   if (onlyBook) await mbFetch(`sales_invoices/${invId}/send_invoice.json`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sales_invoice_sending: { delivery_method: "Manual" } }) });
   return { invId, contactCreated: created };
+}
+
+// ============================================================
+//  AFBOEKEN — banktransacties → grootboek koppelen (Moneybird)
+// ============================================================
+const AFBOEK_LS_KEY = "afboek_rules_v1";
+let mbBankLedgers = null;     // grootboeken die op een banktransactie geboekt mogen worden
+let afboekMutations = [];     // geladen openstaande transacties
+
+function afboekDefaultRules() {
+  // Trefwoord → categorie-naam. Categorieën die nog niet in Moneybird bestaan,
+  // krijgen in de UI een "ontbreekt"-badge totdat je ze (of je boekhouder) aanmaakt.
+  return [
+    { kw: "vennootschapsbelasting", cat: "Vennootschapsbelasting" },
+    { kw: "vpb", cat: "Vennootschapsbelasting" },
+    { kw: "inkomstenbelasting", cat: "Inkomstenbelasting" },
+    { kw: "omzetbelasting", cat: "Betaalde en/of ontvangen btw" },
+    { kw: "btw", cat: "Betaalde en/of ontvangen btw" },
+    { kw: "loonheffing", cat: "Loonheffingen" },
+    { kw: "salaris", cat: "Lonen en salarissen" },
+    { kw: "loon ", cat: "Lonen en salarissen" },
+    { kw: "pensioen", cat: "Pensioenlasten" },
+    { kw: "garagebox", cat: "Huisvestingskosten" },
+    { kw: "huur", cat: "Huisvestingskosten" },
+    { kw: "knab", cat: "Bankkosten" },
+    { kw: "rente", cat: "Rentelasten" }
+  ];
+}
+function loadAfboekRules() {
+  try { const r = JSON.parse(localStorage.getItem(AFBOEK_LS_KEY)); if (Array.isArray(r)) return r; } catch {}
+  return afboekDefaultRules();
+}
+function saveAfboekRules() { localStorage.setItem(AFBOEK_LS_KEY, JSON.stringify(afboekRules)); }
+let afboekRules = loadAfboekRules();
+
+async function mbLoadBankLedgers(force) {
+  if (mbBankLedgers && !force) return mbBankLedgers;
+  const all = await mbFetch("ledger_accounts.json");
+  mbBankLedgers = (Array.isArray(all) ? all : [])
+    .filter(l => l.active && Array.isArray(l.allowed_document_types) && l.allowed_document_types.includes("financial_mutation"))
+    .map(l => ({ id: l.id, name: l.name, type: l.account_type }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+  return mbBankLedgers;
+}
+function bankLedgerIdByName(name) {
+  if (!name || !mbBankLedgers) return null;
+  const n = name.toLowerCase().trim();
+  const hit = mbBankLedgers.find(l => l.name.toLowerCase().trim() === n);
+  return hit ? hit.id : null;
+}
+function ledgerOptionsHtml(selectedId) {
+  let o = `<option value="">— kies categorie —</option>`;
+  (mbBankLedgers || []).forEach(l => {
+    o += `<option value="${escapeHtml(l.id)}"${String(l.id) === String(selectedId) ? " selected" : ""}>${escapeHtml(l.name)}</option>`;
+  });
+  return o;
+}
+function suggestLedgerFor(mut) {
+  const hay = `${mut.message || ""} ${mut.contra_account_name || ""} ${mut.contra_account_number || ""}`.toLowerCase();
+  for (const r of afboekRules) {
+    const kw = (r.kw || "").toLowerCase().trim();
+    if (kw && hay.includes(kw)) return { id: bankLedgerIdByName(r.cat), cat: r.cat, kw };
+  }
+  return null;
+}
+
+async function renderAfboekUI() {
+  try { await mbLoadBankLedgers(); } catch (e) { showToast("Categorieën laden mislukt: " + (e.message || e), "err"); }
+  const sel = $("afboek-rule-cat"); if (sel) sel.innerHTML = ledgerOptionsHtml("");
+  renderAfboekRules();
+}
+function renderAfboekRules() {
+  const box = $("afboek-rules-list"); if (!box) return;
+  if (!afboekRules.length) { box.innerHTML = '<p class="muted">Nog geen regels.</p>'; return; }
+  box.innerHTML = afboekRules.map((r, i) => {
+    const id = bankLedgerIdByName(r.cat);
+    const missing = id ? "" : ' <span class="badge warn">categorie ontbreekt in Moneybird</span>';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(127,127,127,.15);">
+      <span style="flex:1;font-size:13px;"><strong>${escapeHtml(r.kw)}</strong> &rarr; ${escapeHtml(r.cat)}${missing}</span>
+      <button class="icon-btn" title="Verwijderen" onclick="deleteAfboekRule(${i})">&times;</button></div>`;
+  }).join("");
+}
+function addAfboekRule() {
+  const kwEl = $("afboek-rule-keyword"); const kw = (kwEl.value || "").trim();
+  const sel = $("afboek-rule-cat"); const catId = sel ? sel.value : "";
+  if (!kw) { showToast("Vul een trefwoord in", "err"); return; }
+  if (!catId) { showToast("Kies een categorie", "err"); return; }
+  const cat = ((mbBankLedgers || []).find(l => String(l.id) === String(catId)) || {}).name || "";
+  afboekRules.push({ kw: kw.toLowerCase(), cat });
+  saveAfboekRules();
+  kwEl.value = "";
+  renderAfboekRules();
+  if (afboekMutations.length) renderAfboekTransactions();
+}
+function deleteAfboekRule(i) {
+  afboekRules.splice(i, 1); saveAfboekRules(); renderAfboekRules();
+  if (afboekMutations.length) renderAfboekTransactions();
+}
+
+async function loadAfboekTransactions() {
+  const list = $("afboek-list");
+  const period = ($("afboek-period") && $("afboek-period").value) || "this_year";
+  list.innerHTML = '<p class="muted">Laden…</p>';
+  try {
+    await mbLoadBankLedgers();
+    const muts = await mbFetch(`financial_mutations.json?filter=${encodeURIComponent("period:" + period + ",state:unprocessed")}`);
+    afboekMutations = (Array.isArray(muts) ? muts : []).filter(m => Math.abs(parseFloat(m.amount_open) || 0) > 0.0001);
+    renderAfboekTransactions();
+  } catch (e) {
+    list.innerHTML = `<p class="err">Laden mislukt: ${escapeHtml(e.message || String(e))}</p>`;
+  }
+}
+function renderAfboekTransactions() {
+  const list = $("afboek-list"); if (!list) return;
+  if (!afboekMutations.length) {
+    list.innerHTML = '<p class="muted">Geen openstaande transacties. Staat je bankkoppeling in Moneybird aan? Zonder geïmporteerde transacties is er niets af te boeken.</p>';
+    if ($("afboek-bookall-btn")) $("afboek-bookall-btn").disabled = true;
+    if ($("afboek-summary")) $("afboek-summary").textContent = "";
+    return;
+  }
+  let withSugg = 0;
+  list.innerHTML = afboekMutations.map(m => {
+    const sugg = suggestLedgerFor(m);
+    if (sugg && sugg.id) withSugg++;
+    const amt = parseFloat(m.amount_open) || 0;
+    const amtColor = amt < 0 ? "var(--err-text, #c0392b)" : "var(--ok-text, #1e7e34)";
+    const tegen = [m.contra_account_name, m.contra_account_number].filter(Boolean).join(" · ");
+    const badge = sugg
+      ? (sugg.id ? `<span class="badge ok">suggestie: ${escapeHtml(sugg.cat)}</span>`
+                 : `<span class="badge warn">regel '${escapeHtml(sugg.kw)}' → categorie '${escapeHtml(sugg.cat)}' ontbreekt</span>`)
+      : "";
+    return `<div class="afboek-row" data-id="${escapeHtml(m.id)}" data-amt="${escapeHtml(String(m.amount_open))}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
+      <span style="width:84px;font-size:12px;color:var(--muted);">${escapeHtml(m.date || "")}</span>
+      <span style="width:90px;text-align:right;font-variant-numeric:tabular-nums;font-weight:600;color:${amtColor};">€ ${amt.toFixed(2)}</span>
+      <span style="flex:1;min-width:200px;font-size:13px;">${escapeHtml(m.message || "(geen omschrijving)")}${tegen ? ` · <span class="muted">${escapeHtml(tegen)}</span>` : ""} ${badge}</span>
+      <select class="afboek-cat" style="min-width:200px;">${ledgerOptionsHtml(sugg && sugg.id ? sugg.id : "")}</select>
+      <button class="btn" onclick="bookAfboekRow(this)">Boek</button>
+    </div>`;
+  }).join("");
+  if ($("afboek-bookall-btn")) $("afboek-bookall-btn").disabled = withSugg === 0;
+  if ($("afboek-summary")) $("afboek-summary").textContent = `${afboekMutations.length} openstaand · ${withSugg} met suggestie`;
+}
+
+// Banktransactie koppelen aan een grootboekrekening (volledige openstaande bedrag).
+async function mbBookMutation(id, ledgerId, amountOpen) {
+  return mbFetch(`financial_mutations/${id}/link_booking.json`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ booking_type: "LedgerAccount", booking_id: ledgerId, price_base: String(amountOpen) })
+  });
+}
+async function bookAfboekRow(btn) {
+  const row = btn.closest(".afboek-row");
+  const id = row.dataset.id, amt = row.dataset.amt;
+  const sel = row.querySelector(".afboek-cat");
+  const ledgerId = sel ? sel.value : "";
+  if (!ledgerId) { showToast("Kies eerst een categorie", "err"); return; }
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…";
+  try {
+    await mbBookMutation(id, ledgerId, amt);
+    afboekMutations = afboekMutations.filter(m => String(m.id) !== String(id));
+    showToast("Geboekt in Moneybird", "ok");
+    renderAfboekTransactions();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = t;
+    showToast("Boeken mislukt: " + (e.message || e), "err");
+  }
+}
+async function bookAllSuggested() {
+  const rows = Array.from(document.querySelectorAll(".afboek-row"));
+  const todo = rows.filter(r => { const s = r.querySelector(".afboek-cat"); return s && s.value; });
+  if (!todo.length) { showToast("Geen transacties met een gekozen categorie", "err"); return; }
+  if (!confirm(`${todo.length} transactie(s) boeken op de gekozen categorie in Moneybird?`)) return;
+  const btn = $("afboek-bookall-btn"); btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (const r of todo) {
+    const id = r.dataset.id, amt = r.dataset.amt, ledgerId = r.querySelector(".afboek-cat").value;
+    try { await mbBookMutation(id, ledgerId, amt); afboekMutations = afboekMutations.filter(m => String(m.id) !== String(id)); ok++; }
+    catch (e) { fail++; }
+    await new Promise(x => setTimeout(x, 250));
+  }
+  renderAfboekTransactions();
+  showToast(`Klaar: ${ok} geboekt${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
 }
 
 async function processSalesPdf(idx, onlyBook, existingRefs) {

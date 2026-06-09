@@ -15,12 +15,13 @@ Eén-persoons inkoop- en verkoopadministratie voor Triplet IT, als single-file w
 
 ## Wat je krijgt
 
-Een dashboard met zes tabs:
+Een dashboard met zeven tabs:
 
 - **Overzicht** — live status over alle gemonitorde mailboxen: facturen die verwerkt/betaald moeten worden, mails die antwoord vragen, openstaande inkoopfacturen uit Moneybird, en je agenda voor de komende 2 dagen. Per factuurrij een `→ Moneybird`-knop (boekt de factuur direct in) en een `Verwerkt ✓`-knop die de mail naar `MoneyMonk Verwerkt` verplaatst.
 - **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt het contact in Moneybird, maakt de inkoopfactuur aan (ingeboekt, niet betaald) mét PDF als bijlage, en verplaatst de mail naar `MoneyMonk Verwerkt`. Ook een **losse-PDF-upload** voor facturen die niet in je inbox zitten.
 - **Verkoop migreren** — bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Moneybird (per PDF: Claude extraheert klant + bedragen → contact matchen/aanmaken → verkoopfactuur). Met **Direct inboeken** worden ze gemarkeerd als verstuurd (zonder e-mail), anders blijven ze concept; al bestaande referenties worden overgeslagen.
 - **Projecten** — uren registreren per project en er met één klik een verkoopfactuur (concept) van maken. Elke uren-boeking komt ook direct als **tijdregistratie** in Moneybird. Zie [Projecten & facturen](#projecten--facturen-uren--verkoopfactuur) hieronder. Data staat **cross-device** in **Cloudflare Workers KV** (`/projects`), beveiligd via je **Microsoft-login**.
+- **Afboeken** — koppelt nog niet-geboekte banktransacties uit Moneybird aan de juiste grootboek-categorie. Je stelt regels in (trefwoord → categorie); per transactie volgt een voorstel dat je controleert en met één klik boekt (of in bulk). Vereist dat je bankkoppeling in Moneybird transacties importeert, en dat de benodigde categorieën (bv. DGA-loon, vennootschapsbelasting, loonheffing) in Moneybird bestaan.
 - **Instellingen** — Moneybird-verbindingstest. Token + administratie-ID staan in de Worker, niet in de browser.
 - **Uitleg** — beknopte handleiding per tab.
 
