@@ -3688,7 +3688,78 @@ function mbMigStub(naam) {
   const log = $("mb-mig-log");
   if (log) log.innerHTML = `<div class="warn-box">De migratie "${escapeHtml(naam)}" volgt als volgende stap (na de relaties). Verkoop- en inkoopfacturen worden alleen ingeboekt, niet verstuurd.</div>`;
 }
-function migratePurchase() { mbMigStub("Inkoopfacturen"); }
+// Moneybird purchase-config (deze administratie).
+const MB_PURCHASE_TAX = { "21": "489478495139792385", "9": "489478495142938114" };
+const MB_PURCHASE_LEDGER = "489478494294640040";   // "Ongecategoriseerde uitgaven"
+
+function mbPurchasePayload(inv, contactId) {
+  const lines = Object.values(inv.line || {}).filter(l => (Number(l.amount) || 0) !== 0 || (l.description || "").trim());
+  const details = lines.map(l => {
+    const pct = String(parseInt(l.vat_percentage, 10) || 0);
+    const d = { description: mbCleanDesc(l.description) || "Kosten", price: Number(l.amount) || 0, amount: "1", ledger_account_id: MB_PURCHASE_LEDGER };
+    if (MB_PURCHASE_TAX[pct]) d.tax_rate_id = MB_PURCHASE_TAX[pct];   // 0%/buiten-EU: geen tarief
+    return d;
+  });
+  const p = {
+    contact_id: contactId,
+    reference: inv.number || "",
+    prices_are_incl_tax: false,
+    details_attributes: details
+  };
+  if (inv.date && inv.date !== "0000-00-00") p.date = inv.date;
+  const due = inv.expiry_date || inv.date;
+  if (due && due !== "0000-00-00") p.due_date = due;
+  return { purchase_invoice: p };
+}
+
+async function mbLoadExistingPurchaseRefs() {
+  const refs = new Set();
+  for (let p = 1; p <= 60; p++) {
+    const b = await mbFetch(`documents/purchase_invoices.json?per_page=100&page=${p}`);
+    if (!Array.isArray(b) || !b.length) break;
+    b.forEach(iv => { if (iv.reference) refs.add(String(iv.reference).trim()); });
+    if (b.length < 100) break;
+  }
+  return refs;
+}
+
+async function migratePurchase() {
+  if (mbBusy) return;
+  const log = $("mb-mig-log"); const setLog = (h) => { if (log) log.innerHTML = h; };
+  try {
+    setLog(`<div class="muted">Inkoopfacturen + relaties + contacten ophalen…</div>`);
+    const [purData, rels] = await Promise.all([informerFetch("GET", cfg.listPath || "/invoices/purchase/"), loadRelationsCache()]);
+    const invs = normalizePurchaseInvoices(purData);
+    if (!invs.length) { showToast("Geen inkoopfacturen gevonden", "err"); setLog(""); return; }
+    if (!confirm(`${invs.length} inkoopfacturen overzetten naar Moneybird (ingeboekt)?\n\nGrootboek wordt "Ongecategoriseerde uitgaven" — later in Moneybird per factuur te categoriseren.\nBestaande (zelfde factuurnummer) worden overgeslagen.`)) { setLog(""); return; }
+    mbBusy = true;
+    const relById = {}; Object.values(rels).forEach(r => { relById[r.id] = { num: String(r.raw.relation_number || ""), name: (r.raw.company_name || "") }; });
+    const contacts = await mbLoadAllContacts();
+    const byCust = {}, byName = {};
+    contacts.forEach(c => { if (c.customer_id) byCust[String(c.customer_id)] = c.id; if (c.company_name) byName[c.company_name.toLowerCase().trim()] = c.id; });
+    const existing = await mbLoadExistingPurchaseRefs();
+    let created = 0, skipped = 0, failed = 0; const lines = [];
+    for (let i = 0; i < invs.length; i++) {
+      const inv = invs[i]; const ref = (inv.number || "").trim();
+      if (ref && existing.has(ref)) { skipped++; lines.push(`↷ ${escapeHtml(ref)} — bestaat al`); }
+      else {
+        const rel = relById[inv.relation_id];
+        const cid = (rel && byCust[rel.num]) || (rel && byName[(rel.name || "").toLowerCase().trim()]) || null;
+        if (!cid) { failed++; lines.push(`✗ ${escapeHtml(ref)} — geen Moneybird-contact (${escapeHtml(rel ? rel.name : inv.relation_id)})`); }
+        else {
+          try {
+            await mbFetch("documents/purchase_invoices.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbPurchasePayload(inv, cid)) });
+            created++; if (ref) existing.add(ref); lines.push(`✓ ${escapeHtml(ref)} → ${escapeHtml(rel.name)}`);
+          } catch (e) { failed++; lines.push(`✗ ${escapeHtml(ref)} — ${escapeHtml(e.message || String(e))}`); }
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+      setLog(`<div class="muted">Verwerkt ${i + 1}/${invs.length} · aangemaakt ${created} · overgeslagen ${skipped} · fout ${failed}</div><div class="response" style="display:block;max-height:300px;">${lines.slice(-60).join("<br>")}</div>`);
+    }
+    showToast(`Inkoopfacturen klaar: ${created} aangemaakt, ${skipped} bestond al, ${failed} fout`, failed ? "err" : "ok");
+  } catch (e) { setLog(`<div class="err">Migratie mislukt: ${escapeHtml(e.message || String(e))}</div>`); }
+  finally { mbBusy = false; }
+}
 
 // Moneybird-config (deze administratie) — opgehaald via /mb/tax_rates + /ledger_accounts.
 const MB_SALES_TAX = { "21": "489478495131403774", "9": "489478495134549503", "0": "489478495137695232" };
