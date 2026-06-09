@@ -3696,16 +3696,11 @@ function mbMigStub(naam) {
 const MB_PURCHASE_TAX = { "21": "489478495139792385", "9": "489478495142938114" };
 const MB_PURCHASE_LEDGER = "489478494294640040";   // "Ongecategoriseerde uitgaven"
 
-// Zoek (of maak) een 0%-inkooptarief; nodig voor 0%/12%/buitenlandse btw-regels.
-async function mbEnsurePurchase0Rate() {
+// Zoek een 0%-inkooptarief (Moneybird laat aanmaken via API niet toe).
+async function mbFindPurchase0Rate() {
   const rates = await mbFetch("tax_rates.json");
   const zero = (Array.isArray(rates) ? rates : []).find(r => r.tax_rate_type === "purchase_invoice" && Math.round(parseFloat(r.percentage) || 0) === 0);
-  if (zero) return zero.id;
-  const created = await mbFetch("tax_rates.json", {
-    method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ tax_rate: { name: "0% / geen btw (import)", percentage: "0", tax_rate_type: "purchase_invoice", show_tax: true } })
-  });
-  return created && created.id;
+  return zero ? zero.id : null;
 }
 
 function mbPurchasePayload(inv, contactId, zeroRateId) {
@@ -3750,7 +3745,13 @@ async function migratePurchase() {
     if (!invs.length) { showToast("Geen inkoopfacturen gevonden", "err"); setLog(""); return; }
     if (!confirm(`${invs.length} inkoopfacturen overzetten naar Moneybird (ingeboekt)?\n\nGrootboek wordt "Ongecategoriseerde uitgaven" — later in Moneybird per factuur te categoriseren.\nBestaande (zelfde factuurnummer) worden overgeslagen.`)) { setLog(""); return; }
     mbBusy = true;
-    const zeroRateId = await mbEnsurePurchase0Rate();   // voor 0%/12%/buitenlandse btw-regels
+    const zeroRateId = await mbFindPurchase0Rate();   // voor 0%/12%/buitenlandse btw-regels
+    const needsZero = invs.some(inv => Object.values(inv.line || {}).some(l => { const p = parseInt(l.vat_percentage, 10) || 0; return p !== 21 && p !== 9; }));
+    if (needsZero && !zeroRateId) {
+      mbBusy = false;
+      setLog(`<div class="warn-box">Een paar facturen hebben 0%/12%/buitenlandse btw, maar er is nog geen <strong>0%-inkoop-btw-tarief</strong> in Moneybird. Maak die eenmalig aan: <em>Moneybird → Instellingen → Btw-tarieven → nieuw tarief, type inkoop, 0%</em>. Draai daarna deze migratie opnieuw (reeds ingeboekte facturen worden overgeslagen).</div>`);
+      return;
+    }
     const relById = {}; Object.values(rels).forEach(r => { relById[r.id] = { num: String(r.raw.relation_number || ""), name: (r.raw.company_name || "") }; });
     const contacts = await mbLoadAllContacts();
     const byCust = {}, byName = {};
