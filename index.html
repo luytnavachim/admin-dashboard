@@ -1325,7 +1325,7 @@ function renderOpenInvoices(invoices, relationNames) {
   $("deadlines-count").textContent = invoices.length;
   const list = $("deadlines-list");
   if (invoices.length === 0) {
-    list.innerHTML = '<div class="empty">Geen openstaande inkoopfacturen in Informer.</div>';
+    list.innerHTML = '<div class="empty">Geen openstaande inkoopfacturen in Moneybird.</div>';
     return;
   }
   list.innerHTML = invoices.map(inv => {
@@ -1355,7 +1355,7 @@ function renderOpenInvoices(invoices, relationNames) {
       ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener" class="subject-link">${subjectHtml}</a>`
       : subjectHtml;
     const actions = link
-      ? `<div class="actions"><a class="btn primary" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Open in Informer om te koppelen aan een banktransactie">→ Informer</a></div>`
+      ? `<div class="actions"><a class="btn primary" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Open in Moneybird">→ Moneybird</a></div>`
       : '';
     return `<div class="row">
       <div class="info">
@@ -1377,31 +1377,33 @@ function renderOpenInvoices(invoices, relationNames) {
 async function loadOpenInvoices() {
   const list = $("deadlines-list");
   if (!list) return;
-  list.innerHTML = '<div class="loading">Laden uit Informer…</div>';
+  list.innerHTML = '<div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div>';
   try {
-    // Parallel: facturen + relaties (cache wordt gevuld voor leveranciersnamen).
-    const [invoiceData] = await Promise.all([
-      informerFetch("GET", cfg.listPath || "/invoices/purchase/"),
-      loadRelationsCache().catch(() => null)
-    ]);
-    const all = normalizePurchaseInvoices(invoiceData);
-    const unpaid = all.filter(isUnpaidInvoice);
-    unpaid.sort((a, b) => {
-      const ad = new Date(a.expiry_date || a.date || 0).getTime();
-      const bd = new Date(b.expiry_date || b.date || 0).getTime();
-      return ad - bd;
-    });
-
-    const relationNames = {};
-    if (relationsCache) {
-      for (const [id, r] of Object.entries(relationsCache)) relationNames[id] = r.name;
+    const all = [];
+    for (let p = 1; p <= 30; p++) {
+      const b = await mbFetch(`documents/purchase_invoices.json?per_page=100&page=${p}`);
+      if (!Array.isArray(b) || !b.length) break;
+      all.push(...b);
+      if (b.length < 100) break;
     }
-
-    renderOpenInvoices(unpaid.slice(0, 20), relationNames);
+    const unpaid = all.filter(iv => iv.state !== "paid");
+    unpaid.sort((a, b) => new Date(a.due_date || a.date || 0) - new Date(b.due_date || b.date || 0));
+    const relationNames = {};
+    const mapped = unpaid.slice(0, 20).map(iv => {
+      relationNames[iv.id] = (iv.contact && iv.contact.company_name) || "Leverancier";
+      return {
+        expiry_date: iv.due_date, date: iv.date,
+        totals: { incl_vat: Number(iv.total_price_incl_tax) || 0, open: Number(iv.total_price_incl_tax) || 0, paid: 0 },
+        relation_id: iv.id,
+        number: iv.reference || "",
+        url: `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${iv.id}`
+      };
+    });
+    renderOpenInvoices(mapped, relationNames);
   } catch (e) {
     $("stat-deadlines").textContent = "–";
     $("deadlines-count").textContent = "0";
-    list.innerHTML = `<div class="empty">Informer niet bereikbaar: ${escapeHtml(e.message || String(e))}<br><span class="muted">Check Instellingen + Geavanceerd → GET inkoopfacturen om te debuggen.</span></div>`;
+    list.innerHTML = `<div class="empty">Moneybird niet bereikbaar: ${escapeHtml(e.message || String(e))}</div>`;
   }
 }
 function renderEvents(events) {
@@ -3228,22 +3230,25 @@ function dbLinesFromExtract(ex) {
 async function loadDoorbelastingInformer(id) {
   const cont = $("db-informer-" + id);
   if (!cont) return;
-  cont.innerHTML = '<div class="loading">Inkoopfacturen ophalen…</div>';
+  cont.innerHTML = '<div class="loading">Inkoopfacturen ophalen uit Moneybird…</div>';
   try {
-    const [data] = await Promise.all([
-      informerFetch("GET", cfg.listPath || "/invoices/purchase/"),
-      loadRelationsCache().catch(() => null)
-    ]);
-    const all = normalizePurchaseInvoices(data);
-    all.sort((a, b) => new Date(b.invoice_date || b.date || 0) - new Date(a.invoice_date || a.date || 0));
-    dbInformerCache[id] = all.map(inv => {
-      const incl = Number(inv.totals?.incl_vat ?? inv.total_price_incl_vat ?? 0);
-      const excl = inv.totals?.excl_vat != null ? Number(inv.totals.excl_vat) : Math.round((incl / 1.21) * 100) / 100;
-      const supplier = (relationsCache && relationsCache[String(inv.relation_id)]?.name) || `Leverancier #${inv.relation_id || "?"}`;
-      const date = (inv.invoice_date && inv.invoice_date !== "0000-00-00") ? inv.invoice_date : (inv.date || "");
-      return { invId: inv.id, supplier, number: inv.number || "?", date, excl, rawLines: inv.line || inv.lines || null };
-    }).filter(x => x.excl > 0).slice(0, 40);
-    if (!dbInformerCache[id].length) { cont.innerHTML = '<div class="empty">Geen inkoopfacturen gevonden in Informer.</div>'; return; }
+    const all = [];
+    for (let p = 1; p <= 30; p++) {
+      const b = await mbFetch(`documents/purchase_invoices.json?per_page=100&page=${p}`);
+      if (!Array.isArray(b) || !b.length) break;
+      all.push(...b);
+      if (b.length < 100) break;
+    }
+    all.sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+    dbInformerCache[id] = all.map(inv => ({
+      invId: inv.id,
+      supplier: (inv.contact && inv.contact.company_name) || "Leverancier",
+      number: inv.reference || "?",
+      date: inv.date || "",
+      excl: Number(inv.total_price_excl_tax) || 0,
+      rawLines: (inv.details || []).map(d => ({ description: d.description, amount: String(d.total_price_excl_tax_with_discount != null ? d.total_price_excl_tax_with_discount : (Number(d.price) || 0) * (Number(d.amount_decimal || d.amount) || 1)) }))
+    })).filter(x => x.excl > 0).slice(0, 60);
+    if (!dbInformerCache[id].length) { cont.innerHTML = '<div class="empty">Geen inkoopfacturen gevonden in Moneybird.</div>'; return; }
     cont.innerHTML = `<div class="muted" style="margin:8px 0 4px;">Kies de inkoopfactuur om door te belasten:</div>` +
       dbInformerCache[id].map((x, i) => `<div class="entry-row" style="cursor:pointer;" onclick="pickDoorbelastingInformer('${id}',${i})">
         <span class="e-date">${escapeHtml(x.date)}</span>
@@ -3540,7 +3545,7 @@ function renderProjects() {
         <summary class="muted" style="cursor:pointer;font-size:12px;">📄 Doorbelasting importeren (inkoopfactuur → uren @ €${DOORBELAST_RATE})</summary>
         <div class="field" style="margin:8px 0 0;"><label style="font-size:11px;">Bron A — PDF uploaden</label><input type="file" id="db-file-${p.id}" accept="application/pdf,.pdf"></div>
         <div class="row-btns"><button class="btn" onclick="importDoorbelasting('${p.id}')">Inlezen uit PDF</button>
-          <button class="btn" onclick="loadDoorbelastingInformer('${p.id}')">Bron B — kies uit Informer</button>
+          <button class="btn" onclick="loadDoorbelastingInformer('${p.id}')">Bron B — kies uit Moneybird</button>
           <span class="muted" id="db-status-${p.id}" style="align-self:center;"></span></div>
         <div id="db-informer-${p.id}"></div>
         <div id="db-preview-${p.id}"></div>
