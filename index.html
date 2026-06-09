@@ -819,7 +819,8 @@ const MAILBOXES = [
   { email: "info@triplet-it.nl",         label: "Info",        color: "#534ab7" },
   { email: "administratie@triplet-it.nl",label: "Administratie",       color: "#3b6d11" },
   { email: "inkoop@triplet-it.nl",       label: "Inkoop",      color: "#854f0b" },
-  { email: "finance@triplet-it.nl",  label: "Finance", color: "#d4537e" }
+  { email: "finance@triplet-it.nl",  label: "Finance", color: "#d4537e" },
+  { email: "micha@vantuyl.it",       label: "Van Tuyl",    color: "#5249c4" }
 ];
 
 const SCOPES = ["Mail.ReadWrite", "Mail.ReadWrite.Shared", "Calendars.Read", "User.Read"];
@@ -1108,6 +1109,10 @@ function senderName(e) {
   return at > 0 ? addr.slice(0, at) : addr;
 }
 function isOwnInvoice(email) {
+  // Een doorgestuurde mail (Fwd:/FW:) is een binnenkomende factuur die je
+  // zelf hebt doorgezet — niet je eigen uitgaande factuur, dus wél tonen.
+  const subj = (email.subject || "").toLowerCase().trimStart();
+  if (/^(fwd?|fw|doorg)[:\s]/.test(subj)) return false;
   const s = senderEmail(email).toLowerCase();
   if (SELF_EMAILS.includes(s)) return true;
   return SELF_DOMAINS.some(d => s.endsWith("@" + d) || s.endsWith("." + d));
