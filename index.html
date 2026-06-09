@@ -3587,7 +3587,6 @@ async function invoiceProject(id) {
   if (!p) return;
   const statusEl = $("proj-status-" + id);
   const setS = (t) => { if (statusEl) statusEl.textContent = t; };
-  if (!cfg.salesCreatePath || !cfg.baseUrl) { showToast("Vul eerst Instellingen (sales endpoint) in", "err"); switchTab("instellingen"); return; }
   const open = projOpenEntries(p);
   if (!open.length) { showToast("Geen open uren om te factureren", "err"); return; }
 
@@ -3600,39 +3599,30 @@ async function invoiceProject(id) {
     `Totaal: ${fmtEur(inv.amountExcl)} excl. btw (${fmtEur(inv.totalIncl)} incl.)\n` +
     `Periode: ${inv.periodFrom} t/m ${inv.periodTo}`;
   const confirmMsg =
-    `Concept-factuur aanmaken in Informer (niet verstuurd).\n\n` +
+    `Concept-verkoopfactuur aanmaken in Moneybird (niet verstuurd).\n\n` +
     `Project: ${p.name}\nKlant: ${p.relationName}\n${bedrag}\n\n` +
     (testMode
-      ? `TESTFACTUUR: de uren blijven open. Verwijder het concept daarna in Informer.`
-      : `Je verstuurt 'm zelf vanuit Informer (evt. met bijlage). De uren worden als gefactureerd gemarkeerd.`);
+      ? `TESTFACTUUR: de uren blijven open. Verwijder het concept daarna in Moneybird.`
+      : `Je verstuurt 'm zelf vanuit Moneybird (evt. met bijlage). De uren worden als gefactureerd gemarkeerd.`);
   if (!confirm(confirmMsg)) return;
 
-  setS("Bezig — klant opzoeken…");
+  setS("Bezig — contact opzoeken in Moneybird…");
   try {
-    // relation_id bepalen (gekoppeld id, anders op naam matchen)
-    let relationId = p.relationId;
-    if (!relationId) {
-      const match = await findRelationByName(p.relationName);
-      if (!match) throw new Error(`Klant "${p.relationName}" niet gevonden in Informer — koppel of maak 'm eerst aan.`);
-      relationId = match.id;
-      p.relationId = relationId; saveProjects();
-    }
-    inv.payload.relation_id = parseInt(relationId, 10) || relationId;
+    const contactId = await mbContactId(p.relationName);
+    if (!contactId) throw new Error(`Klant "${p.relationName}" niet gevonden als Moneybird-contact — migreer eerst je relaties of maak het contact aan in Moneybird.`);
 
-    setS("Bezig — concept aanmaken…");
-    const result = await informerFetch("POST", cfg.salesCreatePath || "/invoice/sales/", inv.payload);
-    const invId = result?.id || result?.invoice_id || result?.invoice?.id || null;
-    const invUrl = result?.url || result?.invoice_url || result?.invoice?.url || null;
+    setS("Bezig — concept aanmaken in Moneybird…");
+    const result = await mbFetch("sales_invoices.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbProjectSalesPayload(p, inv, contactId)) });
+    const invId = result && result.id;
     if (!invId) throw new Error("Concept aangemaakt maar geen ID teruggekregen: " + JSON.stringify(result).slice(0, 200));
+    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/sales_invoices/${invId}`;
 
     if (!testMode) {
-      // Boekingen markeren als gefactureerd (concept ís de factuur; jij verstuurt zelf).
       const stamp = new Date().toISOString();
       open.forEach(e => { e.invoiced = true; e.invoiceId = invId; e.invoicedAt = stamp; });
-      // Factuur registreren voor het Gefactureerd-overzicht.
       if (!Array.isArray(projectsData.invoices)) projectsData.invoices = [];
       projectsData.invoices.unshift({
-        id: invId, url: invUrl || "",
+        id: invId, url: invUrl,
         projectId: p.id, projectName: p.name, projectNumber: p.projectNumber || "",
         relationName: p.relationName || "",
         date: inv.invDate, periodFrom: inv.periodFrom, periodTo: inv.periodTo,
@@ -3642,9 +3632,9 @@ async function invoiceProject(id) {
       saveProjects();
     }
     renderProjects();
-    showToast(`Concept aangemaakt (id ${invId})`, "ok");
+    showToast(`Concept aangemaakt in Moneybird (id ${invId})`, "ok");
     const after = $("proj-status-" + id);
-    if (after) after.innerHTML = `✓ Concept id ${escapeHtml(String(invId))}${invUrl ? ` — <a href="${escapeHtml(invUrl)}" target="_blank" rel="noopener">openen in Informer</a>` : ""} · verstuur zelf vanuit Informer${testMode ? " · TEST: uren blijven open" : ""}`;
+    if (after) after.innerHTML = `✓ Concept ${escapeHtml(String(invId))} — <a href="${escapeHtml(invUrl)}" target="_blank" rel="noopener">openen in Moneybird</a> · verstuur zelf vanuit Moneybird${testMode ? " · TEST: uren blijven open" : ""}`;
   } catch (e) {
     setS("");
     showToast("Factureren mislukt: " + (e.message || e), "err");
@@ -3783,6 +3773,31 @@ async function migratePurchase() {
 // Moneybird-config (deze administratie) — opgehaald via /mb/tax_rates + /ledger_accounts.
 const MB_SALES_TAX = { "21": "489478495131403774", "9": "489478495134549503", "0": "489478495137695232" };
 const MB_SALES_LEDGER = "489478494297785771";   // grootboek "Omzet"
+const MB_ADMIN_ID = "489478494017815934";       // voor links naar Moneybird
+
+// Moneybird-contact zoeken op bedrijfsnaam (gecachet).
+let mbContactsCache = null;
+async function mbContactId(name) {
+  if (!mbContactsCache) {
+    mbContactsCache = {};
+    const all = await mbLoadAllContacts();
+    all.forEach(c => { if (c.company_name) mbContactsCache[c.company_name.toLowerCase().trim()] = c.id; });
+  }
+  return mbContactsCache[(name || "").toLowerCase().trim()] || null;
+}
+
+// Projectfactuur (uit computeProjectInvoice) → Moneybird sales_invoice payload.
+function mbProjectSalesPayload(p, inv, contactId) {
+  const taxId = p.vatShifted ? MB_SALES_TAX["0"] : MB_SALES_TAX["21"];
+  const details = inv.lines.map(l => ({
+    description: l.description,
+    amount: String(l.qty),
+    price: l.amount,
+    tax_rate_id: taxId,
+    ledger_account_id: MB_SALES_LEDGER
+  }));
+  return { sales_invoice: { contact_id: contactId, reference: p.projectNumber || p.name || "", invoice_date: inv.invDate, details_attributes: details } };
+}
 
 function mbFlatten(obj, key) {
   const c = (obj && obj[key]) || obj;
