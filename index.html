@@ -438,8 +438,6 @@ body { max-width: 1280px; }
         <button class="tab" data-tab="migratie"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/><path d="M3 4h2l2.4 11.5h9.6L19 7H6.5"/></svg>Verkoop migreren</button>
         <button class="tab" data-tab="projecten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M7 8V6a1 1 0 0 1 1-1h4l2 2"/></svg>Projecten</button>
         <button class="tab" data-tab="instellingen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M4.2 7l2.1 1.2M17.7 15.8l2.1 1.2M4.2 17l2.1-1.2M17.7 8.2l2.1-1.2"/></svg>Instellingen</button>
-        <button class="tab" data-tab="geavanceerd"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M7 9l3 3-3 3M13 15h4"/></svg>Geavanceerd</button>
-        <button class="tab" data-tab="moneybird"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8h13l-3-3M20 16H7l3 3"/></svg>Moneybird</button>
         <button class="tab" data-tab="uitleg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1 .9-1 1.6M12 16.8h.01"/></svg>Uitleg</button>
       </nav>
       <div class="side-foot"><span class="dot live" id="status-dot"></span><span id="status-text">verbinden…</span></div>
@@ -474,7 +472,7 @@ body { max-width: 1280px; }
       </div>
       <div class="stat">
         <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
-        <div class="stat-body"><div class="label">Openstaand in Informer</div><div class="value" id="stat-deadlines">–</div></div>
+        <div class="stat-body"><div class="label">Openstaand in Moneybird</div><div class="value" id="stat-deadlines">–</div></div>
       </div>
       <div class="stat ok">
         <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>
@@ -490,7 +488,7 @@ body { max-width: 1280px; }
       <div id="reply-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
     </div>
     <div class="section">
-      <h2>Openstaande inkoopfacturen (Informer) <span class="count" id="deadlines-count">0</span></h2>
+      <h2>Openstaande inkoopfacturen (Moneybird) <span class="count" id="deadlines-count">0</span></h2>
       <div id="deadlines-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
     </div>
     <div class="section">
@@ -532,17 +530,19 @@ body { max-width: 1280px; }
     </div>
   </section>
 
-  <!-- ====== TAB: Verkoop migreren (MoneyMonk PDF → Informer sales) ====== -->
+  <!-- ====== TAB: Verkoop migreren (MoneyMonk PDF → Moneybird sales) ====== -->
   <section id="tab-migratie" class="tab-panel">
     <div class="section">
-      <h2>Verkoopfacturen migreren naar Informer</h2>
-      <div class="warn-box" id="migratie-config-warn" style="display:none">
-        <strong>Eerst even Instellingen invullen.</strong> Sales endpoint en ledger-ID staan leeg — vul ze in onder de Instellingen-tab en kom terug.
-      </div>
+      <h2>Verkoopfacturen migreren naar Moneybird</h2>
+      <p class="muted">Bulk-import van MoneyMonk-PDF's: Claude leest klant + bedragen, het contact wordt gematcht of aangemaakt, en de verkoopfactuur komt in Moneybird. Facturen met een referentie die al bestaat worden overgeslagen.</p>
       <div class="field">
         <label for="sales-upload">Selecteer PDF-bestanden (meerdere mag)</label>
         <input id="sales-upload" type="file" accept="application/pdf,.pdf" multiple onchange="onSalesFilesPicked()">
       </div>
+      <label style="display:flex;align-items:center;gap:6px;margin:8px 0;cursor:pointer;font-size:13px;">
+        <input type="checkbox" id="sales-book">
+        <span><strong>Direct inboeken</strong> (gemarkeerd als verstuurd, zónder e-mail) — anders als concept</span>
+      </label>
       <div class="row-btns">
         <button class="btn primary" id="migratie-start-btn" onclick="startSalesMigration()" disabled>Start migratie &rarr;</button>
         <span class="muted" id="migratie-summary" style="align-self:center;"></span>
@@ -633,157 +633,13 @@ body { max-width: 1280px; }
   <!-- ====== TAB: Instellingen ====== -->
   <section id="tab-instellingen" class="tab-panel">
     <div class="section">
-      <h2>Informer-verbinding</h2>
-      <div class="grid-2">
-        <div class="field">
-          <label for="cfg-base">Base URL</label>
-          <input id="cfg-base" type="text" placeholder="/api" value="/api">
-        </div>
-        <div class="field">
-          <label for="cfg-auth">Auth-header methode</label>
-          <select id="cfg-auth">
-            <option value="none">Geen — proxy regelt auth (aanbevolen)</option>
-            <option value="apikey">ApiKey: &lt;key&gt; (Informer)</option>
-            <option value="bearer">Authorization: Bearer &lt;key&gt;</option>
-            <option value="basic-key">Authorization: Basic base64(key:)</option>
-            <option value="basic-user">Authorization: Basic base64(user:pass)</option>
-            <option value="x-api-key">X-API-Key: &lt;key&gt;</option>
-          </select>
-        </div>
-      </div>
-      <div class="field">
-        <label for="cfg-key">API-key (alleen als auth-methode geen "Geen" is)</label>
-        <input id="cfg-key" type="password" autocomplete="off" placeholder="laat leeg als Worker auth regelt">
-      </div>
-      <div class="grid-2">
-        <div class="field">
-          <label for="cfg-admin">Administratie-ID (optioneel)</label>
-          <input id="cfg-admin" type="text" placeholder="bv. 12345 — leeg laten als je 't nog niet weet">
-        </div>
-        <div class="field">
-          <label for="cfg-list-path">Endpoint inkoopfacturen ophalen (GET)</label>
-          <input id="cfg-list-path" type="text" value="/invoices/purchase/">
-        </div>
-        <div class="field">
-          <label for="cfg-create-path">Endpoint inkoopfactuur aanmaken (POST)</label>
-          <input id="cfg-create-path" type="text" value="/invoice/purchase/">
-        </div>
-        <div class="field">
-          <label for="cfg-sales-create-path">Endpoint verkoopfactuur aanmaken (POST)</label>
-          <input id="cfg-sales-create-path" type="text" value="/invoice/sales/" placeholder="/invoice/sales/">
-        </div>
-        <div class="field">
-          <label for="cfg-sales-ledger-id">Ledger interne API-ID verkoop (zie /invoices/sales/options voor geldige IDs, bv. 15302629 = Omzet hoge BTW)</label>
-          <input id="cfg-sales-ledger-id" type="text" placeholder="15302629">
-        </div>
-        <div class="field">
-          <label for="cfg-sales-product-id">Product-ID verkoop (uurloon/standaard service, bv. 960456)</label>
-          <input id="cfg-sales-product-id" type="text" placeholder="bv. 960456">
-        </div>
-        <div class="field">
-          <label for="cfg-sales-template-id">Template-ID verkoopfactuur</label>
-          <input id="cfg-sales-template-id" type="text" placeholder="bv. 544633">
-        </div>
-        <div class="field">
-          <label for="cfg-sales-payment-condition-id">Betalingsconditie-ID</label>
-          <input id="cfg-sales-payment-condition-id" type="text" placeholder="bv. 704820">
-        </div>
-        <div class="field">
-          <label for="cfg-sales-currency-id">Currency-ID (126106 = EUR)</label>
-          <input id="cfg-sales-currency-id" type="text" placeholder="126106" value="126106">
-        </div>
-        <div class="field">
-          <label for="cfg-sales-vat-option">VAT option</label>
-          <select id="cfg-sales-vat-option">
-            <option value="excl">excl (bedragen exclusief BTW)</option>
-            <option value="incl">incl (bedragen inclusief BTW)</option>
-          </select>
-        </div>
-      </div>
-      <div class="row-btns">
-        <button class="btn primary" onclick="saveConfig()">Opslaan</button>
-        <button class="btn danger" onclick="clearConfig()">Wissen</button>
-        <span class="muted" id="cfg-status" style="align-self:center;"></span>
-      </div>
-    </div>
-  </section>
-
-  <!-- ====== TAB: Geavanceerd (test endpoints + debug log) ====== -->
-  <section id="tab-geavanceerd" class="tab-panel">
-    <div class="section">
-      <h2>Verbinding testen</h2>
-      <div class="field">
-        <label for="test-path">Endpoint</label>
-        <input id="test-path" type="text" value="/administration/">
-      </div>
-      <div class="row-btns">
-        <button class="btn primary" onclick="testConnection()">GET</button>
-      </div>
-      <div id="test-response" class="response" style="display:none;"></div>
-    </div>
-
-    <div class="section">
-      <h2>Bestaande inkoopfacturen ophalen</h2>
-      <div class="row-btns">
-        <button class="btn primary" onclick="listPurchases()">GET inkoopfacturen</button>
-      </div>
-      <div id="list-response" class="response" style="display:none;"></div>
-    </div>
-
-    <div class="section">
-      <h2>Test-inkoopfactuur aanmaken</h2>
-      <div class="field">
-        <label for="create-body">Request body (JSON)</label>
-        <textarea id="create-body" spellcheck="false"></textarea>
-      </div>
-      <div class="row-btns">
-        <button class="btn" onclick="resetCreateBody()">Standaard-payload</button>
-        <button class="btn primary" onclick="createPurchase()">POST inkoopfactuur</button>
-      </div>
-      <div id="create-response" class="response" style="display:none;"></div>
-    </div>
-
-    <div class="section">
-      <h2>Debug-log</h2>
-      <details>
-        <summary>Laatste Informer request/response</summary>
-        <pre id="debug-log" class="response" style="display:block; margin-top:8px;">Nog geen request gedaan.</pre>
-      </details>
-    </div>
-  </section>
-
-  <!-- ====== TAB: Moneybird-migratie (Informer → Moneybird) ====== -->
-  <section id="tab-moneybird" class="tab-panel">
-    <div class="section">
       <h2>Verbinding met Moneybird</h2>
-      <div class="warn-box">
-        Zet in de Cloudflare Worker: <code>MONEYBIRD_TOKEN</code> (Secret — je personal API-token) en <code>MONEYBIRD_ADMIN_ID</code> (variabele — je administratie-ID), en deploy de Worker. Test daarna hier de verbinding.
-      </div>
+      <p class="muted">De koppeling met Moneybird loopt via de Cloudflare Worker. De API-token (<code>MONEYBIRD_TOKEN</code>, Secret) en administratie-ID (<code>MONEYBIRD_ADMIN_ID</code>, variabele) staan in de Worker — niet in de browser. Test hier of de verbinding werkt.</p>
       <div class="row-btns">
         <button class="btn primary" onclick="testMoneybird()">Test verbinding</button>
         <span class="muted" id="mb-test-status" style="align-self:center;"></span>
       </div>
       <div id="mb-test-out" class="response" style="display:none;"></div>
-    </div>
-
-    <div class="section">
-      <h2>Migreren naar Moneybird</h2>
-      <div class="warn-box">
-        Facturen worden alleen <strong>ingeboekt</strong> in Moneybird (niet verstuurd) — ze zijn al verstuurd via Informer/MoneyMonk.
-      </div>
-      <div class="row">
-        <div class="info"><div class="from">1. Relaties / contacten</div><div class="meta">Informer-relaties → Moneybird-contacten (basis voor de facturen).</div></div>
-        <div class="actions"><button class="btn" id="mb-mig-contacts" onclick="migrateContacts()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
-      </div>
-      <div class="row">
-        <div class="info"><div class="from">2. Verkoopfacturen</div><div class="meta">Historische verkoopfacturen → Moneybird. <label style="cursor:pointer;"><input type="checkbox" id="mb-sales-book"> direct inboeken (anders als concept)</label></div></div>
-        <div class="actions"><button class="btn" id="mb-mig-sales" onclick="migrateSales()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
-      </div>
-      <div class="row">
-        <div class="info"><div class="from">3. Inkoopfacturen</div><div class="meta">Historische inkoopfacturen → ingeboekt in Moneybird.</div></div>
-        <div class="actions"><button class="btn" id="mb-mig-purchase" onclick="migratePurchase()" disabled title="Activeert zodra de verbinding is getest">Start</button></div>
-      </div>
-      <div id="mb-mig-log" style="margin-top:12px;"></div>
     </div>
   </section>
 
@@ -796,31 +652,31 @@ body { max-width: 1280px; }
 
     <div class="section">
       <h2>Overzicht</h2>
-      <p class="muted">Live status over alle mailboxen: te verwerken/betalen facturen, mails die antwoord vragen, openstaande inkoopfacturen uit Informer en je agenda. <strong>Workflow inkoopfactuur:</strong> klik <em>Open</em> om de mail door te sturen naar het MoneyMonk-inkoopadres, en klik daarna <em>Verwerkt ✓</em> om 'm naar <code>MoneyMonk Verwerkt</code> te verplaatsen.</p>
+      <p class="muted">Live status over alle mailboxen: te verwerken/betalen facturen, mails die antwoord vragen, openstaande inkoopfacturen uit Moneybird en je agenda. <strong>Workflow inkoopfactuur:</strong> gebruik de knop <em>→ Moneybird</em> om de factuur direct in te boeken, of klik <em>Verwerkt ✓</em> om de mail naar <code>MoneyMonk Verwerkt</code> te verplaatsen.</p>
     </div>
 
     <div class="section">
       <h2>Facturen verwerken</h2>
-      <p class="muted">Kies een factuur-mail uit de Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) maakt/koppelt de relatie in Informer, (4) maakt de inkoopfactuur aan mét PDF als bijlage, (5) verplaatst de mail naar <code>MoneyMonk Verwerkt</code>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur. Met <em>Losse PDF uploaden</em> verwerk je een factuur die niet in je inbox zit (download/scan) via dezelfde flow, zonder Outlook-stappen.</p>
+      <p class="muted">Kies een factuur-mail uit de Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) matcht of maakt het contact in Moneybird, (4) maakt de inkoopfactuur aan mét PDF als bijlage, (5) verplaatst de mail naar <code>MoneyMonk Verwerkt</code>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur. Met <em>Losse PDF uploaden</em> verwerk je een factuur die niet in je inbox zit (download/scan) via dezelfde flow, zonder Outlook-stappen.</p>
     </div>
 
     <div class="section">
       <h2>Verkoop migreren</h2>
-      <p class="muted">Bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Informer. Per PDF: Claude extraheert klant + bedragen → klant matchen/aanmaken → POST naar het verkoop-endpoint. Doorloopt alle bestanden serieel; fouten blijven in beeld zodat je ze daarna kunt oppakken. Vul eerst de sales-instellingen in (Instellingen-tab).</p>
+      <p class="muted">Bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Moneybird. Per PDF: Claude extraheert klant + bedragen → contact matchen/aanmaken → verkoopfactuur in Moneybird. Met <em>Direct inboeken</em> worden ze gemarkeerd als verstuurd (zonder e-mail), anders blijven ze concept. Facturen met een al bestaande referentie worden overgeslagen; fouten blijven in beeld zodat je ze daarna kunt oppakken.</p>
     </div>
 
     <div class="section">
       <h2>Projecten</h2>
-      <p class="muted">Informer-projecten/uren zijn API-afgeschermd, dus je neemt projecten hier één keer over en registreert de uren in het dashboard. Bij <strong>Factureren</strong> wordt altijd alleen een <em>concept</em> in Informer aangemaakt — versturen (en evt. een bijlage koppelen) doe je zelf vanuit Informer.</p>
+      <p class="muted">Je neemt projecten hier één keer over en registreert de uren in het dashboard; elke uren-boeking wordt ook direct als tijdregistratie in Moneybird gezet (gekoppeld aan contact + project + tarief). Bij <strong>Factureren</strong> wordt altijd alleen een <em>concept</em> in Moneybird aangemaakt — versturen (en evt. een bijlage koppelen) doe je zelf vanuit Moneybird.</p>
       <ul class="muted" style="margin-top:0;">
         <li><strong>Tarieven</strong> — één of meer per project; bij meerdere kies je per urenboeking welk tarief geldt.</li>
         <li><strong>Factuur-template</strong> — wordt automatisch op de standaard-template van de relatie gezet; zelf overschrijven kan.</li>
         <li><strong>Factuurregels</strong> — "samengevat per tarief" (1 regel per tarief, datums in de specificatie) of "aparte regel per boeking".</li>
         <li><strong>BTW verlegd</strong> — voor buitenland/EU B2B (bv. België): 0% reverse-charge i.p.v. 21%. Gaat automatisch aan bij een niet-NL relatie.</li>
-        <li><strong>Opmerking op factuur</strong> — vrije tekst die in het Opmerking-veld van Informer komt (bv. "Uren gemaakt door Mohsen / Hours worked by Mohsen").</li>
+        <li><strong>Opmerking op factuur</strong> — vrije tekst die in het Opmerking-veld van Moneybird komt (bv. "Uren gemaakt door Mohsen / Hours worked by Mohsen").</li>
         <li><strong>Testfactuur</strong> (vinkje) — maakt het concept aan maar laat de uren open (dry-run).</li>
-        <li><strong>Markeer als gefactureerd</strong> — markeert open uren als gefactureerd zónder een Informer-concept aan te maken (voor uren die al gefactureerd zijn).</li>
-        <li><strong>Doorbelasting importeren</strong> — lees een inkoopfactuur in (PDF-upload óf bestaande uit Informer): elke regel wordt een uren-boeking (aantal = uren, omschrijving overgenomen) tegen een vast doorbelasttarief, met optie om direct door te zetten naar een concept.</li>
+        <li><strong>Markeer als gefactureerd</strong> — markeert open uren als gefactureerd zónder een Moneybird-concept aan te maken (voor uren die al gefactureerd zijn).</li>
+        <li><strong>Doorbelasting importeren</strong> — lees een inkoopfactuur in (PDF-upload óf bestaande uit Moneybird): elke regel wordt een uren-boeking (aantal = uren, omschrijving overgenomen) tegen een vast doorbelasttarief, met optie om direct door te zetten naar een concept.</li>
         <li><strong>Gefactureerd-overzicht</strong> — alle aangemaakte facturen met status <em>concept/definitief</em> (✓ om op definitief te zetten, ↩ om terug te draaien).</li>
       </ul>
       <p class="muted">Projecten en uren worden centraal in Cloudflare Workers KV bewaard en automatisch gesynchroniseerd op elk apparaat — beveiligd via je Microsoft-login, geen wachtwoord nodig.</p>
@@ -828,17 +684,7 @@ body { max-width: 1280px; }
 
     <div class="section">
       <h2>Instellingen</h2>
-      <p class="muted">De Informer-verbinding loopt via een Cloudflare Worker (Informer staat geen directe browser-calls toe en de API-key mag niet in de frontend staan). Vul de base-URL (<code>&lt;worker&gt;/api</code>) en de sales-IDs (ledger, product, template, betaalconditie, currency) in. Setup-details staan in <code>worker.js</code>/<code>README.md</code>.</p>
-    </div>
-
-    <div class="section">
-      <h2>Geavanceerd</h2>
-      <p class="muted">API-sandbox om Informer rechtstreeks te testen: verbinding testen (GET <code>/administration/</code>), bestaande inkoopfacturen ophalen, en een test-inkoopfactuur aanmaken (POST met aanpasbare JSON; pas IDs aan via <code>/relations/</code>, <code>/vat/</code>, <code>/ledgers/</code>, <code>/costs/</code>). Onderaan een debug-log van de laatste Informer request/response.</p>
-    </div>
-
-    <div class="section">
-      <h2>Moneybird-migratie</h2>
-      <p class="muted">Voor de overstap van Informer naar Moneybird. Zet eerst in de Worker <code>MONEYBIRD_TOKEN</code> (Secret) en <code>MONEYBIRD_ADMIN_ID</code> (variabele) en test de verbinding. Daarna migreer je in volgorde: relaties/contacten → verkoopfacturen → inkoopfacturen. Facturen worden alleen <strong>ingeboekt</strong> in Moneybird (niet verstuurd), want ze zijn al verstuurd via Informer/MoneyMonk. De API loopt via de Worker-proxy <code>/mb/*</code>.</p>
+      <p class="muted">De koppeling met Moneybird loopt via een Cloudflare Worker. De API-token (<code>MONEYBIRD_TOKEN</code>, Secret) en administratie-ID (<code>MONEYBIRD_ADMIN_ID</code>, variabele) staan in de Worker — niet in de browser. Op deze tab test je of de verbinding werkt. Setup-details staan in <code>worker.js</code>/<code>README.md</code>.</p>
     </div>
   </section>
     </main>
@@ -1605,7 +1451,7 @@ function showApp() {
 //  TAB SWITCHING
 // ============================================================
 let facturenLoaded = false;
-const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", instellingen: "Instellingen", geavanceerd: "Geavanceerd", moneybird: "Moneybird-migratie", uitleg: "Uitleg" };
+const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", instellingen: "Instellingen", uitleg: "Uitleg" };
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
@@ -2406,7 +2252,7 @@ function salesSetState(idx, status, message, link) {
 // extractInvoiceViaWorker but hits a different path and trusts the
 // returned schema's customer_* fields.
 async function extractSalesInvoiceViaWorker(pdfBase64) {
-  const extractUrl = cfg.baseUrl.replace(/\/api$/, "") + "/extract-sales";
+  const extractUrl = projWorkerBase() + "/extract-sales";
   let res;
   try {
     res = await fetch(extractUrl, {
@@ -2532,123 +2378,106 @@ function customerToRelationPayload(extracted) {
   };
 }
 
-async function processSalesPdf(idx) {
+// Moneybird-contact uit geëxtraheerde klantvelden (verkoop-PDF).
+function mbContactPayloadFromCustomer(ex) {
+  const addr = [ex.customer_street, ex.customer_house_number, ex.customer_house_number_suffix].filter(s => s && String(s).trim()).join(" ").trim();
+  const email = (ex.customer_email || "").trim();
+  const c = {
+    company_name: (ex.customer_name || "").trim(),
+    firstname: (ex.customer_contact_firstname || "").trim(),
+    lastname: (ex.customer_contact_surname || "").trim(),
+    address1: addr,
+    zipcode: (ex.customer_zip || "").replace(/\s+/g, " ").trim(),
+    city: (ex.customer_city || "").trim(),
+    country: (ex.customer_country || "").trim().toUpperCase(),
+    phone: (ex.customer_phone || "").trim(),
+    tax_number: (ex.customer_vat_number || "").trim(),
+    chamber_of_commerce: (ex.customer_kvk || "").trim()
+  };
+  if (email) { c.send_invoices_to_email = email; c.delivery_method = "Email"; }
+  Object.keys(c).forEach(k => { if (c[k] === "" || c[k] == null) delete c[k]; });
+  return { contact: c };
+}
+
+async function mbCustomerIdOrCreate(ex) {
+  const name = (ex.customer_name || "").trim();
+  if (!name) throw new Error("Geen klantnaam geëxtraheerd.");
+  let id = await mbContactId(name);
+  if (id) return { id, created: false };
+  const res = await mbFetch("contacts.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbContactPayloadFromCustomer(ex)) });
+  id = res && res.id;
+  if (!id) throw new Error("Contact aangemaakt maar geen ID teruggekregen.");
+  if (mbContactsCache) mbContactsCache[name.toLowerCase().trim()] = id;
+  return { id, created: true };
+}
+
+function mbSalesFromExtractedPayload(ex, contactId) {
+  const src = (ex.lines && ex.lines.length) ? ex.lines : [{ description: ex.number || "Verkoopfactuur", amount: ex.invoice_total || 0, vat_rate: 21 }];
+  const details = src.map(l => {
+    const p = parseInt(l.vat_rate, 10);
+    const pct = String(isNaN(p) ? 21 : p);
+    return { description: (l.description || "Regel").slice(0, 200), amount: "1", price: Number(l.amount) || 0, tax_rate_id: MB_SALES_TAX[pct] || MB_SALES_TAX["0"], ledger_account_id: MB_SALES_LEDGER };
+  });
+  const invDate = (ex.invoice_date && ex.invoice_date !== "0000-00-00") ? ex.invoice_date : new Date().toISOString().slice(0, 10);
+  return { sales_invoice: { contact_id: contactId, reference: ex.number || "", invoice_date: invDate, details_attributes: details } };
+}
+
+// Verkoop-PDF → Moneybird: contact match/aanmaken → verkoopfactuur (concept of
+// direct ingeboekt zonder e-mail). Geeft {invId, contactCreated}.
+async function mbBookSalesFromExtracted(ex, onlyBook) {
+  const { id: contactId, created } = await mbCustomerIdOrCreate(ex);
+  const res = await mbFetch("sales_invoices.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbSalesFromExtractedPayload(ex, contactId)) });
+  const invId = res && res.id;
+  if (!invId) throw new Error("Verkoopfactuur aangemaakt maar geen ID teruggekregen.");
+  if (onlyBook) await mbFetch(`sales_invoices/${invId}/send_invoice.json`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sales_invoice_sending: { delivery_method: "Manual" } }) });
+  return { invId, contactCreated: created };
+}
+
+async function processSalesPdf(idx, onlyBook, existingRefs) {
   const entry = salesQueue[idx];
   const file = entry.file;
   try {
-    salesSetState(idx, "reading", "1/4 — PDF lezen...");
+    salesSetState(idx, "reading", "1/3 — PDF lezen...");
     const buf = await file.arrayBuffer();
     const pdfB64 = arrayBufferToBase64(buf);
 
-    salesSetState(idx, "extracting", "2/4 — Extractie via Claude...");
+    salesSetState(idx, "extracting", "2/3 — Extractie via Claude...");
     const extracted = await extractSalesInvoiceViaWorker(pdfB64);
     if (!extracted.customer_name) throw new Error("Claude vond geen klantnaam.");
 
-    salesSetState(idx, "matching", `3/4 — Klant matchen/aanmaken: "${extracted.customer_name}"...`);
-    let match = await findRelationByName(extracted.customer_name);
-    let relationSource = "match";
-    if (!match) {
-      const patches = [];
-      const created = await createRelationWithRetry(
-        customerToRelationPayload(extracted),
-        (field, val) => patches.push(`${field}=${val}`)
-      );
-      const newId = created?.relation_id || created?.id ||
-                    (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) ||
-                    null;
-      if (!newId) throw new Error("Klant aangemaakt maar geen ID teruggekregen: " + JSON.stringify(created).slice(0, 300));
-      match = { id: newId, relation: { name: extracted.customer_name } };
-      relationSource = patches.length > 0 ? `created (auto-fill: ${patches.join(", ")})` : "created";
+    const ref = (extracted.number || "").trim();
+    if (ref && existingRefs && existingRefs.has(ref)) {
+      salesSetState(idx, "skipped", `Referentie ${ref} bestaat al in Moneybird — overgeslagen`);
+      return;
     }
 
-    salesSetState(idx, "creating", `4/4 — Verkoopfactuur aanmaken in Informer (klant ${relationSource === "created" ? "aangemaakt" : "gematched"})...`);
-    // Zelfde clamp + line-sum normalisatie als bij inkoop, maar sales
-    // gebruikt een ander line-schema: qty + amount (unit price) +
-    // vat_id + ledger_account_id. Informer berekent zelf de BTW
-    // uit qty × amount × vat_percentage. Voor sales 21% NL is
-    // vat_id 1478830 (inkoop is 1478835 — admin-specifiek toegevoegd
-    // door Informer; deze klopt voor jouw administratie).
-    const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
-    let _expDate = extracted.invoice_expiry_date || _invDate;
-    if (_expDate < _invDate) _expDate = _invDate;
-    const SALES_VAT_ID_21 = 1478830;
-    const ledgerId = Number(cfg.salesLedgerId) || 15302629;
-    // v2 line-shape uit Informer's docs: alleen info, qty, description,
-    // amount, vat_id, ledger_id. Geen product_id/costs_id/discount —
-    // die hadden we erbij gehouden voor v1-compat, maar v2 vereist
-    // alleen deze 6. ledger_id is 't rekeningnummer (8000), niet de
-    // interne API-ID.
-    const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
-      description: extracted.number || "Verkoopfactuur",
-      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 21
-    }]).map(ln => {
-      const amt = Number(ln.amount) || 0;
-      return {
-        info: false,
-        qty: 1,
-        description: (ln.description || "Regel").slice(0, 200),
-        amount: amt,
-        vat_id: SALES_VAT_ID_21,
-        ledger_id: ledgerId,
-        costs_id: 0,
-        discount: 0
-      };
-    });
-    const totalExcl = lines.reduce((s, ln) => s + (ln.qty * ln.amount), 0);
-    const invoiceTotal = Math.round(totalExcl * 1.21 * 100) / 100;
-    // Admin-specifieke IDs uit Settings — Informer's POST /invoice/sales/
-    // verlangt: template_id, payment_condition_id, currency_id,
-    // vat_option, ledger_id (per line), costs_id (per line).
-    // Sales POST-schema (uit Informer docs): relation_id, contact_name,
-    // reference, invoice_date, payment_condition_id, currency_id,
-    // vat_option, template_id, comment, footer, lines[].
-    // Niet toegestaan: pdf (template genereert), invoice_total
-    // (berekent uit lines), invoice_expiry_date (uit payment_condition_id
-    // expiry_days), number (Informer auto-nummert).
-    // Originele MoneyMonk-factuurnummer gaat in `reference` zodat je
-    // in Informer alsnog kan zoeken op je oude nummer.
-    const payload = {
-      relation_id: parseInt(match.id, 10) || match.id,
-      reference: extracted.number || "",
-      invoice_date: _invDate,
-      template_id: parseInt(cfg.salesTemplateId, 10) || undefined,
-      payment_condition_id: parseInt(cfg.salesPaymentConditionId, 10) || undefined,
-      currency_id: parseInt(cfg.salesCurrencyId, 10) || 126106,
-      vat_option: cfg.salesVatOption || "excl",
-      lines
-    };
-    const path = cfg.salesCreatePath || "/invoice/sales/";
-    const result = await informerFetch("POST", path, payload);
-    // v2 retourneert {id, url, ...}; v1 had {invoice_id, invoice_url}.
-    const invId = result?.id || result?.invoice_id || result?.invoice?.id || "?";
-    const invUrl = result?.url || result?.invoice_url || result?.invoice?.url || null;
+    salesSetState(idx, "creating", `3/3 — Inboeken in Moneybird: "${extracted.customer_name}"...`);
+    const { invId, contactCreated } = await mbBookSalesFromExtracted(extracted, onlyBook);
+    if (ref && existingRefs) existingRefs.add(ref);
+    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/sales_invoices/${invId}`;
     salesSetState(idx, "ok",
-      `Aangemaakt (id ${invId}) — ${extracted.customer_name} · nr ${extracted.number} · €${invoiceTotal.toFixed(2)}`,
+      `${onlyBook ? "Ingeboekt" : "Concept"} — ${extracted.customer_name} · nr ${extracted.number || "?"}${contactCreated ? " · nieuw contact" : ""}`,
       invUrl);
   } catch (e) {
-    if (isDuplicateInvoiceError(e)) {
-      salesSetState(idx, "skipped", "Factuurnummer bestaat al in Informer — overgeslagen");
-    } else {
-      salesSetState(idx, "error", e.message || String(e));
-    }
+    salesSetState(idx, "error", e.message || String(e));
   }
 }
 
 async function startSalesMigration() {
   if (salesMigrating) return;
-  if (!cfg.salesCreatePath) {
-    showToast("Vul eerst sales endpoint in onder Instellingen", "err");
-    return;
-  }
   if (salesQueue.length === 0) return;
+  const onlyBook = !!($("sales-book") && $("sales-book").checked);
   salesMigrating = true;
   const startBtn = $("migratie-start-btn");
   const origText = startBtn.textContent;
   startBtn.disabled = true;
   startBtn.textContent = "Bezig...";
+  let existingRefs = new Set();
+  try { existingRefs = await mbLoadExistingSalesRefs(); } catch (e) { /* dedupe best-effort */ }
   for (let i = 0; i < salesQueue.length; i++) {
     if (salesQueue[i].status === "ok" || salesQueue[i].status === "skipped") continue;
-    await processSalesPdf(i);
+    await processSalesPdf(i, onlyBook, existingRefs);
+    await new Promise(r => setTimeout(r, 300));
   }
   salesMigrating = false;
   startBtn.disabled = false;
@@ -2984,7 +2813,7 @@ function addProject() {
   if ($("proj-rates")) { $("proj-rates").innerHTML = ""; addRateRow(); }
   if ($("proj-template")) $("proj-template").value = String(cfg.salesTemplateId || "");
   if ($("proj-linemode")) $("proj-linemode").value = "summary";
-  status.textContent = rel ? "" : "Let op: geen exacte Informer-relatie gematcht — bij factureren wordt de klant op naam opgezocht.";
+  status.textContent = rel ? "" : "Let op: geen exact Moneybird-contact gematcht — bij factureren wordt de klant op naam opgezocht.";
   renderProjects();
 }
 
@@ -3018,7 +2847,7 @@ function markProjectInvoiced(id) {
   if (!p) return;
   const open = projOpenEntries(p);
   if (!open.length) { showToast("Geen open uren", "err"); return; }
-  if (!confirm(`Alle ${open.length} open boeking(en) van "${p.name}" markeren als gefactureerd (definitief)?\n\nDit maakt GEEN factuur in Informer aan — gebruik dit als de factuur al bestaat.`)) return;
+  if (!confirm(`Alle ${open.length} open boeking(en) van "${p.name}" markeren als gefactureerd (definitief)?\n\nDit maakt GEEN factuur in Moneybird aan — gebruik dit als de factuur al bestaat.`)) return;
   const inv = computeProjectInvoice(p, open, cfg);
   const invId = "handmatig_" + Date.now().toString(36);
   const stamp = new Date().toISOString();
@@ -3263,7 +3092,7 @@ function projEntryRowHtml(p, e) {
     <span class="e-desc" title="${escapeHtml(e.description)}">${escapeHtml(e.description)}${statusBadge}</span>
     <span class="e-hrs" style="min-width:150px;">${rTag}</span>
     ${e.invoiced
-      ? `<button class="icon-btn" title="Terugzetten naar open (bv. als je het concept in Informer hebt verwijderd)" onclick="unInvoiceEntry('${p.id}','${e.id}')" style="color:var(--muted);">↩</button>`
+      ? `<button class="icon-btn" title="Terugzetten naar open (bv. als je het concept in Moneybird hebt verwijderd)" onclick="unInvoiceEntry('${p.id}','${e.id}')" style="color:var(--muted);">↩</button>`
       : `<button class="icon-btn" title="Verwijderen" onclick="deleteEntry('${p.id}','${e.id}')">✕</button>`}
   </div>`;
 }
@@ -3323,7 +3152,7 @@ function renderInvoicesOverview() {
         : `#${escapeHtml(String(iv.id))}`);
     const isFinal = iv.status === "definitief";
     const statusBadge = `<span class="badge ${isFinal ? "ok" : "info"}">${isFinal ? "definitief" : "concept"}</span>`;
-    const finalBtn = `<button class="icon-btn" title="${isFinal ? "Terug naar concept" : "Markeer als definitief (verstuurd in Informer)"}" onclick="toggleInvoiceFinal('${escapeHtml(String(iv.id))}')" style="color:var(--ok-text);">${isFinal ? "↺" : "✓"}</button>`;
+    const finalBtn = `<button class="icon-btn" title="${isFinal ? "Terug naar concept" : "Markeer als definitief (verstuurd in Moneybird)"}" onclick="toggleInvoiceFinal('${escapeHtml(String(iv.id))}')" style="color:var(--ok-text);">${isFinal ? "↺" : "✓"}</button>`;
     return `<div class="entry-row">
       <span class="e-date">${escapeHtml(iv.date || "")}</span>
       <span class="e-desc">${idLink} · ${proj} · <span class="muted">${escapeHtml(iv.relationName || "")}</span> ${statusBadge}</span>
@@ -3343,7 +3172,7 @@ function toggleInvoiceFinal(invId) {
 }
 
 function removeInvoiceRecord(invId) {
-  if (!confirm("Factuur uit het overzicht verwijderen en de bijbehorende uren terugzetten naar open?\n\n(Doe dit als je het concept in Informer hebt weggegooid.)")) return;
+  if (!confirm("Factuur uit het overzicht verwijderen en de bijbehorende uren terugzetten naar open?\n\n(Doe dit als je het concept in Moneybird hebt weggegooid.)")) return;
   projectsData.projects.forEach(p => (p.entries || []).forEach(e => {
     if (e.invoiced && String(e.invoiceId) === String(invId)) { e.invoiced = false; e.invoiceId = null; e.invoicedAt = null; }
   }));
@@ -3393,7 +3222,7 @@ function renderProjects() {
     const openAmt = projOpenAmount(p);
     const rates = projRatesOf(p);
     const expanded = projExpanded.has(p.id);
-    const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Informer-koppeling</span>';
+    const koppelWarn = p.relationId ? "" : ' · <span class="badge warn">geen Moneybird-koppeling</span>';
     const nummerBadge = p.projectNumber ? `<span class="badge info">${escapeHtml(p.projectNumber)}</span> ` : "";
     const tmplName = p.templateName || (p.templateId && projTemplates[p.templateId]) || "";
     const tmplPart = tmplName ? ` · ${escapeHtml(tmplName)}` : "";
@@ -3448,7 +3277,7 @@ function renderProjects() {
         <div id="db-preview-${p.id}"></div>
       </details>
       <div class="field" style="margin-top:12px;">
-        <label>Opmerking op factuur (komt in het Opmerking-veld van Informer)</label>
+        <label>Opmerking op factuur (komt in het Opmerking-veld van Moneybird)</label>
         <textarea rows="2" onchange="setProjectComment('${p.id}', this.value)" placeholder="bv. Uren gemaakt door Mohsen&#10;Hours worked by Mohsen">${escapeHtml(p.invoiceComment || "")}</textarea>
       </div>
       <div class="row-btns" style="margin-top:12px;">
@@ -3461,7 +3290,7 @@ function renderProjects() {
         <label class="muted" style="display:flex;align-items:center;gap:4px;cursor:pointer;">
           <input type="checkbox" ${p.vatShifted ? "checked" : ""} onchange="setProjectVatShifted('${p.id}', this.checked)"> BTW verlegd
         </label>
-        <button class="btn" onclick="markProjectInvoiced('${p.id}')" ${openHrs > 0 ? "" : "disabled"} title="Markeer open uren als gefactureerd zonder een Informer-concept aan te maken">Markeer als gefactureerd</button>
+        <button class="btn" onclick="markProjectInvoiced('${p.id}')" ${openHrs > 0 ? "" : "disabled"} title="Markeer open uren als gefactureerd zonder een Moneybird-concept aan te maken">Markeer als gefactureerd</button>
         <button class="btn danger" onclick="deleteProject('${p.id}')">Project verwijderen</button>
         <span class="muted" id="proj-status-${p.id}" style="align-self:center;"></span>
       </div>
