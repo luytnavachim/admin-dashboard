@@ -499,7 +499,7 @@ body { max-width: 1280px; }
     </div>
   </section>
 
-  <!-- ====== TAB: Facturen verwerken (Outlook → Informer) ====== -->
+  <!-- ====== TAB: Facturen verwerken (Outlook → Moneybird) ====== -->
   <section id="tab-facturen" class="tab-panel">
     <div class="section">
       <h2>Facturen verwerken</h2>
@@ -513,8 +513,8 @@ body { max-width: 1280px; }
       </div>
 
       <div class="row-btns">
-        <button class="btn primary" id="send-btn" onclick="sendSelectedToInformer()" disabled>Stuur naar Informer &rarr;</button>
-        <button class="btn" id="skip-btn" onclick="skipSelected()" disabled title="Verplaatst de mail naar Archive zonder factuur in Informer aan te maken">Negeren (geen factuur)</button>
+        <button class="btn primary" id="send-btn" onclick="sendSelectedToMoneybird()" disabled>Inboeken in Moneybird &rarr;</button>
+        <button class="btn" id="skip-btn" onclick="skipSelected()" disabled title="Verplaatst de mail naar Archive zonder factuur in Moneybird in te boeken">Negeren (geen factuur)</button>
       </div>
       <div id="flow-log" style="margin-top: 12px;"></div>
     </div>
@@ -526,7 +526,7 @@ body { max-width: 1280px; }
         <input id="pdf-upload" type="file" accept="application/pdf,.pdf" onchange="onPdfPicked()">
       </div>
       <div class="row-btns">
-        <button class="btn primary" id="upload-btn" onclick="sendUploadedPdfToInformer()" disabled>Stuur naar Informer &rarr;</button>
+        <button class="btn primary" id="upload-btn" onclick="sendUploadedPdfToMoneybird()" disabled>Inboeken in Moneybird &rarr;</button>
       </div>
       <div id="upload-log" style="margin-top: 12px;"></div>
     </div>
@@ -1280,7 +1280,7 @@ function renderInvoices(emails) {
       </div>
       <div class="actions">
         <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Open</a>
-        ${e.hasAttachments ? `<button class="btn" data-action="informer" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" title="Stuur PDF + data direct naar Informer">→ Informer</button>` : ''}
+        ${e.hasAttachments ? `<button class="btn" data-action="moneybird" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" title="Boek PDF + data direct in als inkoopfactuur in Moneybird">→ Moneybird</button>` : ''}
         <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" data-sender="${escapeHtml(senderEmail(e))}">Verwerkt ✓</button>
       </div>
     </div>`;
@@ -1288,8 +1288,8 @@ function renderInvoices(emails) {
   list.querySelectorAll('[data-action="processed"]').forEach(btn => {
     btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id, btn.dataset.mbox, btn.dataset.sender));
   });
-  list.querySelectorAll('[data-action="informer"]').forEach(btn => {
-    btn.addEventListener('click', () => sendRowToInformer(btn, btn.dataset.id, btn.dataset.mbox));
+  list.querySelectorAll('[data-action="moneybird"]').forEach(btn => {
+    btn.addEventListener('click', () => sendRowToMoneybird(btn, btn.dataset.id, btn.dataset.mbox));
   });
 }
 function renderReply(emails) {
@@ -2054,7 +2054,7 @@ function tryParseUbl(xmlString) {
 }
 
 async function extractInvoiceViaWorker(pdfBase64) {
-  const extractUrl = cfg.baseUrl.replace(/\/api$/, "") + "/extract";
+  const extractUrl = projWorkerBase() + "/extract";
   // Base64 inflates ~33% — payload size is what matters for CF Worker
   // limits (100MB) en browser body-handling.
   const payloadKB = Math.round(pdfBase64.length / 1024);
@@ -2107,7 +2107,7 @@ async function findRelationByName(name) {
   return null;
 }
 
-async function sendSelectedToInformer() {
+async function sendSelectedToMoneybird() {
   $("flow-log").innerHTML = "";
   const email = invoiceEmails.find(e => e.id === selectedEmailId);
   if (!email) { showToast("Geen mail geselecteerd", "err"); return; }
@@ -2117,9 +2117,9 @@ async function sendSelectedToInformer() {
   const origText = btn.textContent;
   btn.textContent = "Bezig...";
 
-  let step1 = null, step2 = null, step3 = null, step4 = null, step5 = null;
+  let step1 = null, step2 = null, step3 = null, step4 = null;
   try {
-    step1 = logStep("1/5 — Bijlagen zoeken in Outlook (PDF + UBL)...");
+    step1 = logStep("1/4 — Bijlagen zoeken in Outlook (PDF + UBL)...");
     const base = userPath(email._mailbox);
     const atts = await graph("GET", `${base}/messages/${email.id}/attachments?$select=id,name,contentType,size`);
     const list = atts.value || [];
@@ -2127,9 +2127,9 @@ async function sendSelectedToInformer() {
     if (!pdf) throw new Error("Geen PDF-bijlage gevonden in deze mail.");
     const ubl = list.find(a => /\.(xml|ubl)$/i.test(a.name || "") || /xml/i.test(a.contentType || ""));
     step1.className = "flow-step ok";
-    step1.textContent = `1/5 — PDF: ${pdf.name} (${Math.round(pdf.size/1024)} KB)` + (ubl ? ` + UBL: ${ubl.name}` : "");
+    step1.textContent = `1/4 — PDF: ${pdf.name} (${Math.round(pdf.size/1024)} KB)` + (ubl ? ` + UBL: ${ubl.name}` : "");
 
-    step2 = logStep("2/5 — Factuurdata extraheren" + (ubl ? " uit UBL..." : " uit PDF via Claude..."));
+    step2 = logStep("2/4 — Factuurdata extraheren" + (ubl ? " uit UBL..." : " uit PDF via Claude..."));
     let extracted = null, extractedVia = "";
     if (ubl) {
       const xmlBuf = await graphBinary(`${base}/messages/${email.id}/attachments/${ubl.id}/$value`);
@@ -2143,92 +2143,40 @@ async function sendSelectedToInformer() {
       extractedVia = "Claude";
     }
     step2.className = "flow-step ok";
-    step2.textContent = `2/5 — Geëxtraheerd via ${extractedVia}: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
+    step2.textContent = `2/4 — Geëxtraheerd via ${extractedVia}: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
 
-    step3 = logStep(`3/5 — Leverancier matchen in Informer: "${extracted.supplier_name}"...`);
-    let match = await findRelationByName(extracted.supplier_name);
-    let relationSource = "match";
-    if (!match) {
-      step3.textContent = `3/5 — Geen match voor "${extracted.supplier_name}" — aanmaken in Informer...`;
-      const fb = (v, def) => (v && String(v).trim()) ? v : def;
-      const newRelation = {
-        relation_type:"0", company_name: extracted.supplier_name,
-        firstname: extracted.supplier_contact_firstname || "", surname_prefix:"", surname: extracted.supplier_contact_surname || "",
-        street: fb(extracted.supplier_street, "Onbekend"), house_number: normHouseNumber(extracted.supplier_house_number), house_number_suffix:"",
-        zip: fb(extracted.supplier_zip, "0000XX"), city: fb(extracted.supplier_city, "Onbekend"), country: fb(extracted.supplier_country, "NL"),
-        phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
-        coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
-      };
-      const created = await createRelationWithRetry(newRelation);
-      const newId = created?.relation_id || created?.id || (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) || null;
-      if (!newId) throw new Error("Relation aangemaakt maar geen ID teruggekregen — response: " + JSON.stringify(created).slice(0, 300));
-      match = { id: newId, relation: { name: extracted.supplier_name } };
-      relationSource = "created";
-    }
+    step3 = logStep("3/4 — Inboeken in Moneybird (contact + inkoopfactuur + PDF)...");
+    const { invId, contactCreated, attachErr } = await mbBookPurchaseFromExtracted(extracted, pdfB64, pdf.name);
+    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${invId}`;
     step3.className = "flow-step ok";
-    const matchLabel = relationSource === "created" ? "Aangemaakt" : "Match";
-    step3.textContent = `3/5 — ${matchLabel}: relation_id ${match.id} — ${match.relation.company_name || match.relation.name || match.relation.company || extracted.supplier_name}`;
+    step3.textContent = `3/4 — Ingeboekt in Moneybird${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
+      (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : " + PDF bijgevoegd") + ` — ${invUrl}`;
 
-    step4 = logStep("4/5 — Factuur aanmaken in Informer...");
-    const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
-      description: extracted.number || "Inkoopfactuur",
-      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 0
-    }]).map(ln => ({
-      description: (ln.description || "Regel").slice(0, 200),
-      amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
-      vat_id: 1478835, ledger_id: 15302498, costs_id: 0
-    }));
-    // Zie upload-flow voor uitleg: clamp expiry >= invoice_date en
-    // herbereken invoice_total uit de regels zodat Informer's
-    // consistentie-checks niet aanslaan.
-    const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
-    let _expDate = extracted.invoice_expiry_date || _invDate;
-    if (_expDate < _invDate) _expDate = _invDate;
-    const _lineSum = lines.reduce((s, ln) => s + (Number(ln.amount) || 0) + (Number(ln.vat_amount) || 0), 0);
-    const _invoiceTotal = Math.round(_lineSum * 100) / 100;
-    const _extractedTotal = Number(extracted.invoice_total) || 0;
-    if (_extractedTotal && Math.abs(_invoiceTotal - _extractedTotal) > 0.01) {
-      logStep(`(totaal aangepast: €${_extractedTotal.toFixed(2)} → €${_invoiceTotal.toFixed(2)} om bij regels te kloppen)`, "ok");
-    }
-    const payload = {
-      relation_id: parseInt(match.id, 10) || match.id,
-      number: extracted.number || `OUTLOOK-${Date.now()}`,
-      invoice_date: _invDate,
-      invoice_expiry_date: _expDate,
-      collect: 0, invoice_total: _invoiceTotal, pdf: pdfB64, lines
-    };
-    const path = cfg.createPath || "/invoice/purchase/";
-    const result = await informerFetch("POST", path, payload);
-    step4.className = "flow-step ok";
-    const invoiceTail = result?.invoice_url ? ` — ${result.invoice_url}` : "";
-    step4.textContent = `4/5 — Factuur aangemaakt (id ${result?.invoice_id || "?"})${invoiceTail}`;
-
-    step5 = logStep("5/5 — Mail verplaatsen naar Verwerkt-map...");
+    step4 = logStep("4/4 — Mail verplaatsen naar Verwerkt-map...");
     try {
       const folderId = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
       if (email.parentFolderId && email.parentFolderId === folderId) {
-        step5.className = "flow-step ok";
-        step5.textContent = `5/5 — Mail stond al in ${PROCESSED_FOLDER_NAME} (geen move nodig)`;
+        step4.className = "flow-step ok";
+        step4.textContent = `4/4 — Mail stond al in ${PROCESSED_FOLDER_NAME} (geen move nodig)`;
       } else {
         await moveMessage(email._mailbox, email.id, folderId);
-        step5.className = "flow-step ok";
-        step5.textContent = "5/5 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
+        step4.className = "flow-step ok";
+        step4.textContent = "4/4 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
       }
     } catch (e) {
-      step5.className = "flow-step err";
-      step5.textContent = "5/5 — Verplaatsen mislukt (factuur is wel in Informer): " + e.message;
+      step4.className = "flow-step err";
+      step4.textContent = "4/4 — Verplaatsen mislukt (factuur staat wel in Moneybird): " + e.message;
     }
 
-    if (result?.invoice_url) logStep(`Klaar! Open in Informer: ${result.invoice_url}`, "ok");
-    else logStep("Klaar! (geen invoice_url teruggekregen)", "ok");
-    showToast("Verstuurd naar Informer", "ok");
+    logStep(`Klaar! Open in Moneybird: ${invUrl}`, "ok");
+    showToast("Ingeboekt in Moneybird", "ok");
 
     // Verwijder uit lokale lijst zodat 'ie niet meer verschijnt zonder refresh
     invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
     selectedEmailId = null;
     renderEmails();
   } catch (e) {
-    const failing = step5 || step4 || step3 || step2 || step1;
+    const failing = step4 || step3 || step2 || step1;
     if (failing) { failing.className = "flow-step err"; failing.textContent = (failing.textContent.split("—")[0]) + "— FOUT: " + e.message; }
     else logStep("Fout: " + e.message, "err");
     showToast("Mislukt: " + e.message, "err");
@@ -2238,10 +2186,10 @@ async function sendSelectedToInformer() {
   }
 }
 
-// Adapter: triggert de Informer-flow vanuit een Overzicht-rij door
-// kort de globale state na te bootsen die sendSelectedToInformer verwacht.
+// Adapter: triggert de Moneybird-flow vanuit een Overzicht-rij door
+// kort de globale state na te bootsen die sendSelectedToMoneybird verwacht.
 // Voordeel: één gedeelde flow, geen code-duplicatie.
-async function sendRowToInformer(btn, id, mboxEmail) {
+async function sendRowToMoneybird(btn, id, mboxEmail) {
   const email = (window.lastInvoices || []).find(e =>
     e.id === id && e._mailbox && e._mailbox.email === mboxEmail
   );
@@ -2251,9 +2199,9 @@ async function sendRowToInformer(btn, id, mboxEmail) {
   const origBtnText = btn.textContent;
   btn.disabled = true;
   btn.textContent = "Bezig…";
-  devLog(`informer-flow: "${(email.subject || '').slice(0, 40)}" (${email._mailbox.label})`, "info");
+  devLog(`moneybird-flow: "${(email.subject || '').slice(0, 40)}" (${email._mailbox.label})`, "info");
 
-  // Maak tijdelijke DOM-elementen aan voor wat sendSelectedToInformer nodig heeft
+  // Maak tijdelijke DOM-elementen aan voor wat sendSelectedToMoneybird nodig heeft
   let tempFlowLog = null, tempSendBtn = null;
   if (!$("flow-log")) {
     tempFlowLog = document.createElement("div");
@@ -2275,11 +2223,11 @@ async function sendRowToInformer(btn, id, mboxEmail) {
   selectedEmailId = email.id;
 
   try {
-    await sendSelectedToInformer();
-    // sendSelectedToInformer haalt de mail uit invoiceEmails op succes
+    await sendSelectedToMoneybird();
+    // sendSelectedToMoneybird haalt de mail uit invoiceEmails op succes
     const succeeded = !invoiceEmails.find(e => e.id === email.id);
     if (succeeded) {
-      showToast(`Verstuurd naar Informer (${email._mailbox.label || email._mailbox.email})`, "ok");
+      showToast(`Ingeboekt in Moneybird (${email._mailbox.label || email._mailbox.email})`, "ok");
       fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
     } else {
       btn.disabled = false;
@@ -2289,7 +2237,7 @@ async function sendRowToInformer(btn, id, mboxEmail) {
   } catch (e) {
     btn.disabled = false;
     btn.textContent = origBtnText;
-    showToast("Naar Informer mislukt: " + e.message, "err");
+    showToast("Naar Moneybird mislukt: " + e.message, "err");
     if (!wasInList) invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
   } finally {
     selectedEmailId = prevSel;
@@ -2301,7 +2249,7 @@ async function sendRowToInformer(btn, id, mboxEmail) {
 async function skipSelected() {
   const email = invoiceEmails.find(e => e.id === selectedEmailId);
   if (!email) { showToast("Geen mail geselecteerd", "err"); return; }
-  if (!confirm(`Mail "${(email.subject || "").slice(0, 60)}" verplaatsen naar Archive zonder een factuur in Informer aan te maken?`)) return;
+  if (!confirm(`Mail "${(email.subject || "").slice(0, 60)}" verplaatsen naar Archive zonder een factuur in Moneybird in te boeken?`)) return;
   const skipBtn = $("skip-btn"), sendBtn = $("send-btn");
   const origText = skipBtn.textContent;
   skipBtn.disabled = true; sendBtn.disabled = true; skipBtn.textContent = "Bezig...";
@@ -2325,14 +2273,14 @@ async function skipSelected() {
 }
 
 // ============================================================
-//  LOSSE PDF UPLOAD → INFORMER
+//  LOSSE PDF UPLOAD → MONEYBIRD
 // ============================================================
 function onPdfPicked() {
   const f = $("pdf-upload").files[0];
   $("upload-btn").disabled = !f;
 }
 
-async function sendUploadedPdfToInformer() {
+async function sendUploadedPdfToMoneybird() {
   const fileInput = $("pdf-upload");
   const file = fileInput.files[0];
   if (!file) { showToast("Geen PDF geselecteerd", "err"); return; }
@@ -2359,69 +2307,15 @@ async function sendUploadedPdfToInformer() {
     s2.className = "flow-step ok";
     s2.textContent = `2/3 — Geëxtraheerd: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
 
-    s3 = logStep(`3/3 — Leverancier matchen + factuur aanmaken in Informer...`, "active", "upload-log");
-    let match = await findRelationByName(extracted.supplier_name);
-    let relationSource = "match";
-    if (!match) {
-      const fb = (v, def) => (v && String(v).trim()) ? v : def;
-      const newRelation = {
-        relation_type:"0", company_name: extracted.supplier_name,
-        firstname: extracted.supplier_contact_firstname || "", surname_prefix:"", surname: extracted.supplier_contact_surname || "",
-        street: fb(extracted.supplier_street, "Onbekend"), house_number: normHouseNumber(extracted.supplier_house_number), house_number_suffix:"",
-        zip: fb(extracted.supplier_zip, "0000XX"), city: fb(extracted.supplier_city, "Onbekend"), country: fb(extracted.supplier_country, "NL"),
-        phone_number: extracted.supplier_phone || "", fax_number:"", web: extracted.supplier_website || "", email: extracted.supplier_email || "",
-        coc: extracted.supplier_kvk || "", vat: extracted.supplier_vat_number || "", iban:"", bic:"", email_invoice: extracted.supplier_email || ""
-      };
-      const created = await createRelationWithRetry(newRelation);
-      const newId = created?.relation_id || created?.id || (created?.relation && (created.relation.id || Object.keys(created.relation)[0])) || null;
-      if (!newId) throw new Error("Relation aangemaakt maar geen ID teruggekregen — response: " + JSON.stringify(created).slice(0, 300));
-      match = { id: newId, relation: { name: extracted.supplier_name } };
-      relationSource = "created";
-    }
-    const matchLabel = relationSource === "created" ? "aangemaakt" : "gematched";
-
-    const lines = (extracted.lines && extracted.lines.length ? extracted.lines : [{
-      description: extracted.number || "Inkoopfactuur",
-      amount: extracted.invoice_total || 0, vat_amount: 0, vat_rate: 0
-    }]).map(ln => ({
-      description: (ln.description || "Regel").slice(0, 200),
-      amount: Number(ln.amount) || 0, vat_amount: Number(ln.vat_amount) || 0,
-      vat_id: 1478835, ledger_id: 15302498, costs_id: 0
-    }));
-    // Informer eist invoice_expiry_date >= invoice_date. Claude haalt
-    // dat soms net niet (Bambulab-PDF: factuurdatum 15 mei, expiry 14
-    // mei → 422). Clamp expiry naar invoice_date i.p.v. de POST laten
-    // mislukken; YYYY-MM-DD string-compare werkt voor de check.
-    const _invDate = extracted.invoice_date || new Date().toISOString().slice(0, 10);
-    let _expDate = extracted.invoice_expiry_date || _invDate;
-    if (_expDate < _invDate) _expDate = _invDate;
-    // Informer eist sum(amount + vat_amount over lines) === invoice_total.
-    // Claude geeft soms inconsistente bedragen tussen 't apart geëxtraheerde
-    // totaal en de regelitems. Trust de regels (itemized data is
-    // betrouwbaarder), herbereken het totaal en rond op 2 decimalen
-    // tegen floating point drift.
-    const _lineSum = lines.reduce((s, ln) => s + (Number(ln.amount) || 0) + (Number(ln.vat_amount) || 0), 0);
-    const _invoiceTotal = Math.round(_lineSum * 100) / 100;
-    const _extractedTotal = Number(extracted.invoice_total) || 0;
-    if (_extractedTotal && Math.abs(_invoiceTotal - _extractedTotal) > 0.01) {
-      logStep(`(totaal aangepast: €${_extractedTotal.toFixed(2)} → €${_invoiceTotal.toFixed(2)} om bij regels te kloppen)`, "ok", "upload-log");
-    }
-    const payload = {
-      relation_id: parseInt(match.id, 10) || match.id,
-      number: extracted.number || `UPLOAD-${Date.now()}`,
-      invoice_date: _invDate,
-      invoice_expiry_date: _expDate,
-      collect: 0, invoice_total: _invoiceTotal, pdf: pdfB64, lines
-    };
-    const path = cfg.createPath || "/invoice/purchase/";
-    const result = await informerFetch("POST", path, payload);
+    s3 = logStep(`3/3 — Inboeken in Moneybird (contact + inkoopfactuur + PDF)...`, "active", "upload-log");
+    const { invId, contactCreated, attachErr } = await mbBookPurchaseFromExtracted(extracted, pdfB64, file.name);
+    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${invId}`;
     s3.className = "flow-step ok";
-    const tail = result?.invoice_url ? ` — ${result.invoice_url}` : "";
-    s3.textContent = `3/3 — Leverancier ${matchLabel} (relation_id ${match.id}) · factuur aangemaakt (id ${result?.invoice_id || "?"})${tail}`;
+    s3.textContent = `3/3 — Ingeboekt in Moneybird${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
+      (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : " + PDF bijgevoegd") + ` — ${invUrl}`;
 
-    if (result?.invoice_url) logStep(`Klaar! Open in Informer: ${result.invoice_url}`, "ok", "upload-log");
-    else logStep("Klaar!", "ok", "upload-log");
-    showToast("PDF verstuurd naar Informer", "ok");
+    logStep(`Klaar! Open in Moneybird: ${invUrl}`, "ok", "upload-log");
+    showToast("PDF ingeboekt in Moneybird", "ok");
 
     // Reset het file-veld zodat dezelfde PDF opnieuw kan worden geupload
     fileInput.value = "";
@@ -3720,6 +3614,82 @@ function mbPurchasePayload(inv, contactId, zeroRateId) {
   const due = inv.expiry_date || inv.date;
   if (due && due !== "0000-00-00") p.due_date = due;
   return { purchase_invoice: p };
+}
+
+// ---- Verwerk-flow: geëxtraheerde factuur → Moneybird-inkoopfactuur ----
+// Moneybird-contact bouwen uit de door Claude geëxtraheerde leveranciersvelden.
+function mbContactPayloadFromExtracted(ex) {
+  const addr = [ex.supplier_street, ex.supplier_house_number, ex.supplier_house_number_suffix].filter(s => s && String(s).trim()).join(" ").trim();
+  const email = (ex.supplier_email || "").trim();
+  const c = {
+    company_name: (ex.supplier_name || "").trim(),
+    firstname: (ex.supplier_contact_firstname || "").trim(),
+    lastname: (ex.supplier_contact_surname || "").trim(),
+    address1: addr,
+    zipcode: (ex.supplier_zip || "").replace(/\s+/g, " ").trim(),
+    city: (ex.supplier_city || "").trim(),
+    country: (ex.supplier_country || "").trim().toUpperCase(),
+    phone: (ex.supplier_phone || "").trim(),
+    tax_number: (ex.supplier_vat_number || "").trim(),
+    chamber_of_commerce: (ex.supplier_kvk || "").trim()
+  };
+  if (email) { c.send_invoices_to_email = email; c.delivery_method = "Email"; }
+  Object.keys(c).forEach(k => { if (c[k] === "" || c[k] == null) delete c[k]; });
+  return { contact: c };
+}
+
+// Contact zoeken op naam; niet gevonden → aanmaken. Geeft {id, created}.
+async function mbContactIdOrCreate(ex) {
+  const name = (ex.supplier_name || "").trim();
+  if (!name) throw new Error("Geen leveranciersnaam geëxtraheerd.");
+  let id = await mbContactId(name);
+  if (id) return { id, created: false };
+  const res = await mbFetch("contacts.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbContactPayloadFromExtracted(ex)) });
+  id = res && res.id;
+  if (!id) throw new Error("Contact aangemaakt maar geen ID teruggekregen.");
+  if (mbContactsCache) mbContactsCache[name.toLowerCase().trim()] = id;
+  return { id, created: true };
+}
+
+// Geëxtraheerde factuur → Moneybird purchase_invoice payload (bedragen excl. btw).
+function mbPurchaseFromExtractedPayload(ex, contactId, zeroRateId) {
+  const src = (ex.lines && ex.lines.length) ? ex.lines : [{ description: ex.number || "Inkoopfactuur", amount: ex.invoice_total || 0, vat_rate: 0 }];
+  const details = src.map(l => {
+    const pct = String(parseInt(l.vat_rate, 10) || 0);
+    return { description: (l.description || "Kosten").slice(0, 200), price: Number(l.amount) || 0, amount: "1", tax_rate_id: MB_PURCHASE_TAX[pct] || zeroRateId, ledger_account_id: MB_PURCHASE_LEDGER };
+  });
+  const invDate = (ex.invoice_date && ex.invoice_date !== "0000-00-00") ? ex.invoice_date : new Date().toISOString().slice(0, 10);
+  let due = (ex.invoice_expiry_date && ex.invoice_expiry_date !== "0000-00-00") ? ex.invoice_expiry_date : invDate;
+  if (due < invDate) due = invDate;
+  return { purchase_invoice: { contact_id: contactId, reference: ex.number || "", prices_are_incl_tax: false, date: invDate, due_date: due, details_attributes: details } };
+}
+
+// PDF als bijlage aan een Moneybird-inkoopfactuur hangen (multipart). Best-effort.
+async function mbAttachPdfToPurchase(invId, pdfB64, filename) {
+  const bin = atob(pdfB64);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  const fd = new FormData();
+  fd.append("file", new Blob([bytes], { type: "application/pdf" }), filename || "factuur.pdf");
+  await mbFetch(`documents/purchase_invoices/${invId}/attachment.json`, { method: "POST", body: fd });
+}
+
+// Kern van de verwerk-flow: extracted + PDF → contact (match/aanmaken) → inkoopfactuur
+// (ingeboekt, NIET betaald) → PDF als bijlage. Geeft {invId, contactCreated}.
+let _mbZeroRateCache = undefined;
+async function mbBookPurchaseFromExtracted(extracted, pdfB64, filename) {
+  const { id: contactId, created } = await mbContactIdOrCreate(extracted);
+  // 0%-inkooptarief alleen nodig als er een regel met andere btw dan 21/9 is.
+  const needsZero = ((extracted.lines && extracted.lines.length) ? extracted.lines : []).some(l => { const p = parseInt(l.vat_rate, 10) || 0; return p !== 21 && p !== 9; });
+  if (needsZero && _mbZeroRateCache === undefined) _mbZeroRateCache = await mbFindPurchase0Rate();
+  const zeroRateId = needsZero ? _mbZeroRateCache : null;
+  if (needsZero && !zeroRateId) throw new Error("Factuur heeft 0%/buitenlandse btw maar er is geen 0%-inkoop-btw-tarief in Moneybird. Maak dat eenmalig aan (Moneybird → Instellingen → Btw-tarieven → inkoop, 0%).");
+  const res = await mbFetch("documents/purchase_invoices.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbPurchaseFromExtractedPayload(extracted, contactId, zeroRateId)) });
+  const invId = res && res.id;
+  if (!invId) throw new Error("Inkoopfactuur aangemaakt maar geen ID teruggekregen.");
+  let attachErr = null;
+  if (pdfB64) { try { await mbAttachPdfToPurchase(invId, pdfB64, filename); } catch (e) { attachErr = e.message || String(e); } }
+  return { invId, contactCreated: created, attachErr };
 }
 
 async function mbLoadExistingPurchaseRefs() {
