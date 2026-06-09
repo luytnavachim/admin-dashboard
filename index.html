@@ -3163,13 +3163,18 @@ function addEntry(id) {
   const rates = projRatesOf(p);
   const sel = $("entry-rate-" + id);
   const r = (sel ? rates[parseInt(sel.value, 10)] : rates[0]) || rates[0];
-  p.entries.push({
+  const entry = {
     id: projGenId("e"), date, hours, description: desc || "Werkzaamheden",
     rateAmount: Number(r.amount) || 0, rateLabel: r.label || "",
     invoiced: false, invoiceId: null
-  });
+  };
+  p.entries.push(entry);
   saveProjects();
   renderProjects();
+  // Ook direct als tijdregistratie in Moneybird zetten.
+  mbCreateTimeEntry(p, entry)
+    .then(tid => { if (tid) { entry.mbTimeEntryId = tid; saveProjects(); } showToast("Uren geboekt — ook in Moneybird", "ok"); })
+    .catch(e => showToast("Uren lokaal opgeslagen, maar Moneybird-tijdregistratie mislukte: " + (e.message || e), "err"));
 }
 
 function deleteEntry(projId, entryId) {
@@ -3789,6 +3794,34 @@ async function mbContactId(name) {
     all.forEach(c => { if (c.company_name) mbContactsCache[c.company_name.toLowerCase().trim()] = c.id; });
   }
   return mbContactsCache[(name || "").toLowerCase().trim()] || null;
+}
+
+// Moneybird-tijdregistratie: uren → time_entry, gekoppeld aan contact + (juiste) project.
+const MB_USER_ID = "211695746093679828";   // owner van deze administratie
+let mbProjectsCache = null;
+async function mbFindProjectId(number, rate) {
+  if (!number) return null;
+  if (!mbProjectsCache) { try { mbProjectsCache = await mbFetch("projects.json"); } catch { mbProjectsCache = []; } }
+  const list = Array.isArray(mbProjectsCache) ? mbProjectsCache : [];
+  const cands = list.filter(pr => (pr.name || "").startsWith(String(number)));
+  if (!cands.length) return null;
+  const byRate = cands.find(pr => Math.round(Number(pr.budget) || 0) === Math.round(Number(rate) || 0));
+  return (byRate || cands[0]).id;
+}
+async function mbCreateTimeEntry(p, entry) {
+  const contactId = await mbContactId(p.relationName);
+  if (!contactId) throw new Error(`geen Moneybird-contact voor "${p.relationName}"`);
+  const projectId = await mbFindProjectId(p.projectNumber, entry.rateAmount);
+  const s = new Date(`${entry.date}T09:00:00`);
+  const e = new Date(s.getTime() + (Number(entry.hours) || 0) * 3600 * 1000);
+  const te = {
+    started_at: s.toISOString(), ended_at: e.toISOString(),
+    description: entry.description || "Werkzaamheden", billable: true,
+    user_id: MB_USER_ID, contact_id: contactId
+  };
+  if (projectId) te.project_id = projectId;
+  const res = await mbFetch("time_entries.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ time_entry: te }) });
+  return res && res.id;
 }
 
 // Projectfactuur (uit computeProjectInvoice) → Moneybird sales_invoice payload.
