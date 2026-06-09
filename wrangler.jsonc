@@ -21,8 +21,8 @@
 		"INFORMER_AUTH_METHOD": "apikey",
 		"INFORMER_BASE_URL": "https://api.informer.eu/v1",
 		"ALLOWED_ORIGIN": "*",
-		// Moneybird-administratie-ID (niet geheim). Vul je administratie-ID in.
-		// De token zet je als Secret:  npx wrangler secret put MONEYBIRD_TOKEN
-		"MONEYBIRD_ADMIN_ID": ""
+		// Moneybird-administratie-ID (niet geheim) — staat hier zodat 'wrangler deploy'
+		// 'm niet meer wist. De token zet je als Secret: npx wrangler secret put MONEYBIRD_TOKEN
+		"MONEYBIRD_ADMIN_ID": "489478494017815934"
 	}
 }
