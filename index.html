@@ -557,7 +557,9 @@ body { max-width: 1280px; }
       <h2>Synchronisatie <span class="muted" id="proj-sync-status" style="font-weight:400;"></span></h2>
       <div class="row-btns">
         <button class="btn" onclick="manualSync()">Nu synchroniseren</button>
+        <button class="btn" onclick="backfillTimeEntries()" title="Zet alle al geboekte uren die nog niet in Moneybird staan eenmalig als tijdregistratie in Moneybird">Bestaande uren → Moneybird</button>
       </div>
+      <div id="backfill-status" class="muted" style="font-size:13px;margin-top:8px;"></div>
     </div>
 
     <label style="display:flex;align-items:center;gap:6px;margin:0 0 14px;cursor:pointer;font-size:13px;">
@@ -3822,6 +3824,33 @@ async function mbCreateTimeEntry(p, entry) {
   if (projectId) te.project_id = projectId;
   const res = await mbFetch("time_entries.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ time_entry: te }) });
   return res && res.id;
+}
+
+// Eenmalige migratie: alle bestaande uren-boekingen die nog geen Moneybird-tijdregistratie
+// hebben (mbTimeEntryId leeg) alsnog naar Moneybird zetten. Idempotent: al gemigreerde
+// boekingen worden overgeslagen.
+async function backfillTimeEntries() {
+  const projects = (projectsData && projectsData.projects) || [];
+  const todo = [];
+  projects.forEach(p => (p.entries || []).forEach(e => { if (!e.mbTimeEntryId) todo.push({ p, e }); }));
+  if (!todo.length) { showToast("Geen uren te migreren — alles staat al in Moneybird", "ok"); return; }
+  if (!confirm(`${todo.length} uren-boeking(en) nog niet in Moneybird. Nu eenmalig overzetten als tijdregistratie?`)) return;
+  const st = $("backfill-status");
+  let ok = 0, fail = 0;
+  const errs = [];
+  for (let i = 0; i < todo.length; i++) {
+    const { p, e } = todo[i];
+    if (st) st.textContent = `Bezig… ${i + 1}/${todo.length} (${ok} gelukt, ${fail} mislukt)`;
+    try {
+      const tid = await mbCreateTimeEntry(p, e);
+      if (tid) { e.mbTimeEntryId = tid; ok++; saveProjects(); }
+      else { fail++; errs.push(`${p.name || p.projectNumber}: geen id terug`); }
+    } catch (err) {
+      fail++; errs.push(`${p.name || p.projectNumber} (${e.date}): ${err.message || err}`);
+    }
+  }
+  if (st) st.textContent = `Klaar: ${ok} gezet, ${fail} mislukt.` + (errs.length ? " " + errs.slice(0, 5).join(" · ") : "");
+  showToast(`Migratie klaar — ${ok} gezet, ${fail} mislukt`, fail ? "err" : "ok");
 }
 
 // Projectfactuur (uit computeProjectInvoice) → Moneybird sales_invoice payload.
