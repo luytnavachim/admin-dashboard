@@ -697,6 +697,17 @@ body { max-width: 1280px; }
       </div>
       <div id="rec-list" style="margin-top:12px;"><p class="muted">Klik "Scan" om te beginnen. Dit kan even duren — elke factuur-PDF wordt gelezen (Claude).</p></div>
     </div>
+
+    <details class="section" id="inkoop-rules-details">
+      <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Inkoop-categorieregels (automatisch boeken op de juiste categorie)</summary>
+      <p class="muted" style="margin-top:8px;">Bij het inboeken van een inkoopfactuur kiest het dashboard de grootboek-categorie op basis van deze regels (match op leveranciersnaam + omschrijving). Geen match → "Ongecategoriseerde uitgaven". Regels staan lokaal in deze browser.</p>
+      <div id="inkoop-rules-list"></div>
+      <div class="entry-add" style="margin-top:8px;">
+        <div class="field desc" style="margin:0;"><input id="inkoop-rule-keyword" type="text" placeholder="Trefwoord, bv. 'hetzner' of 'knab'"></div>
+        <div class="field" style="margin:0;min-width:220px;"><select id="inkoop-rule-cat"></select></div>
+        <button class="btn" onclick="addInkoopRule()">+ Regel</button>
+      </div>
+    </details>
   </section>
 
   <!-- ====== TAB: Instellingen ====== -->
@@ -1584,6 +1595,9 @@ function switchTab(name) {
   }
   if (name === "instellingen" && account) {
     renderCatSetup().catch(e => console.warn("cats:", e));
+  }
+  if (name === "moneybird" && account) {
+    renderInkoopRules().catch(e => console.warn("inkoopRules:", e));
   }
 }
 document.addEventListener("click", (ev) => {
@@ -2879,6 +2893,65 @@ async function attachToInvoice(btn) {
 // ============================================================
 //  MAILBOX ↔ MONEYBIRD CONTROLE (reconciliatie)
 // ============================================================
+// ---- Inkoop-categorisatie: trefwoord → grootboek (toegepast bij inboeken) ----
+const INKOOP_LS_KEY = "inkoop_rules_v1";
+function loadInkoopRules() { try { const r = JSON.parse(localStorage.getItem(INKOOP_LS_KEY)); if (Array.isArray(r)) return r; } catch {} return []; }
+function saveInkoopRules() { localStorage.setItem(INKOOP_LS_KEY, JSON.stringify(inkoopRules)); }
+let inkoopRules = loadInkoopRules();
+let mbPurchaseLedgerMap = null;   // lowercase naam -> id
+let mbPurchaseLedgerList = null;  // [{id,name}]
+async function mbLoadPurchaseLedgers(force) {
+  if (mbPurchaseLedgerMap && !force) return mbPurchaseLedgerMap;
+  const all = await mbFetch("ledger_accounts.json");
+  mbPurchaseLedgerMap = {}; mbPurchaseLedgerList = [];
+  (Array.isArray(all) ? all : []).forEach(l => {
+    if (l.active && Array.isArray(l.allowed_document_types) && l.allowed_document_types.includes("purchase_invoice")) {
+      mbPurchaseLedgerMap[(l.name || "").toLowerCase().trim()] = l.id;
+      mbPurchaseLedgerList.push({ id: l.id, name: l.name });
+    }
+  });
+  mbPurchaseLedgerList.sort((a, b) => a.name.localeCompare(b.name));
+  return mbPurchaseLedgerMap;
+}
+function mbResolvePurchaseLedgerId(ex, desc) {
+  if (!mbPurchaseLedgerMap || !inkoopRules.length) return null;
+  const hay = `${(ex && ex.supplier_name) || ""} ${desc || ""}`.toLowerCase();
+  for (const r of inkoopRules) {
+    const kw = (r.kw || "").toLowerCase().trim();
+    if (kw && hay.includes(kw)) { const id = mbPurchaseLedgerMap[(r.cat || "").toLowerCase().trim()]; if (id) return id; }
+  }
+  return null;
+}
+async function renderInkoopRules() {
+  try { await mbLoadPurchaseLedgers(); } catch (e) {}
+  const sel = $("inkoop-rule-cat");
+  if (sel) sel.innerHTML = `<option value="">— kies categorie —</option>` + (mbPurchaseLedgerList || []).map(l => `<option value="${escapeHtml(l.name)}">${escapeHtml(l.name)}</option>`).join("");
+  const box = $("inkoop-rules-list"); if (!box) return;
+  if (!inkoopRules.length) { box.innerHTML = '<p class="muted">Nog geen regels — facturen gaan naar "Ongecategoriseerde uitgaven" tenzij een regel matcht.</p>'; return; }
+  box.innerHTML = inkoopRules.map((r, i) => {
+    const exists = mbPurchaseLedgerMap && mbPurchaseLedgerMap[(r.cat || "").toLowerCase().trim()];
+    const miss = exists ? "" : ' <span class="badge warn">categorie ontbreekt</span>';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:5px 0;border-bottom:1px solid rgba(127,127,127,.15);">
+      <span style="flex:1;font-size:13px;"><strong>${escapeHtml(r.kw)}</strong> &rarr; ${escapeHtml(r.cat)}${miss}</span>
+      <button class="icon-btn" title="Verwijderen" onclick="deleteInkoopRule(${i})">&times;</button></div>`;
+  }).join("");
+}
+function addInkoopRule() {
+  const kwEl = $("inkoop-rule-keyword"); const kw = (kwEl.value || "").trim();
+  const sel = $("inkoop-rule-cat"); const cat = sel ? sel.value : "";
+  if (!kw) { showToast("Vul een trefwoord in", "err"); return; }
+  if (!cat) { showToast("Kies een categorie", "err"); return; }
+  inkoopRules.push({ kw: kw.toLowerCase(), cat }); saveInkoopRules(); kwEl.value = ""; renderInkoopRules();
+}
+function deleteInkoopRule(i) { inkoopRules.splice(i, 1); saveInkoopRules(); renderInkoopRules(); }
+
+// Mail naar de Verwerkt-map verplaatsen (best-effort, no-op als 'ie er al staat).
+async function recMoveMail(email) {
+  const fid = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
+  if (email.parentFolderId && email.parentFolderId === fid) return;
+  await moveMessage(email._mailbox, email.id, fid);
+}
+
 let recRows = [];
 let recMbOnly = [];
 async function recGatherMails(months) {
@@ -3012,8 +3085,23 @@ function renderRec() {
       </div>`;
     }).join("");
   } else html += '<p class="muted">Geen.</p>';
-  const compleet = recRows.filter(r => r.status === "compleet").length;
-  html += `<h3 style="margin:16px 0 4px;font-size:14px;">Compleet (al in Moneybird mét bijlage) <span class="count">${compleet}</span></h3>`;
+  // Compleet (factuur + bijlage aanwezig): mail mag naar Verwerkt-map.
+  const compRows = recRows.filter(r => r.status === "compleet");
+  html += `<h3 style="margin:16px 0 4px;font-size:14px;">Compleet in Moneybird — mail naar Verwerkt <span class="count">${compRows.length}</span></h3>`;
+  if (compRows.length) {
+    html += `<div class="row-btns" style="margin-bottom:4px;"><button class="btn" onclick="recMoveAllCompleet()">Verplaats alle naar Verwerkt</button></div>`;
+    html += compRows.map(r => {
+      const sup = (r.extracted && r.extracted.supplier_name) || "?";
+      const when = new Date(r.email.receivedDateTime).toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+      return `<div class="reccmp-row" data-id="${escapeHtml(r.email.id)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(127,127,127,.12);flex-wrap:wrap;">
+        <span style="width:78px;font-size:12px;color:var(--muted);">${escapeHtml(when)}</span>
+        <span style="flex:1;min-width:200px;font-size:13px;">${escapeHtml(sup)} · ${escapeHtml(r.ref || "")}</span>
+        <button class="btn" onclick="recMoveCompleet('${escapeHtml(r.email.id)}')">→ Verwerkt</button>
+      </div>`;
+    }).join("");
+  } else html += '<p class="muted">Geen.</p>';
+  const verplaatst = recRows.filter(r => r.status === "verplaatst").length;
+  if (verplaatst) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${verplaatst} mail(s) verplaatst naar ${escapeHtml(PROCESSED_FOLDER_NAME)}. ✓</p>`;
   const probs = recRows.filter(r => r.status === "fout" || r.status === "geen-pdf");
   if (probs.length) {
     html += `<h3 style="margin:16px 0 4px;font-size:14px;">Niet kunnen lezen <span class="count">${probs.length}</span></h3>`;
@@ -3026,14 +3114,34 @@ async function recDoOne(emailId, action, silent) {
   try {
     if (action === "book") {
       const res = await mbBookPurchaseFromExtracted(r.extracted, r.pdfB64, r.pdfName);
-      r.status = "compleet"; r.mbId = res.invId; r.pdfB64 = null;
+      r.mbId = res.invId; r.pdfB64 = null;
     } else if (action === "attach") {
       await mbAttachPdfToPurchase(r.mbId, r.pdfB64, r.pdfName);
-      r.status = "compleet"; r.pdfB64 = null;
+      r.pdfB64 = null;
     }
-    if (!silent) { showToast(action === "book" ? "Ingeboekt + PDF" : "Bijlage gekoppeld", "ok"); renderRec(); }
+    // Factuur is nu compleet in Moneybird → mail naar Verwerkt-map verplaatsen.
+    let moved = false;
+    try { await recMoveMail(r.email); moved = true; } catch (e) {}
+    r.status = moved ? "verplaatst" : "compleet";
+    if (!silent) { showToast((action === "book" ? "Ingeboekt + PDF" : "Bijlage gekoppeld") + (moved ? " · mail verplaatst" : ""), "ok"); renderRec(); }
     return true;
   } catch (e) { if (!silent) showToast("Mislukt: " + (e.message || e), "err"); throw e; }
+}
+async function recMoveCompleet(emailId) {
+  const r = recRows.find(x => x.email.id === emailId); if (!r) return;
+  try { await recMoveMail(r.email); r.status = "verplaatst"; showToast("Mail verplaatst naar " + PROCESSED_FOLDER_NAME, "ok"); renderRec(); }
+  catch (e) { showToast("Verplaatsen mislukt: " + (e.message || e), "err"); }
+}
+async function recMoveAllCompleet() {
+  const todo = recRows.filter(r => r.status === "compleet");
+  if (!todo.length) return;
+  if (!confirm(`${todo.length} verwerkte mail(s) verplaatsen naar de map "${PROCESSED_FOLDER_NAME}"?`)) return;
+  let ok = 0, fail = 0;
+  for (const r of todo) {
+    try { await recMoveMail(r.email); r.status = "verplaatst"; ok++; } catch (e) { fail++; }
+    await new Promise(x => setTimeout(x, 150));
+  }
+  renderRec(); showToast(`Klaar: ${ok} verplaatst${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
 }
 async function recAttachMbOnly(btn) {
   const row = btn.closest(".recmb-row");
@@ -4127,12 +4235,16 @@ function mbPurchaseFromExtractedPayload(ex, contactId, zeroRateId) {
   const src = (ex.lines && ex.lines.length) ? ex.lines : [{ description: ex.number || "Inkoopfactuur", amount: ex.invoice_total || 0, vat_rate: 0 }];
   const details = src.map(l => {
     const pct = String(parseInt(l.vat_rate, 10) || 0);
-    return { description: (l.description || "Kosten").slice(0, 200), price: Number(l.amount) || 0, amount: "1", tax_rate_id: MB_PURCHASE_TAX[pct] || zeroRateId, ledger_account_id: MB_PURCHASE_LEDGER };
+    const ledger = mbResolvePurchaseLedgerId(ex, l.description) || MB_PURCHASE_LEDGER;
+    return { description: (l.description || "Kosten").slice(0, 200), price: Number(l.amount) || 0, amount: "1", tax_rate_id: MB_PURCHASE_TAX[pct] || zeroRateId, ledger_account_id: ledger };
   });
   const invDate = (ex.invoice_date && ex.invoice_date !== "0000-00-00") ? ex.invoice_date : new Date().toISOString().slice(0, 10);
   let due = (ex.invoice_expiry_date && ex.invoice_expiry_date !== "0000-00-00") ? ex.invoice_expiry_date : invDate;
   if (due < invDate) due = invDate;
-  return { purchase_invoice: { contact_id: contactId, reference: ex.number || "", prices_are_incl_tax: false, date: invDate, due_date: due, details_attributes: details } };
+  const pi = { contact_id: contactId, reference: ex.number || "", prices_are_incl_tax: false, date: invDate, due_date: due, details_attributes: details };
+  const cur = (ex.currency || "EUR").toUpperCase().trim();
+  if (cur && cur !== "EUR") pi.currency = cur;   // bv. USD; Moneybird rekent de koers
+  return { purchase_invoice: pi };
 }
 
 // PDF als bijlage aan een Moneybird-inkoopfactuur hangen (multipart). Best-effort.
@@ -4149,6 +4261,7 @@ async function mbAttachPdfToPurchase(invId, pdfB64, filename) {
 // (ingeboekt, NIET betaald) → PDF als bijlage. Geeft {invId, contactCreated}.
 let _mbZeroRateCache = undefined;
 async function mbBookPurchaseFromExtracted(extracted, pdfB64, filename) {
+  try { await mbLoadPurchaseLedgers(); } catch (e) { /* categorisatie best-effort */ }
   const { id: contactId, created } = await mbContactIdOrCreate(extracted);
   // 0%-inkooptarief alleen nodig als er een regel met andere btw dan 21/9 is.
   const needsZero = ((extracted.lines && extracted.lines.length) ? extracted.lines : []).some(l => { const p = parseInt(l.vat_rate, 10) || 0; return p !== 21 && p !== 9; });
