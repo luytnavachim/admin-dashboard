@@ -2979,7 +2979,7 @@ async function recGatherMails(ym) {
   const seen = new Set(); const out = [];
   for (const m of MAILBOXES) {
     const filter = `hasAttachments eq true and receivedDateTime ge ${startISO} and receivedDateTime lt ${endISO}`;
-    let url = `${userPath(m)}/messages?$filter=${encodeURIComponent(filter)}&$top=100&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+    let url = `${userPath(m)}/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
     let guard = 0;
     while (url && guard++ < 12) {
       let r; try { r = await graph("GET", url); } catch (e) { break; }
