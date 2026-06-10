@@ -514,6 +514,7 @@ body { max-width: 1280px; }
 
       <div class="row-btns">
         <button class="btn primary" id="send-btn" onclick="sendSelectedToMoneybird()" disabled>Inboeken in Moneybird &rarr;</button>
+        <button class="btn" id="fwd-btn" onclick="forwardSelectedToMoneybird()" disabled title="Stuurt de mail mét PDF door naar het Moneybird inkomend-adres; Moneybird doet zelf scan &amp; herken">Doorsturen naar Moneybird</button>
         <button class="btn" id="skip-btn" onclick="skipSelected()" disabled title="Verplaatst de mail naar Archive zonder factuur in Moneybird in te boeken">Negeren (geen factuur)</button>
       </div>
       <div id="flow-log" style="margin-top: 12px;"></div>
@@ -797,6 +798,7 @@ body { max-width: 1280px; }
 const CLIENT_ID = "866230d7-2236-4814-af6f-cffb47d3ab08";
 const TENANT = "common";
 const MONEYMONK_ADDRESS = "triplet-it@inkomend.moneymonk.nl";
+const MONEYBIRD_INBOX = "triplet-it-579bdb3f@inkomend.moneybird.nl";  // Moneybird "Inkomend"-adres (scan & herken)
 const PROCESSED_FOLDER_NAME = "MoneyMonk Verwerkt";
 
 // All mailboxes to monitor. The first one is the "primary" — used for calendar.
@@ -810,7 +812,7 @@ const MAILBOXES = [
   { email: "micha@vantuyl.it",       label: "Van Tuyl",    color: "#5249c4" }
 ];
 
-const SCOPES = ["Mail.ReadWrite", "Mail.ReadWrite.Shared", "Calendars.Read", "User.Read"];
+const SCOPES = ["Mail.ReadWrite", "Mail.ReadWrite.Shared", "Mail.Send", "Mail.Send.Shared", "Calendars.Read", "User.Read"];
 
 const SELF_DOMAINS = ["triplet-it.nl"];
 const SELF_EMAILS = ["michavantuyl@gmail.com", ...MAILBOXES.map(m => m.email.toLowerCase())];
@@ -1965,6 +1967,7 @@ function selectEmail(id) {
   selectedEmailId = id;
   document.querySelectorAll(".email-pick").forEach(el => el.classList.toggle("selected", el.dataset.id === id));
   $("send-btn").disabled = false;
+  if ($("fwd-btn")) $("fwd-btn").disabled = false;
   $("skip-btn").disabled = false;
 }
 
@@ -2207,6 +2210,27 @@ async function sendRowToMoneybird(btn, id, mboxEmail) {
     if (tempFlowLog) tempFlowLog.remove();
     if (tempSendBtn) tempSendBtn.remove();
   }
+}
+
+async function forwardSelectedToMoneybird() {
+  const email = invoiceEmails.find(e => e.id === selectedEmailId);
+  if (!email) { showToast("Geen mail geselecteerd", "err"); return; }
+  const btn = $("fwd-btn"); const orig = btn ? btn.textContent : "";
+  if (btn) { btn.disabled = true; btn.textContent = "Bezig..."; }
+  try {
+    await forwardToMoneybird(email._mailbox, email.id);
+    let moved = false;
+    try {
+      const fid = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
+      if (!(email.parentFolderId && email.parentFolderId === fid)) await moveMessage(email._mailbox, email.id, fid);
+      moved = true;
+    } catch (e) {}
+    showToast("Doorgestuurd naar Moneybird" + (moved ? " · mail verplaatst" : ""), "ok");
+    invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
+    selectedEmailId = null; renderEmails();
+  } catch (e) {
+    showToast("Doorsturen mislukt: " + (e.message || e), "err");
+  } finally { if (btn) { btn.disabled = false; btn.textContent = orig; } }
 }
 
 async function skipSelected() {
@@ -2949,6 +2973,15 @@ async function recMoveMail(email) {
   await moveMessage(email._mailbox, email.id, fid);
 }
 
+// Factuurmail (incl. PDF-bijlage) doorsturen naar het Moneybird inkomend-adres,
+// zodat Moneybird zelf scan & herken doet. Vereist Mail.Send(.Shared)-scope.
+async function forwardToMoneybird(mbox, messageId, comment) {
+  await graph("POST", `${userPath(mbox)}/messages/${messageId}/forward`, {
+    comment: comment || "Doorgestuurd vanuit admin-dashboard voor Moneybird scan & herken.",
+    toRecipients: [{ emailAddress: { address: MONEYBIRD_INBOX } }]
+  });
+}
+
 let recRows = [];
 let recMbOnly = [];
 
@@ -3070,7 +3103,7 @@ function recRowHtml(r) {
   const mbox = r.email._mailbox ? (r.email._mailbox.label || r.email._mailbox.email) : "";
   const when = new Date(r.email.receivedDateTime).toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
   let action = "";
-  if (r.status === "book") action = `<button class="btn" onclick="recDoOne('${escapeHtml(r.email.id)}','book')">Inboeken + PDF</button>`;
+  if (r.status === "book") action = `<button class="btn" onclick="recDoOne('${escapeHtml(r.email.id)}','book')">Inboeken + PDF</button> <button class="btn" onclick="recForwardOne('${escapeHtml(r.email.id)}')" title="Doorsturen naar Moneybird i.p.v. zelf inboeken (Moneybird herkent 'm)">Doorsturen</button>`;
   else if (r.status === "attach") action = `<button class="btn" onclick="recDoOne('${escapeHtml(r.email.id)}','attach')">Koppel bijlage</button>`;
   action += ` <button class="btn" onclick="recIgnoreRow('${escapeHtml(r.email.id)}')" title="Negeren — verschijnt niet meer">Negeer</button>`;
   return `<div class="rec-row" data-id="${escapeHtml(r.email.id)}" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
@@ -3083,14 +3116,14 @@ function renderRec() {
   const list = $("rec-list"); if (!list) return;
   if (!recRows.length) { list.innerHTML = '<p class="muted">Geen factuurmails gevonden in deze periode.</p>'; return; }
   const groups = [
-    ["book", "Ontbreekt in Moneybird — inboeken", "recBookAll()", "Boek alle ontbrekende"],
-    ["attach", "Staat in Moneybird zónder bijlage — koppel PDF", "recAttachAll()", "Koppel alle bijlagen"]
+    ["book", "Ontbreekt in Moneybird — inboeken of doorsturen", `<button class="btn" onclick="recBookAll()">Boek alle (incl. PDF)</button> <button class="btn" onclick="recForwardAll()">Stuur alle door naar Moneybird</button>`],
+    ["attach", "Staat in Moneybird zónder bijlage — koppel PDF", `<button class="btn" onclick="recAttachAll()">Koppel alle bijlagen</button>`]
   ];
   let html = "";
-  for (const [stt, title, bulkFn, bulkLabel] of groups) {
+  for (const [stt, title, bulkBtns] of groups) {
     const rows = recRows.filter(r => r.status === stt);
     html += `<h3 style="margin:16px 0 4px;font-size:14px;">${title} <span class="count">${rows.length}</span></h3>`;
-    if (rows.length) { html += `<div class="row-btns" style="margin-bottom:4px;"><button class="btn" onclick="${bulkFn}">${bulkLabel}</button></div>` + rows.map(recRowHtml).join(""); }
+    if (rows.length) { html += `<div class="row-btns" style="margin-bottom:4px;">${bulkBtns}</div>` + rows.map(recRowHtml).join(""); }
     else html += '<p class="muted">Geen.</p>';
   }
   // Moneybird-first: zonder bijlage én geen mail gevonden — handmatig uploaden.
@@ -3125,6 +3158,8 @@ function renderRec() {
   } else html += '<p class="muted">Geen.</p>';
   const verplaatst = recRows.filter(r => r.status === "verplaatst").length;
   if (verplaatst) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${verplaatst} mail(s) verplaatst naar ${escapeHtml(PROCESSED_FOLDER_NAME)}. ✓</p>`;
+  const doorgestuurd = recRows.filter(r => r.status === "doorgestuurd").length;
+  if (doorgestuurd) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${doorgestuurd} doorgestuurd naar Moneybird (verschijnt daar bij "Inkomende documenten" zodra scan & herken klaar is). ✓</p>`;
   const genegeerd = recRows.filter(r => r.status === "genegeerd").length;
   if (genegeerd) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${genegeerd} genegeerd. (Gebruik "Negeerlijst wissen" om ze weer te tonen.)</p>`;
   const probs = recRows.filter(r => r.status === "fout" || r.status === "geen-pdf");
@@ -3151,6 +3186,27 @@ async function recDoOne(emailId, action, silent) {
     if (!silent) { showToast((action === "book" ? "Ingeboekt + PDF" : "Bijlage gekoppeld") + (moved ? " · mail verplaatst" : ""), "ok"); renderRec(); }
     return true;
   } catch (e) { if (!silent) showToast("Mislukt: " + (e.message || e), "err"); throw e; }
+}
+async function recForwardOne(emailId, silent) {
+  const r = recRows.find(x => x.email.id === emailId); if (!r) return;
+  try {
+    await forwardToMoneybird(r.email._mailbox, r.email.id);
+    let moved = false; try { await recMoveMail(r.email); moved = true; } catch (e) {}
+    r.status = "doorgestuurd";
+    if (!silent) { showToast("Doorgestuurd naar Moneybird" + (moved ? " · mail verplaatst" : ""), "ok"); renderRec(); }
+    return true;
+  } catch (e) { if (!silent) showToast("Doorsturen mislukt: " + (e.message || e), "err"); throw e; }
+}
+async function recForwardAll() {
+  const todo = recRows.filter(r => r.status === "book");
+  if (!todo.length) return;
+  if (!confirm(`${todo.length} ontbrekende factu(u)r(en) doorsturen naar Moneybird (scan & herken)? Je bevestigt ze daarna in Moneybird zelf.`)) return;
+  let ok = 0, fail = 0;
+  for (const r of todo) {
+    try { await recForwardOne(r.email.id, true); ok++; } catch (e) { fail++; }
+    await new Promise(x => setTimeout(x, 300));
+  }
+  renderRec(); showToast(`Klaar: ${ok} doorgestuurd${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
 }
 function recIgnoreRow(emailId) {
   const r = recRows.find(x => x.email.id === emailId); if (!r) return;
