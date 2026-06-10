@@ -681,7 +681,7 @@ body { max-width: 1280px; }
 
     <div class="section">
       <h2>Grootboek-categorieën aanmaken (beginbalans)</h2>
-      <p class="muted">Maakt de categorieën aan die je voor de beginbalans nodig hebt en die nog niet in Moneybird bestaan. Groen = bestaat al, oranje = ontbreekt. Het juiste type (vaste activa, eigen vermogen, voorziening, schuld) staat erbij; de fiscale RGS-koppeling kun je later in Moneybird of met je boekhouder fijnslijpen.</p>
+      <p class="muted">Maakt de categorieën aan die je voor de beginbalans nodig hebt en die nog niet in Moneybird bestaan. Groen = bestaat al, oranje = ontbreekt. Moneybird vereist bij het aanmaken een <strong>RGS 3.5-code</strong>; die staat per regel ingevuld en is aanpasbaar. Keurt Moneybird een code af? Zoek de juiste op via <a href="https://www.boekhoudplaza.nl/cmm/rgs/referentiegrootboekschema_rgs.php" target="_blank" rel="noopener">boekhoudplaza.nl</a>, plak 'm in het veld en klik opnieuw op "Maak aan". De taxonomie kun je later met je boekhouder fijnslijpen.</p>
       <div class="row-btns">
         <button class="btn" onclick="renderCatSetup(true)">Vernieuwen</button>
         <button class="btn primary" onclick="createMissingCats()" id="cats-create-btn" disabled>Maak alle ontbrekende aan</button>
@@ -2684,19 +2684,20 @@ async function bookAllSuggested() {
 // ============================================================
 //  GROOTBOEK-CATEGORIEËN AANMAKEN (beginbalans) — ledger_accounts
 // ============================================================
-// Naam + Moneybird account_type voor de balansposten uit de jaarrekening 2024.
+// Naam + Moneybird account_type + RGS 3.5-code voor de balansposten uit de jaarrekening 2024.
+// De RGS-code is per regel bewerkbaar; afgekeurd door Moneybird? Pas 'm aan (boekhoudplaza.nl).
 const BEGIN_CATS = [
-  { name: "Vervoermiddelen", type: "non_current_assets", note: "Auto (materiële vaste activa)" },
-  { name: "Inventaris", type: "non_current_assets", note: "Inventaris/computers (materiële vaste activa)" },
-  { name: "Lening directie", type: "non_current_assets", note: "Langlopende vordering op de DGA" },
-  { name: "Rekening-courant DGA", type: "current_assets", note: "Vordering op de DGA" },
-  { name: "Aandelenkapitaal", type: "equity", note: "Eigen vermogen" },
-  { name: "Agioreserve", type: "equity", note: "Eigen vermogen" },
-  { name: "Overige reserves", type: "equity", note: "Eigen vermogen (incl. resultaat)" },
-  { name: "Lijfrente-/Pensioenvoorziening", type: "provisions", note: "Voorziening" },
-  { name: "Financial lease", type: "non_current_liabilities", note: "Langlopende schuld" },
-  { name: "Te betalen vennootschapsbelasting", type: "current_liabilities", note: "Kortlopende schuld" },
-  { name: "Loonheffingen", type: "current_liabilities", note: "Kortlopende schuld" }
+  { name: "Vervoermiddelen", type: "non_current_assets", rgs: "BMvaTevVvp", note: "Auto (materiële vaste activa)" },
+  { name: "Inventaris", type: "non_current_assets", rgs: "BMvaBeiVvp", note: "Inventaris/computers (MVA)" },
+  { name: "Lening directie", type: "non_current_assets", rgs: "BFvaLenLen", note: "Langlopende vordering op de DGA" },
+  { name: "Rekening-courant DGA", type: "current_assets", rgs: "BVorOvrOvk", note: "Vordering op de DGA — taxonomie evt. aanpassen" },
+  { name: "Aandelenkapitaal", type: "equity", rgs: "BEivGokGea", note: "Eigen vermogen (normale aandelen)" },
+  { name: "Agioreserve", type: "equity", rgs: "BEivAgiAgi", note: "Eigen vermogen" },
+  { name: "Overige reserves", type: "equity", rgs: "BEivOvrOrs", note: "Eigen vermogen (incl. resultaat)" },
+  { name: "Lijfrente-/Pensioenvoorziening", type: "provisions", rgs: "BVrzOvpOvp", note: "Voorziening — taxonomie evt. aanpassen" },
+  { name: "Financial lease", type: "non_current_liabilities", rgs: "BLasFlvFle", note: "Langlopende schuld" },
+  { name: "Te betalen vennootschapsbelasting", type: "current_liabilities", rgs: "", note: "Kortlopende schuld" },
+  { name: "Loonheffingen", type: "current_liabilities", rgs: "BSchOvsOvs", note: "Kortlopende schuld — taxonomie evt. aanpassen" }
 ];
 let mbAllLedgers = null;
 async function mbLoadAllLedgers(force) {
@@ -2719,45 +2720,56 @@ async function renderCatSetup(force) {
     const exists = ledgerExistsByName(c.name);
     if (!exists) missing++;
     const badge = exists ? '<span class="badge ok">bestaat</span>' : '<span class="badge warn">ontbreekt</span>';
-    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(127,127,127,.15);">
-      <span style="flex:1;font-size:13px;"><strong>${escapeHtml(c.name)}</strong> <span class="muted">· ${escapeHtml(c.note)}</span></span>
-      ${badge}
-      ${exists ? "" : `<button class="btn" onclick="createOneCat('${escapeHtml(c.name)}')">Maak aan</button>`}
+    const right = exists ? badge :
+      `${badge}
+       <input class="cat-rgs" data-name="${escapeHtml(c.name)}" value="${escapeHtml(c.rgs)}" title="RGS 3.5-code (aanpasbaar)" placeholder="RGS-code" style="width:108px;font-size:12px;">
+       <button class="btn" onclick="createOneCat('${escapeHtml(c.name)}')">Maak aan</button>`;
+    return `<div class="cat-row" data-name="${escapeHtml(c.name)}" style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
+      <span style="flex:1;min-width:220px;font-size:13px;"><strong>${escapeHtml(c.name)}</strong> <span class="muted">· ${escapeHtml(c.note)}</span></span>
+      ${right}
     </div>`;
   }).join("");
   if ($("cats-create-btn")) $("cats-create-btn").disabled = missing === 0;
   if ($("cats-status")) $("cats-status").textContent = missing ? `${missing} ontbreekt` : "alles aanwezig ✓";
 }
-async function mbCreateLedger(name, type) {
+function catRgsInput(name) {
+  return document.querySelector('.cat-rgs[data-name="' + String(name).replace(/"/g, '') + '"]');
+}
+async function mbCreateLedger(name, type, rgs) {
+  const body = { ledger_account: { name, account_type: type } };
+  if (rgs && rgs.trim()) body.rgs_code = rgs.trim();
   const res = await mbFetch("ledger_accounts.json", {
     method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ledger_account: { name, account_type: type } })
+    body: JSON.stringify(body)
   });
   mbBankLedgers = null;   // dropdowns op de Afboeken-tab herladen
   return res;
 }
 async function createOneCat(name) {
   const c = BEGIN_CATS.find(x => x.name === name); if (!c) return;
+  const inp = catRgsInput(name);
+  const rgs = (inp && inp.value.trim()) || c.rgs;
   try {
-    await mbCreateLedger(c.name, c.type);
+    await mbCreateLedger(c.name, c.type, rgs);
     showToast(`Categorie "${c.name}" aangemaakt`, "ok");
     await renderCatSetup(true);
   } catch (e) { showToast(`Aanmaken mislukt: ${e.message || e}`, "err"); }
 }
 async function createMissingCats() {
-  try { await mbLoadAllLedgers(true); } catch (e) {}
   const todo = BEGIN_CATS.filter(c => !ledgerExistsByName(c.name));
   if (!todo.length) { showToast("Alle categorieën bestaan al", "ok"); return; }
   if (!confirm(`${todo.length} ontbrekende categorie(ën) aanmaken in Moneybird?`)) return;
+  // RGS-codes uit de invoervelden lezen vóór de lijst opnieuw rendert.
+  const plan = todo.map(c => { const inp = catRgsInput(c.name); return { c, rgs: (inp && inp.value.trim()) || c.rgs }; });
   const btn = $("cats-create-btn"); if (btn) btn.disabled = true;
   let ok = 0, fail = 0; const errs = [];
-  for (const c of todo) {
-    try { await mbCreateLedger(c.name, c.type); ok++; }
-    catch (e) { fail++; errs.push(`${c.name}: ${e.message || e}`); }
+  for (const p of plan) {
+    try { await mbCreateLedger(p.c.name, p.c.type, p.rgs); ok++; }
+    catch (e) { fail++; errs.push(`${p.c.name}: ${e.message || e}`); }
     await new Promise(r => setTimeout(r, 250));
   }
   await renderCatSetup(true);
-  if (errs.length && $("cats-status")) $("cats-status").textContent = errs.slice(0, 3).join(" · ");
+  if (errs.length && $("cats-status")) $("cats-status").textContent = errs.slice(0, 2).join(" · ");
   showToast(`Klaar: ${ok} aangemaakt${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
 }
 
