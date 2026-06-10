@@ -684,15 +684,11 @@ body { max-width: 1280px; }
       <h2>Mailbox ↔ Moneybird controle</h2>
       <p class="muted">Scant je mailboxen op inkoopfacturen en vergelijkt ze met wat in Moneybird staat. <strong>Ontbreekt</strong> een factuur? Dan kun je 'm inboeken (incl. PDF). Staat een factuur er wél maar <strong>zonder bijlage</strong>? Dan koppelt het de PDF uit de mail. Je controleert per regel en bevestigt zelf — er gaat niets automatisch.</p>
       <div class="row-btns" style="align-items:center;">
-        <label style="font-size:13px;">Periode
-          <select id="rec-period" style="margin-left:6px;">
-            <option value="3">3 maanden</option>
-            <option value="6">6 maanden</option>
-            <option value="12" selected>12 maanden</option>
-            <option value="24">24 maanden</option>
-          </select>
+        <label style="font-size:13px;">Maand
+          <select id="rec-month" style="margin-left:6px;"></select>
         </label>
-        <button class="btn primary" id="rec-run-btn" onclick="reconcileMailboxes()">Scan mailboxen &amp; vergelijk</button>
+        <button class="btn primary" id="rec-run-btn" onclick="reconcileMailboxes()">Scan deze maand &amp; vergelijk</button>
+        <button class="btn" onclick="recClearIgnored()" title="Wis de negeerlijst zodat genegeerde facturen weer verschijnen">Negeerlijst wissen</button>
         <span class="muted" id="rec-status" style="align-self:center;"></span>
       </div>
       <div id="rec-list" style="margin-top:12px;"><p class="muted">Klik "Scan" om te beginnen. Dit kan even duren — elke factuur-PDF wordt gelezen (Claude).</p></div>
@@ -1597,6 +1593,7 @@ function switchTab(name) {
     renderCatSetup().catch(e => console.warn("cats:", e));
   }
   if (name === "moneybird" && account) {
+    recPopulateMonths();
     renderInkoopRules().catch(e => console.warn("inkoopRules:", e));
   }
 }
@@ -2954,23 +2951,45 @@ async function recMoveMail(email) {
 
 let recRows = [];
 let recMbOnly = [];
-async function recGatherMails(months) {
-  const sinceMs = Date.now() - months * 30 * 86400000;
-  const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning", "receipt", "bestelbevestiging", "bon"];
+
+// Negeerlijst (persistent): keys "mail:<id>" en "mb:<id>".
+const REC_IGNORE_KEY = "rec_ignored_v1";
+function loadRecIgnored() { try { const a = JSON.parse(localStorage.getItem(REC_IGNORE_KEY)); if (Array.isArray(a)) return new Set(a); } catch {} return new Set(); }
+let recIgnored = loadRecIgnored();
+function saveRecIgnored() { localStorage.setItem(REC_IGNORE_KEY, JSON.stringify([...recIgnored])); }
+
+// Maandkeuze vullen (laatste 24 maanden).
+function recPopulateMonths() {
+  const sel = $("rec-month"); if (!sel || sel.options.length) return;
+  const now = new Date(); let html = "";
+  const mn = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    html += `<option value="${ym}">${mn[d.getMonth()]} ${d.getFullYear()}</option>`;
+  }
+  sel.innerHTML = html;
+}
+
+// Scant één maand in de hele mailbox (datumfilter i.p.v. trefwoord-zoek → snel + compleet).
+async function recGatherMails(ym) {
+  const start = new Date(ym + "-01T00:00:00Z");
+  const end = new Date(start); end.setUTCMonth(end.getUTCMonth() + 1);
+  const startISO = start.toISOString(), endISO = end.toISOString();
   const seen = new Set(); const out = [];
   for (const m of MAILBOXES) {
-    for (const q of queries) {
-      let results = [];
-      try { results = await searchMessagesAll(m, q, 50); } catch (e) { continue; }
-      for (const msg of results) {
+    const filter = `hasAttachments eq true and receivedDateTime ge ${startISO} and receivedDateTime lt ${endISO}`;
+    let url = `${userPath(m)}/messages?$filter=${encodeURIComponent(filter)}&$top=100&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+    let guard = 0;
+    while (url && guard++ < 12) {
+      let r; try { r = await graph("GET", url); } catch (e) { break; }
+      for (const msg of (r.value || [])) {
         if (seen.has(msg.id)) continue;
-        if (!msg.hasAttachments) continue;
-        if (new Date(msg.receivedDateTime).getTime() < sinceMs) continue;
         if (!looksLikeInvoice(msg)) continue;
         if (isOwnInvoice(msg)) continue;
-        msg._mailbox = msg._mailbox || m;
-        seen.add(msg.id); out.push(msg);
+        msg._mailbox = m; seen.add(msg.id); out.push(msg);
       }
+      url = r["@odata.nextLink"] || null;
     }
   }
   out.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
@@ -3013,7 +3032,8 @@ async function recProcessOne(email, mbMap) {
 async function reconcileMailboxes() {
   if (!account) { showToast("Eerst inloggen met Microsoft", "err"); return; }
   const btn = $("rec-run-btn"), st = $("rec-status"), list = $("rec-list");
-  const months = parseInt(($("rec-period") && $("rec-period").value) || "12", 10);
+  const ym = ($("rec-month") && $("rec-month").value) || "";
+  if (!ym) { showToast("Kies een maand", "err"); return; }
   btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…";
   list.innerHTML = ""; st.textContent = "Mailboxen scannen…";
   try {
@@ -3022,10 +3042,11 @@ async function reconcileMailboxes() {
     const mbMap = {};
     mbList.forEach(iv => { const k = iv.ref.toLowerCase(); if (k) mbMap[k] = { id: iv.id, hasAtt: iv.hasAtt }; });
     st.textContent = "Mailboxen scannen…";
-    const mails = await recGatherMails(months);
+    const mails = await recGatherMails(ym);
     st.textContent = `${mails.length} factuurmails gevonden · vergelijken…`;
     recRows = [];
     for (let i = 0; i < mails.length; i++) {
+      if (recIgnored.has("mail:" + mails[i].id)) { recRows.push({ email: mails[i], status: "genegeerd" }); continue; }
       st.textContent = `Lezen ${i + 1}/${mails.length}…`;
       try { recRows.push(await recProcessOne(mails[i], mbMap)); }
       catch (e) { recRows.push({ email: mails[i], status: "fout", err: e.message || String(e) }); }
@@ -3033,7 +3054,7 @@ async function reconcileMailboxes() {
     }
     // Moneybird-first: facturen zonder bijlage waarvoor geen mail gevonden is.
     const matched = new Set(recRows.filter(r => r.status === "attach" || r.status === "compleet").map(r => (r.ref || "").toLowerCase()).filter(Boolean));
-    recMbOnly = mbList.filter(iv => !iv.hasAtt && iv.ref && !matched.has(iv.ref.toLowerCase()));
+    recMbOnly = mbList.filter(iv => !iv.hasAtt && iv.ref && !matched.has(iv.ref.toLowerCase()) && !recIgnored.has("mb:" + iv.id));
     renderRec();
     const book = recRows.filter(r => r.status === "book").length;
     const att = recRows.filter(r => r.status === "attach").length;
@@ -3051,6 +3072,7 @@ function recRowHtml(r) {
   let action = "";
   if (r.status === "book") action = `<button class="btn" onclick="recDoOne('${escapeHtml(r.email.id)}','book')">Inboeken + PDF</button>`;
   else if (r.status === "attach") action = `<button class="btn" onclick="recDoOne('${escapeHtml(r.email.id)}','attach')">Koppel bijlage</button>`;
+  action += ` <button class="btn" onclick="recIgnoreRow('${escapeHtml(r.email.id)}')" title="Negeren — verschijnt niet meer">Negeer</button>`;
   return `<div class="rec-row" data-id="${escapeHtml(r.email.id)}" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
     <span style="width:78px;font-size:12px;color:var(--muted);">${escapeHtml(when)}</span>
     <span style="flex:1;min-width:200px;font-size:13px;">${escapeHtml(sup)} · ${escapeHtml(r.ref || "")} · <strong>€ ${amt.toFixed(2)}</strong> <span class="muted">· ${escapeHtml(mbox)}</span></span>
@@ -3082,6 +3104,7 @@ function renderRec() {
         <span style="flex:1;min-width:200px;font-size:13px;"><a href="${url}" target="_blank" rel="noopener" style="color:inherit;">${escapeHtml(iv.supplier)}</a> · ${escapeHtml(iv.ref)} · <strong>€ ${iv.amount.toFixed(2)}</strong></span>
         <input type="file" class="recmb-file" accept="application/pdf,.pdf" style="font-size:12px;max-width:220px;">
         <button class="btn" onclick="recAttachMbOnly(this)">Koppel PDF</button>
+        <button class="btn" onclick="recIgnoreMb('${escapeHtml(iv.id)}')" title="Negeren">Negeer</button>
       </div>`;
     }).join("");
   } else html += '<p class="muted">Geen.</p>';
@@ -3102,6 +3125,8 @@ function renderRec() {
   } else html += '<p class="muted">Geen.</p>';
   const verplaatst = recRows.filter(r => r.status === "verplaatst").length;
   if (verplaatst) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${verplaatst} mail(s) verplaatst naar ${escapeHtml(PROCESSED_FOLDER_NAME)}. ✓</p>`;
+  const genegeerd = recRows.filter(r => r.status === "genegeerd").length;
+  if (genegeerd) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${genegeerd} genegeerd. (Gebruik "Negeerlijst wissen" om ze weer te tonen.)</p>`;
   const probs = recRows.filter(r => r.status === "fout" || r.status === "geen-pdf");
   if (probs.length) {
     html += `<h3 style="margin:16px 0 4px;font-size:14px;">Niet kunnen lezen <span class="count">${probs.length}</span></h3>`;
@@ -3126,6 +3151,19 @@ async function recDoOne(emailId, action, silent) {
     if (!silent) { showToast((action === "book" ? "Ingeboekt + PDF" : "Bijlage gekoppeld") + (moved ? " · mail verplaatst" : ""), "ok"); renderRec(); }
     return true;
   } catch (e) { if (!silent) showToast("Mislukt: " + (e.message || e), "err"); throw e; }
+}
+function recIgnoreRow(emailId) {
+  const r = recRows.find(x => x.email.id === emailId); if (!r) return;
+  recIgnored.add("mail:" + emailId); saveRecIgnored(); r.status = "genegeerd"; renderRec();
+}
+function recIgnoreMb(id) {
+  recIgnored.add("mb:" + id); saveRecIgnored();
+  recMbOnly = recMbOnly.filter(iv => String(iv.id) !== String(id)); renderRec();
+}
+function recClearIgnored() {
+  if (!recIgnored.size) { showToast("Negeerlijst is al leeg", "ok"); return; }
+  if (!confirm(`${recIgnored.size} item(s) van de negeerlijst halen? Scan daarna opnieuw.`)) return;
+  recIgnored.clear(); saveRecIgnored(); showToast("Negeerlijst gewist — scan opnieuw", "ok");
 }
 async function recMoveCompleet(emailId) {
   const r = recRows.find(x => x.email.id === emailId); if (!r) return;
