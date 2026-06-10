@@ -1009,6 +1009,15 @@ async function searchMessages(mbox, query, top) {
   const r = await graph("GET", url);
   return (r.value || []).map(m => ({ ...m, _mailbox: mbox }));
 }
+// Zoekt in de HELE mailbox (alle mappen, incl. Verwerkt/Archief/subfolders).
+// Alleen voor de Moneybird-controle; eigen/verstuurde facturen worden eruit
+// gefilterd via looksLikeInvoice + isOwnInvoice.
+async function searchMessagesAll(mbox, query, top) {
+  const base = userPath(mbox);
+  const url = `${base}/messages?$search="${encodeURIComponent(query)}"&$top=${top || 25}&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+  const r = await graph("GET", url);
+  return (r.value || []).map(m => ({ ...m, _mailbox: mbox }));
+}
 async function listInbox(mbox, top) {
   const base = userPath(mbox);
   const url = `${base}/mailFolders/Inbox/messages?$top=${top || 25}&$orderby=receivedDateTime desc&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
@@ -2871,6 +2880,7 @@ async function attachToInvoice(btn) {
 //  MAILBOX ↔ MONEYBIRD CONTROLE (reconciliatie)
 // ============================================================
 let recRows = [];
+let recMbOnly = [];
 async function recGatherMails(months) {
   const sinceMs = Date.now() - months * 30 * 86400000;
   const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning", "receipt", "bestelbevestiging", "bon"];
@@ -2878,7 +2888,7 @@ async function recGatherMails(months) {
   for (const m of MAILBOXES) {
     for (const q of queries) {
       let results = [];
-      try { results = await searchMessages(m, q, 50); } catch (e) { continue; }
+      try { results = await searchMessagesAll(m, q, 50); } catch (e) { continue; }
       for (const msg of results) {
         if (seen.has(msg.id)) continue;
         if (!msg.hasAttachments) continue;
@@ -2893,15 +2903,20 @@ async function recGatherMails(months) {
   out.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
   return out;
 }
-async function recLoadMbPurchaseMap() {
-  const map = {};
+async function recLoadMbPurchaseList() {
+  const out = [];
   for (let p = 1; p <= 60; p++) {
     const b = await mbFetch(`documents/purchase_invoices.json?per_page=100&page=${p}`);
     if (!Array.isArray(b) || !b.length) break;
-    b.forEach(iv => { const ref = String(iv.reference || "").trim().toLowerCase(); if (ref) map[ref] = { id: iv.id, hasAtt: !!(iv.attachments && iv.attachments.length) }; });
+    b.forEach(iv => out.push({
+      id: iv.id, ref: String(iv.reference || "").trim(),
+      hasAtt: !!(iv.attachments && iv.attachments.length),
+      supplier: (iv.contact && iv.contact.company_name) || "Leverancier",
+      amount: Number(iv.total_price_incl_tax) || 0, date: iv.date || ""
+    }));
     if (b.length < 100) break;
   }
-  return map;
+  return out;
 }
 async function recProcessOne(email, mbMap) {
   const base = userPath(email._mailbox);
@@ -2929,9 +2944,13 @@ async function reconcileMailboxes() {
   btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…";
   list.innerHTML = ""; st.textContent = "Mailboxen scannen…";
   try {
+    st.textContent = "Moneybird-inkoopfacturen laden…";
+    const mbList = await recLoadMbPurchaseList();
+    const mbMap = {};
+    mbList.forEach(iv => { const k = iv.ref.toLowerCase(); if (k) mbMap[k] = { id: iv.id, hasAtt: iv.hasAtt }; });
+    st.textContent = "Mailboxen scannen…";
     const mails = await recGatherMails(months);
-    st.textContent = `${mails.length} factuurmails gevonden · Moneybird laden…`;
-    const mbMap = await recLoadMbPurchaseMap();
+    st.textContent = `${mails.length} factuurmails gevonden · vergelijken…`;
     recRows = [];
     for (let i = 0; i < mails.length; i++) {
       st.textContent = `Lezen ${i + 1}/${mails.length}…`;
@@ -2939,11 +2958,14 @@ async function reconcileMailboxes() {
       catch (e) { recRows.push({ email: mails[i], status: "fout", err: e.message || String(e) }); }
       await new Promise(r => setTimeout(r, 120));
     }
+    // Moneybird-first: facturen zonder bijlage waarvoor geen mail gevonden is.
+    const matched = new Set(recRows.filter(r => r.status === "attach" || r.status === "compleet").map(r => (r.ref || "").toLowerCase()).filter(Boolean));
+    recMbOnly = mbList.filter(iv => !iv.hasAtt && iv.ref && !matched.has(iv.ref.toLowerCase()));
     renderRec();
     const book = recRows.filter(r => r.status === "book").length;
     const att = recRows.filter(r => r.status === "attach").length;
     const ok = recRows.filter(r => r.status === "compleet").length;
-    st.textContent = `Klaar: ${book} ontbreekt · ${att} zonder bijlage · ${ok} compleet`;
+    st.textContent = `Klaar: ${book} ontbreekt · ${att} zonder bijlage (mail) · ${recMbOnly.length} zonder bijlage (geen mail) · ${ok} compleet`;
   } catch (e) {
     list.innerHTML = `<p class="err">Mislukt: ${escapeHtml(e.message || e)}</p>`;
   } finally { btn.disabled = false; btn.textContent = t; }
@@ -2976,6 +2998,20 @@ function renderRec() {
     if (rows.length) { html += `<div class="row-btns" style="margin-bottom:4px;"><button class="btn" onclick="${bulkFn}">${bulkLabel}</button></div>` + rows.map(recRowHtml).join(""); }
     else html += '<p class="muted">Geen.</p>';
   }
+  // Moneybird-first: zonder bijlage én geen mail gevonden — handmatig uploaden.
+  html += `<h3 style="margin:16px 0 4px;font-size:14px;">In Moneybird zónder bijlage — géén mail gevonden <span class="count">${recMbOnly.length}</span></h3>`;
+  if (recMbOnly.length) {
+    html += '<p class="muted" style="font-size:12px;">Geen bijbehorende mail in de gescande periode. Upload de PDF handmatig (uit een ander archief), of vergroot de periode.</p>';
+    html += recMbOnly.map(iv => {
+      const url = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${iv.id}`;
+      return `<div class="recmb-row" data-id="${escapeHtml(iv.id)}" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
+        <span style="width:78px;font-size:12px;color:var(--muted);">${escapeHtml(iv.date)}</span>
+        <span style="flex:1;min-width:200px;font-size:13px;"><a href="${url}" target="_blank" rel="noopener" style="color:inherit;">${escapeHtml(iv.supplier)}</a> · ${escapeHtml(iv.ref)} · <strong>€ ${iv.amount.toFixed(2)}</strong></span>
+        <input type="file" class="recmb-file" accept="application/pdf,.pdf" style="font-size:12px;max-width:220px;">
+        <button class="btn" onclick="recAttachMbOnly(this)">Koppel PDF</button>
+      </div>`;
+    }).join("");
+  } else html += '<p class="muted">Geen.</p>';
   const compleet = recRows.filter(r => r.status === "compleet").length;
   html += `<h3 style="margin:16px 0 4px;font-size:14px;">Compleet (al in Moneybird mét bijlage) <span class="count">${compleet}</span></h3>`;
   const probs = recRows.filter(r => r.status === "fout" || r.status === "geen-pdf");
@@ -2998,6 +3034,21 @@ async function recDoOne(emailId, action, silent) {
     if (!silent) { showToast(action === "book" ? "Ingeboekt + PDF" : "Bijlage gekoppeld", "ok"); renderRec(); }
     return true;
   } catch (e) { if (!silent) showToast("Mislukt: " + (e.message || e), "err"); throw e; }
+}
+async function recAttachMbOnly(btn) {
+  const row = btn.closest(".recmb-row");
+  const id = row.dataset.id;
+  const fileInput = row.querySelector(".recmb-file");
+  const file = fileInput && fileInput.files[0];
+  if (!file) { showToast("Kies eerst een PDF", "err"); return; }
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { showToast("Bestand is geen PDF", "err"); return; }
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…";
+  try {
+    await mbAttachFileToPurchase(id, file);
+    recMbOnly = recMbOnly.filter(iv => String(iv.id) !== String(id));
+    showToast("PDF gekoppeld aan de factuur", "ok");
+    renderRec();
+  } catch (e) { btn.disabled = false; btn.textContent = t; showToast("Koppelen mislukt: " + (e.message || e), "err"); }
 }
 async function recBookAll() {
   const todo = recRows.filter(r => r.status === "book");
