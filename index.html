@@ -529,6 +529,16 @@ body { max-width: 1280px; }
       </div>
       <div id="upload-log" style="margin-top: 12px;"></div>
     </div>
+
+    <details class="section" id="missing-att-details">
+      <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Ontbrekende bijlagen aanvullen</summary>
+      <p class="muted" style="margin-top:8px;">Toont Moneybird-inkoopfacturen <strong>zonder PDF-bijlage</strong> (o.a. de eerder gemigreerde facturen). Upload per factuur de bijbehorende PDF; die wordt dan aan de factuur in Moneybird gehangen.</p>
+      <div class="row-btns">
+        <button class="btn primary" onclick="loadMissingAttachments()">Facturen zonder bijlage laden</button>
+        <span class="muted" id="missing-att-status" style="align-self:center;"></span>
+      </div>
+      <div id="missing-att-list" style="margin-top:12px;"></div>
+    </details>
   </section>
 
   <!-- ====== TAB: Verkoop migreren (MoneyMonk PDF → Moneybird sales) ====== -->
@@ -2771,6 +2781,68 @@ async function createMissingCats() {
   await renderCatSetup(true);
   if (errs.length && $("cats-status")) $("cats-status").textContent = errs.slice(0, 2).join(" · ");
   showToast(`Klaar: ${ok} aangemaakt${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
+}
+
+// ============================================================
+//  ONTBREKENDE BIJLAGEN — PDF koppelen aan bestaande inkoopfacturen
+// ============================================================
+let missingAttInvoices = [];
+async function loadMissingAttachments() {
+  const list = $("missing-att-list"); const st = $("missing-att-status");
+  list.innerHTML = '<p class="muted">Laden…</p>'; if (st) st.textContent = "";
+  try {
+    const all = [];
+    for (let p = 1; p <= 60; p++) {
+      const b = await mbFetch(`documents/purchase_invoices.json?per_page=100&page=${p}`);
+      if (!Array.isArray(b) || !b.length) break;
+      all.push(...b);
+      if (b.length < 100) break;
+    }
+    missingAttInvoices = all.filter(iv => !iv.attachments || iv.attachments.length === 0);
+    renderMissingAttachments();
+    if (st) st.textContent = `${missingAttInvoices.length} zonder bijlage (van ${all.length} inkoopfacturen)`;
+  } catch (e) {
+    list.innerHTML = `<p class="err">Laden mislukt: ${escapeHtml(e.message || e)}</p>`;
+  }
+}
+function renderMissingAttachments() {
+  const list = $("missing-att-list"); if (!list) return;
+  if (!missingAttInvoices.length) { list.innerHTML = '<p class="muted">Geen inkoopfacturen zonder bijlage. ✓</p>'; return; }
+  list.innerHTML = missingAttInvoices.map(iv => {
+    const sup = (iv.contact && iv.contact.company_name) || "Leverancier";
+    const amt = Number(iv.total_price_incl_tax) || 0;
+    const url = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${iv.id}`;
+    return `<div class="missing-att-row" data-id="${escapeHtml(iv.id)}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
+      <span style="width:84px;font-size:12px;color:var(--muted);">${escapeHtml(iv.date || "")}</span>
+      <span style="flex:1;min-width:200px;font-size:13px;"><a href="${url}" target="_blank" rel="noopener" style="color:inherit;">${escapeHtml(sup)}</a> · ${escapeHtml(iv.reference || "")} · <strong>€ ${amt.toFixed(2)}</strong></span>
+      <input type="file" class="missing-att-file" accept="application/pdf,.pdf" style="font-size:12px;max-width:230px;">
+      <button class="btn" onclick="attachToInvoice(this)">Koppel PDF</button>
+    </div>`;
+  }).join("");
+}
+async function mbAttachFileToPurchase(invId, file) {
+  const fd = new FormData();
+  fd.append("file", file, file.name || "factuur.pdf");
+  return mbFetch(`documents/purchase_invoices/${invId}/attachments.json`, { method: "POST", body: fd });
+}
+async function attachToInvoice(btn) {
+  const row = btn.closest(".missing-att-row");
+  const id = row.dataset.id;
+  const fileInput = row.querySelector(".missing-att-file");
+  const file = fileInput && fileInput.files[0];
+  if (!file) { showToast("Kies eerst een PDF", "err"); return; }
+  if (!/\.pdf$/i.test(file.name) && file.type !== "application/pdf") { showToast("Bestand is geen PDF", "err"); return; }
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…";
+  try {
+    await mbAttachFileToPurchase(id, file);
+    missingAttInvoices = missingAttInvoices.filter(iv => String(iv.id) !== String(id));
+    showToast("PDF gekoppeld aan de factuur", "ok");
+    renderMissingAttachments();
+    const st = $("missing-att-status"); if (st) st.textContent = `${missingAttInvoices.length} zonder bijlage`;
+  } catch (e) {
+    btn.disabled = false; btn.textContent = t;
+    showToast("Koppelen mislukt: " + (e.message || e), "err");
+  }
 }
 
 async function processSalesPdf(idx, onlyBook, existingRefs) {
