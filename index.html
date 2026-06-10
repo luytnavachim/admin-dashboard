@@ -678,6 +678,17 @@ body { max-width: 1280px; }
       </div>
       <div id="mb-test-out" class="response" style="display:none;"></div>
     </div>
+
+    <div class="section">
+      <h2>Grootboek-categorieën aanmaken (beginbalans)</h2>
+      <p class="muted">Maakt de categorieën aan die je voor de beginbalans nodig hebt en die nog niet in Moneybird bestaan. Groen = bestaat al, oranje = ontbreekt. Het juiste type (vaste activa, eigen vermogen, voorziening, schuld) staat erbij; de fiscale RGS-koppeling kun je later in Moneybird of met je boekhouder fijnslijpen.</p>
+      <div class="row-btns">
+        <button class="btn" onclick="renderCatSetup(true)">Vernieuwen</button>
+        <button class="btn primary" onclick="createMissingCats()" id="cats-create-btn" disabled>Maak alle ontbrekende aan</button>
+        <span class="muted" id="cats-status" style="align-self:center;"></span>
+      </div>
+      <div id="cats-list" style="margin-top:12px;"><p class="muted">Laden…</p></div>
+    </div>
   </section>
 
   <!-- ====== TAB: Uitleg (alle begeleidende teksten gebundeld) ====== -->
@@ -732,7 +743,7 @@ body { max-width: 1280px; }
 
     <div class="section">
       <h2>Instellingen</h2>
-      <p class="muted">De koppeling met Moneybird loopt via een Cloudflare Worker. De API-token (<code>MONEYBIRD_TOKEN</code>, Secret) en administratie-ID (<code>MONEYBIRD_ADMIN_ID</code>, variabele) staan in de Worker — niet in de browser. Op deze tab test je of de verbinding werkt. Setup-details staan in <code>worker.js</code>/<code>README.md</code>.</p>
+      <p class="muted">De koppeling met Moneybird loopt via een Cloudflare Worker. De API-token (<code>MONEYBIRD_TOKEN</code>, Secret) en administratie-ID (<code>MONEYBIRD_ADMIN_ID</code>, variabele) staan in de Worker — niet in de browser. Op deze tab test je of de verbinding werkt. Hier zit ook <strong>Grootboek-categorieën aanmaken</strong>: dat checkt welke categorieën voor de beginbalans nog ontbreken en maakt ze met één klik aan in Moneybird (met het juiste type). De fiscale RGS-koppeling kun je daarna in Moneybird of met je boekhouder fijnslijpen. Setup-details staan in <code>worker.js</code>/<code>README.md</code>.</p>
     </div>
   </section>
     </main>
@@ -1529,6 +1540,9 @@ function switchTab(name) {
   }
   if (name === "afboeken" && account) {
     renderAfboekUI().catch(e => console.warn("afboeken:", e));
+  }
+  if (name === "instellingen" && account) {
+    renderCatSetup().catch(e => console.warn("cats:", e));
   }
 }
 document.addEventListener("click", (ev) => {
@@ -2665,6 +2679,86 @@ async function bookAllSuggested() {
   }
   renderAfboekTransactions();
   showToast(`Klaar: ${ok} geboekt${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
+}
+
+// ============================================================
+//  GROOTBOEK-CATEGORIEËN AANMAKEN (beginbalans) — ledger_accounts
+// ============================================================
+// Naam + Moneybird account_type voor de balansposten uit de jaarrekening 2024.
+const BEGIN_CATS = [
+  { name: "Vervoermiddelen", type: "non_current_assets", note: "Auto (materiële vaste activa)" },
+  { name: "Inventaris", type: "non_current_assets", note: "Inventaris/computers (materiële vaste activa)" },
+  { name: "Lening directie", type: "non_current_assets", note: "Langlopende vordering op de DGA" },
+  { name: "Rekening-courant DGA", type: "current_assets", note: "Vordering op de DGA" },
+  { name: "Aandelenkapitaal", type: "equity", note: "Eigen vermogen" },
+  { name: "Agioreserve", type: "equity", note: "Eigen vermogen" },
+  { name: "Overige reserves", type: "equity", note: "Eigen vermogen (incl. resultaat)" },
+  { name: "Lijfrente-/Pensioenvoorziening", type: "provisions", note: "Voorziening" },
+  { name: "Financial lease", type: "non_current_liabilities", note: "Langlopende schuld" },
+  { name: "Te betalen vennootschapsbelasting", type: "current_liabilities", note: "Kortlopende schuld" },
+  { name: "Loonheffingen", type: "current_liabilities", note: "Kortlopende schuld" }
+];
+let mbAllLedgers = null;
+async function mbLoadAllLedgers(force) {
+  if (mbAllLedgers && !force) return mbAllLedgers;
+  const all = await mbFetch("ledger_accounts.json");
+  mbAllLedgers = Array.isArray(all) ? all : [];
+  return mbAllLedgers;
+}
+function ledgerExistsByName(name) {
+  const n = (name || "").toLowerCase().trim();
+  return (mbAllLedgers || []).some(l => (l.name || "").toLowerCase().trim() === n);
+}
+async function renderCatSetup(force) {
+  const box = $("cats-list"); if (!box) return;
+  box.innerHTML = '<p class="muted">Laden…</p>';
+  try { await mbLoadAllLedgers(!!force); }
+  catch (e) { box.innerHTML = `<p class="err">Categorieën laden mislukt: ${escapeHtml(e.message || e)}</p>`; return; }
+  let missing = 0;
+  box.innerHTML = BEGIN_CATS.map(c => {
+    const exists = ledgerExistsByName(c.name);
+    if (!exists) missing++;
+    const badge = exists ? '<span class="badge ok">bestaat</span>' : '<span class="badge warn">ontbreekt</span>';
+    return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(127,127,127,.15);">
+      <span style="flex:1;font-size:13px;"><strong>${escapeHtml(c.name)}</strong> <span class="muted">· ${escapeHtml(c.note)}</span></span>
+      ${badge}
+      ${exists ? "" : `<button class="btn" onclick="createOneCat('${escapeHtml(c.name)}')">Maak aan</button>`}
+    </div>`;
+  }).join("");
+  if ($("cats-create-btn")) $("cats-create-btn").disabled = missing === 0;
+  if ($("cats-status")) $("cats-status").textContent = missing ? `${missing} ontbreekt` : "alles aanwezig ✓";
+}
+async function mbCreateLedger(name, type) {
+  const res = await mbFetch("ledger_accounts.json", {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ledger_account: { name, account_type: type } })
+  });
+  mbBankLedgers = null;   // dropdowns op de Afboeken-tab herladen
+  return res;
+}
+async function createOneCat(name) {
+  const c = BEGIN_CATS.find(x => x.name === name); if (!c) return;
+  try {
+    await mbCreateLedger(c.name, c.type);
+    showToast(`Categorie "${c.name}" aangemaakt`, "ok");
+    await renderCatSetup(true);
+  } catch (e) { showToast(`Aanmaken mislukt: ${e.message || e}`, "err"); }
+}
+async function createMissingCats() {
+  try { await mbLoadAllLedgers(true); } catch (e) {}
+  const todo = BEGIN_CATS.filter(c => !ledgerExistsByName(c.name));
+  if (!todo.length) { showToast("Alle categorieën bestaan al", "ok"); return; }
+  if (!confirm(`${todo.length} ontbrekende categorie(ën) aanmaken in Moneybird?`)) return;
+  const btn = $("cats-create-btn"); if (btn) btn.disabled = true;
+  let ok = 0, fail = 0; const errs = [];
+  for (const c of todo) {
+    try { await mbCreateLedger(c.name, c.type); ok++; }
+    catch (e) { fail++; errs.push(`${c.name}: ${e.message || e}`); }
+    await new Promise(r => setTimeout(r, 250));
+  }
+  await renderCatSetup(true);
+  if (errs.length && $("cats-status")) $("cats-status").textContent = errs.slice(0, 3).join(" · ");
+  showToast(`Klaar: ${ok} aangemaakt${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
 }
 
 async function processSalesPdf(idx, onlyBook, existingRefs) {
