@@ -2977,6 +2977,18 @@ function addInkoopRule() {
 function deleteInkoopRule(i) { inkoopRules.splice(i, 1); saveInkoopRules(); renderInkoopRules(); }
 
 // ---- Duplicaat-check op Moneybird-documenten (inkoopfacturen + bonnen) ----
+const DUPDOC_IGNORE_KEY = "dupdoc_ignored_v1";
+function loadDupIgnored() { try { const a = JSON.parse(localStorage.getItem(DUPDOC_IGNORE_KEY)); if (Array.isArray(a)) return new Set(a); } catch {} return new Set(); }
+let dupIgnored = loadDupIgnored();
+function saveDupIgnored() { localStorage.setItem(DUPDOC_IGNORE_KEY, JSON.stringify([...dupIgnored])); }
+let dupLastClusters = [];   // [[docIdx,...], ...]
+let dupLastDocs = [];
+let dupShowIgnored = false;
+function dupSig(cluster) { return cluster.map(i => dupLastDocs[i].id).sort().join("|"); }
+function dupIgnore(sig) { dupIgnored.add(sig); saveDupIgnored(); renderDuplicateDocs(); }
+function dupUnignore(sig) { dupIgnored.delete(sig); saveDupIgnored(); renderDuplicateDocs(); }
+function dupToggleIgnored(ev) { if (ev) ev.preventDefault(); dupShowIgnored = !dupShowIgnored; renderDuplicateDocs(); }
+
 async function checkDuplicateDocs() {
   const btn = $("dupdoc-btn"), st = $("dupdoc-status"), list = $("dupdoc-list");
   btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…"; list.innerHTML = ""; st.textContent = "Documenten laden…";
@@ -3021,18 +3033,23 @@ async function checkDuplicateDocs() {
     const dups = Object.values(clusters)
       .map(c => [...new Map(c.map(i => [docs[i].id, i])).values()])  // uniek per doc-id
       .filter(c => c.length > 1);
-    renderDuplicateDocs(dups, docs);
-    st.textContent = dups.length ? `${dups.length} mogelijke duplicaat-groep(en) gevonden` : "Geen duplicaten gevonden ✓";
+    dupLastDocs = docs; dupLastClusters = dups; dupShowIgnored = false;
+    renderDuplicateDocs();
+    const open = dups.filter(c => !dupIgnored.has(dupSig(c))).length;
+    st.textContent = open ? `${open} mogelijke duplicaat-groep(en)` : (dups.length ? "Alle gevonden duplicaten staan op de negeerlijst" : "Geen duplicaten gevonden ✓");
   } catch (e) {
     list.innerHTML = `<p class="err">Check mislukt: ${escapeHtml(e.message || e)}</p>`;
   } finally { btn.disabled = false; btn.textContent = t; }
 }
-function renderDuplicateDocs(dups, docs) {
+function renderDuplicateDocs() {
   const list = $("dupdoc-list"); if (!list) return;
-  if (!dups.length) { list.innerHTML = '<p class="muted">Geen mogelijke duplicaten gevonden. ✓</p>'; return; }
-  list.innerHTML = dups.map((c, gi) => {
+  if (!dupLastClusters.length) { list.innerHTML = '<p class="muted">Geen mogelijke duplicaten gevonden. ✓</p>'; return; }
+  const visible = dupLastClusters.filter(c => !dupIgnored.has(dupSig(c)));
+  const ignored = dupLastClusters.filter(c => dupIgnored.has(dupSig(c)));
+  const groupHtml = (c, isIgnored) => {
+    const sig = dupSig(c);
     const rows = c.map(i => {
-      const d = docs[i];
+      const d = dupLastDocs[i];
       const f = d.files.length ? ` · <span class="muted">${escapeHtml(d.files[0])}</span>` : "";
       return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid rgba(127,127,127,.12);flex-wrap:wrap;">
         <span style="width:78px;font-size:12px;color:var(--muted);">${escapeHtml(d.date)}</span>
@@ -3040,9 +3057,19 @@ function renderDuplicateDocs(dups, docs) {
         <a class="btn" href="${d.url}" target="_blank" rel="noopener">Open in Moneybird</a>
       </div>`;
     }).join("");
-    return `<div style="margin:10px 0;padding:8px 10px;border:1px solid rgba(192,57,43,.35);border-radius:8px;">
-      <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Mogelijk duplicaat (${c.length}×)</div>${rows}</div>`;
-  }).join("");
+    const action = isIgnored
+      ? `<button class="btn" onclick="dupUnignore('${sig}')">Toon weer</button>`
+      : `<button class="btn" onclick="dupIgnore('${sig}')" title="Geen duplicaat — niet meer tonen">Negeer</button>`;
+    return `<div style="margin:10px 0;padding:8px 10px;border:1px solid rgba(192,57,43,${isIgnored ? ".2" : ".35"});border-radius:8px;${isIgnored ? "opacity:.65;" : ""}">
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;">
+        <span style="font-size:13px;font-weight:600;">Mogelijk duplicaat (${c.length}×)${isIgnored ? " · genegeerd" : ""}</span>${action}
+      </div>${rows}</div>`;
+  };
+  let html = "";
+  if (ignored.length) html += `<p class="muted" style="font-size:12px;">${ignored.length} groep(en) genegeerd. <a href="#" onclick="dupToggleIgnored(event)">${dupShowIgnored ? "verberg" : "toon om te controleren"}</a></p>`;
+  html += visible.length ? visible.map(c => groupHtml(c, false)).join("") : '<p class="muted">Geen openstaande duplicaten. ✓</p>';
+  if (dupShowIgnored) html += ignored.map(c => groupHtml(c, true)).join("");
+  list.innerHTML = html;
 }
 
 // Mail naar de Verwerkt-map verplaatsen (best-effort, no-op als 'ie er al staat).
