@@ -705,6 +705,16 @@ body { max-width: 1280px; }
         <button class="btn" onclick="addInkoopRule()">+ Regel</button>
       </div>
     </details>
+
+    <details class="section" id="dupdoc-details">
+      <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Dubbele documenten in Moneybird controleren</summary>
+      <p class="muted" style="margin-top:8px;">Controleert je inkoopfacturen en bonnen (receipts) op mogelijke duplicaten — bv. dezelfde factuur die per ongeluk twee keer is doorgestuurd. Match op leverancier + bedrag + datum, op factuurnummer, én op de bestandsnaam van de bijlage. Verwijderen doe je zelf in Moneybird (zo blijf je in controle).</p>
+      <div class="row-btns">
+        <button class="btn primary" onclick="checkDuplicateDocs()" id="dupdoc-btn">Check op dubbele documenten</button>
+        <span class="muted" id="dupdoc-status" style="align-self:center;"></span>
+      </div>
+      <div id="dupdoc-list" style="margin-top:12px;"></div>
+    </details>
   </section>
 
   <!-- ====== TAB: Instellingen ====== -->
@@ -2965,6 +2975,75 @@ function addInkoopRule() {
   inkoopRules.push({ kw: kw.toLowerCase(), cat }); saveInkoopRules(); kwEl.value = ""; renderInkoopRules();
 }
 function deleteInkoopRule(i) { inkoopRules.splice(i, 1); saveInkoopRules(); renderInkoopRules(); }
+
+// ---- Duplicaat-check op Moneybird-documenten (inkoopfacturen + bonnen) ----
+async function checkDuplicateDocs() {
+  const btn = $("dupdoc-btn"), st = $("dupdoc-status"), list = $("dupdoc-list");
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…"; list.innerHTML = ""; st.textContent = "Documenten laden…";
+  try {
+    const docs = [];
+    for (const kind of ["purchase_invoices", "receipts", "typeless_documents"]) {
+      for (let p = 1; p <= 60; p++) {
+        let b;
+        try { b = await mbFetch(`documents/${kind}.json?per_page=100&page=${p}`); } catch (e) { break; }
+        if (!Array.isArray(b) || !b.length) break;
+        b.forEach(d => docs.push({
+          kind,
+          label: kind === "purchase_invoices" ? "Inkoopfactuur" : (kind === "receipts" ? "Bon" : "Document"),
+          id: d.id,
+          ref: String(d.reference || "").trim(),
+          supplier: (d.contact && d.contact.company_name) || "",
+          amount: Number(d.total_price_incl_tax) || 0,
+          date: d.date || "",
+          files: (d.attachments || []).map(a => (a.filename || "")).filter(Boolean),
+          url: `https://moneybird.com/${MB_ADMIN_ID}/documents/${kind}/${d.id}`
+        }));
+        if (b.length < 100) break;
+      }
+    }
+    st.textContent = `${docs.length} documenten · vergelijken…`;
+    // Sleutels: factuurnummer+leverancier, leverancier+bedrag+datum, en bestandsnaam.
+    const keyMap = {};
+    const add = (key, i) => { if (!key) return; (keyMap[key] = keyMap[key] || []).push(i); };
+    docs.forEach((d, i) => {
+      const sup = d.supplier.toLowerCase();
+      if (d.ref) add("ref|" + sup + "|" + d.ref.toLowerCase(), i);
+      if (sup && d.amount) add("cnt|" + sup + "|" + d.amount.toFixed(2) + "|" + d.date, i);
+      d.files.forEach(f => add("file|" + f.toLowerCase(), i));
+    });
+    // Clusteren via union-find: documenten die een sleutel delen horen bij elkaar.
+    const parent = docs.map((_, i) => i);
+    const find = x => { while (parent[x] !== x) { parent[x] = parent[parent[x]]; x = parent[x]; } return x; };
+    const uni = (a, b) => { parent[find(a)] = find(b); };
+    Object.values(keyMap).forEach(arr => { for (let k = 1; k < arr.length; k++) uni(arr[0], arr[k]); });
+    const clusters = {};
+    docs.forEach((d, i) => { const r = find(i); (clusters[r] = clusters[r] || []).push(i); });
+    const dups = Object.values(clusters)
+      .map(c => [...new Map(c.map(i => [docs[i].id, i])).values()])  // uniek per doc-id
+      .filter(c => c.length > 1);
+    renderDuplicateDocs(dups, docs);
+    st.textContent = dups.length ? `${dups.length} mogelijke duplicaat-groep(en) gevonden` : "Geen duplicaten gevonden ✓";
+  } catch (e) {
+    list.innerHTML = `<p class="err">Check mislukt: ${escapeHtml(e.message || e)}</p>`;
+  } finally { btn.disabled = false; btn.textContent = t; }
+}
+function renderDuplicateDocs(dups, docs) {
+  const list = $("dupdoc-list"); if (!list) return;
+  if (!dups.length) { list.innerHTML = '<p class="muted">Geen mogelijke duplicaten gevonden. ✓</p>'; return; }
+  list.innerHTML = dups.map((c, gi) => {
+    const rows = c.map(i => {
+      const d = docs[i];
+      const f = d.files.length ? ` · <span class="muted">${escapeHtml(d.files[0])}</span>` : "";
+      return `<div style="display:flex;align-items:center;gap:10px;padding:5px 0;border-bottom:1px solid rgba(127,127,127,.12);flex-wrap:wrap;">
+        <span style="width:78px;font-size:12px;color:var(--muted);">${escapeHtml(d.date)}</span>
+        <span style="flex:1;min-width:200px;font-size:13px;"><a href="${d.url}" target="_blank" rel="noopener" style="color:inherit;">${escapeHtml(d.supplier || "?")}</a> · ${escapeHtml(d.label)} · ${escapeHtml(d.ref || "")} · <strong>€ ${d.amount.toFixed(2)}</strong>${f}</span>
+        <a class="btn" href="${d.url}" target="_blank" rel="noopener">Open in Moneybird</a>
+      </div>`;
+    }).join("");
+    return `<div style="margin:10px 0;padding:8px 10px;border:1px solid rgba(192,57,43,.35);border-radius:8px;">
+      <div style="font-size:13px;font-weight:600;margin-bottom:4px;">Mogelijk duplicaat (${c.length}×)</div>${rows}</div>`;
+  }).join("");
+}
 
 // Mail naar de Verwerkt-map verplaatsen (best-effort, no-op als 'ie er al staat).
 async function recMoveMail(email) {
