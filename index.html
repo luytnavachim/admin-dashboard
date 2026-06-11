@@ -541,6 +541,23 @@ body { max-width: 1280px; }
       </div>
       <div id="missing-att-list" style="margin-top:12px;"></div>
     </details>
+
+    <details class="section" id="bulkfwd-details">
+      <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Bulk doorsturen per maand (naar MoneyMonk / Moneybird)</summary>
+      <p class="muted" style="margin-top:8px;">Stuurt alle factuurmails van een maand in één keer door naar je boekhouding (scan &amp; herken doet de rest). Handig om 2025 in MoneyMonk compleet te maken zonder elke factuur los te uploaden. Verstuurde mails gaan naar de Verwerkt-map, zodat je niets dubbel doorstuurt.</p>
+      <div class="row-btns" style="align-items:center;">
+        <label style="font-size:13px;">Maand <select id="bf-month" style="margin-left:6px;"></select></label>
+        <label style="font-size:13px;">Doel
+          <select id="bf-target" style="margin-left:6px;" onchange="renderBf()">
+            <option value="moneymonk">MoneyMonk</option>
+            <option value="moneybird">Moneybird</option>
+          </select>
+        </label>
+        <button class="btn primary" id="bf-scan-btn" onclick="bfScan()">Scan maand</button>
+        <span class="muted" id="bf-status" style="align-self:center;"></span>
+      </div>
+      <div id="bf-list" style="margin-top:12px;"></div>
+    </details>
   </section>
 
   <!-- ====== TAB: Verkoop migreren (MoneyMonk PDF → Moneybird sales) ====== -->
@@ -1579,9 +1596,9 @@ function switchTab(name) {
   if (name === "overzicht") showDevConsoleIfEnabled();
   else hideDevConsole();
   // Lazy-load invoice emails on first activation of the facturen tab
-  if (name === "facturen" && !facturenLoaded && account) {
-    facturenLoaded = true;
-    loadInvoiceEmails().catch(e => console.warn("loadInvoiceEmails:", e));
+  if (name === "facturen" && account) {
+    bfPopulateMonths();
+    if (!facturenLoaded) { facturenLoaded = true; loadInvoiceEmails().catch(e => console.warn("loadInvoiceEmails:", e)); }
   }
   // Projecten: sync vanaf de Worker, render lijst, relaties laden voor de klant-picker
   if (name === "projecten") {
@@ -3079,13 +3096,77 @@ async function recMoveMail(email) {
   await moveMessage(email._mailbox, email.id, fid);
 }
 
-// Factuurmail (incl. PDF-bijlage) doorsturen naar het Moneybird inkomend-adres,
-// zodat Moneybird zelf scan & herken doet. Vereist Mail.Send(.Shared)-scope.
-async function forwardToMoneybird(mbox, messageId, comment) {
+// Factuurmail (incl. PDF-bijlage) doorsturen naar een inkomend-adres. Vereist Mail.Send(.Shared).
+async function forwardMailTo(mbox, messageId, address, comment) {
   await graph("POST", `${userPath(mbox)}/messages/${messageId}/forward`, {
-    comment: comment || "Doorgestuurd vanuit admin-dashboard voor Moneybird scan & herken.",
-    toRecipients: [{ emailAddress: { address: MONEYBIRD_INBOX } }]
+    comment: comment || "Doorgestuurd vanuit admin-dashboard.",
+    toRecipients: [{ emailAddress: { address } }]
   });
+}
+async function forwardToMoneybird(mbox, messageId, comment) {
+  return forwardMailTo(mbox, messageId, MONEYBIRD_INBOX, comment || "Doorgestuurd vanuit admin-dashboard voor Moneybird scan & herken.");
+}
+
+// ---- Bulk doorsturen per maand (MoneyMonk of Moneybird) ----
+let bfMails = [];
+function bfPopulateMonths() {
+  const sel = $("bf-month"); if (!sel || sel.options.length) return;
+  const now = new Date(); const mn = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
+  let html = "";
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    html += `<option value="${ym}">${mn[d.getMonth()]} ${d.getFullYear()}</option>`;
+  }
+  sel.innerHTML = html;
+}
+function bfTargetAddress() { return (($("bf-target") && $("bf-target").value) || "moneymonk") === "moneybird" ? MONEYBIRD_INBOX : MONEYMONK_ADDRESS; }
+async function bfScan() {
+  if (!account) { showToast("Eerst inloggen met Microsoft", "err"); return; }
+  const ym = ($("bf-month") && $("bf-month").value) || ""; if (!ym) { showToast("Kies een maand", "err"); return; }
+  const btn = $("bf-scan-btn"), st = $("bf-status"), list = $("bf-list");
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…"; list.innerHTML = ""; st.textContent = "Mailbox scannen…";
+  try {
+    bfMails = await recGatherMails(ym);   // snelle maand-scan (datumfilter), géén Claude
+    renderBf();
+    st.textContent = `${bfMails.length} factuurmails in deze maand`;
+  } catch (e) { list.innerHTML = `<p class="err">Mislukt: ${escapeHtml(e.message || e)}</p>`; }
+  finally { btn.disabled = false; btn.textContent = t; }
+}
+function renderBf() {
+  const list = $("bf-list"); if (!list) return;
+  if (!bfMails.length) { list.innerHTML = '<p class="muted">Klik "Scan maand" om factuurmails te tonen.</p>'; return; }
+  const doel = (($("bf-target") && $("bf-target").value) || "moneymonk") === "moneybird" ? "Moneybird" : "MoneyMonk";
+  list.innerHTML = `<div class="row-btns" style="margin-bottom:6px;"><button class="btn primary" onclick="bfForwardAll()">Stuur alle ${bfMails.length} door naar ${doel}</button></div>` + bfMails.map(m => {
+    const from = (m.from && m.from.emailAddress && (m.from.emailAddress.name || m.from.emailAddress.address)) || "";
+    const when = new Date(m.receivedDateTime).toLocaleDateString("nl-NL", { day: "numeric", month: "short" });
+    const mbox = m._mailbox ? (m._mailbox.label || m._mailbox.email) : "";
+    return `<div class="bf-row" data-id="${escapeHtml(m.id)}" style="display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
+      <span style="width:78px;font-size:12px;color:var(--muted);">${escapeHtml(when)}</span>
+      <span style="flex:1;min-width:200px;font-size:13px;">${escapeHtml(from)} · ${escapeHtml((m.subject || "").slice(0, 55))} <span class="muted">· ${escapeHtml(mbox)}</span></span>
+      <button class="btn" onclick="bfForwardOne('${escapeHtml(m.id)}')">Doorsturen</button>
+    </div>`;
+  }).join("");
+}
+async function bfForwardOne(id, silent) {
+  const m = bfMails.find(x => x.id === id); if (!m) return;
+  try {
+    await forwardMailTo(m._mailbox, m.id, bfTargetAddress());
+    try { await recMoveMail(m); } catch (e) {}
+    bfMails = bfMails.filter(x => x.id !== id);
+    if (!silent) { showToast("Doorgestuurd · mail verplaatst", "ok"); renderBf(); }
+    return true;
+  } catch (e) { if (!silent) showToast("Doorsturen mislukt: " + (e.message || e), "err"); throw e; }
+}
+async function bfForwardAll() {
+  if (!bfMails.length) return;
+  if (!confirm(`${bfMails.length} factuurmail(s) doorsturen naar ${bfTargetAddress()}?`)) return;
+  const ids = bfMails.map(m => m.id); let ok = 0, fail = 0;
+  for (const id of ids) {
+    try { await bfForwardOne(id, true); ok++; } catch (e) { fail++; }
+    await new Promise(r => setTimeout(r, 300));
+  }
+  renderBf(); showToast(`Klaar: ${ok} doorgestuurd${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
 }
 
 let recRows = [];
