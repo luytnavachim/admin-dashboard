@@ -1391,7 +1391,7 @@ async function loadOpenInvoices() {
         totals: { incl_vat: Number(iv.total_price_incl_tax) || 0, open: Number(iv.total_price_incl_tax) || 0, paid: 0 },
         relation_id: iv.id,
         number: iv.reference || "",
-        url: `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${iv.id}`
+        url: `https://moneybird.com/${MB_ADMIN_ID}/documents/${iv.id}`
       };
     });
     renderOpenInvoices(mapped, relationNames);
@@ -2152,7 +2152,7 @@ async function sendSelectedToMoneybird() {
 
     step3 = logStep("3/4 — Inboeken in Moneybird (contact + inkoopfactuur + PDF)...");
     const { invId, contactCreated, attachErr } = await mbBookPurchaseFromExtracted(extracted, pdfB64, pdf.name);
-    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${invId}`;
+    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/${invId}`;
     step3.className = "flow-step ok";
     step3.textContent = `3/4 — Ingeboekt in Moneybird${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
       (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : " + PDF bijgevoegd") + ` — ${invUrl}`;
@@ -2335,7 +2335,7 @@ async function sendUploadedPdfToMoneybird() {
 
     s3 = logStep(`3/3 — Inboeken in Moneybird (contact + inkoopfactuur + PDF)...`, "active", "upload-log");
     const { invId, contactCreated, attachErr } = await mbBookPurchaseFromExtracted(extracted, pdfB64, file.name);
-    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${invId}`;
+    const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/${invId}`;
     s3.className = "flow-step ok";
     s3.textContent = `3/3 — Ingeboekt in Moneybird${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
       (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : " + PDF bijgevoegd") + ` — ${invUrl}`;
@@ -2916,7 +2916,7 @@ function renderMissingAttachments() {
   list.innerHTML = missingAttInvoices.map(iv => {
     const sup = (iv.contact && iv.contact.company_name) || "Leverancier";
     const amt = Number(iv.total_price_incl_tax) || 0;
-    const url = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${iv.id}`;
+    const url = `https://moneybird.com/${MB_ADMIN_ID}/documents/${iv.id}`;
     return `<div class="missing-att-row" data-id="${escapeHtml(iv.id)}" style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
       <span style="width:84px;font-size:12px;color:var(--muted);">${escapeHtml(iv.date || "")}</span>
       <span style="flex:1;min-width:200px;font-size:13px;"><a href="${url}" target="_blank" rel="noopener" style="color:inherit;">${escapeHtml(sup)}</a> · ${escapeHtml(iv.reference || "")} · <strong>€ ${amt.toFixed(2)}</strong></span>
@@ -3037,7 +3037,7 @@ async function checkDuplicateDocs() {
           amount: Number(d.total_price_incl_tax) || 0,
           date: d.date || "",
           files: (d.attachments || []).map(a => (a.filename || "")).filter(Boolean),
-          url: `https://moneybird.com/${MB_ADMIN_ID}/documents/${kind}/${d.id}`
+          url: `https://moneybird.com/${MB_ADMIN_ID}/documents/${d.id}`
         }));
         if (b.length < 100) break;
       }
@@ -3330,7 +3330,7 @@ function renderRec() {
   if (recMbOnly.length) {
     html += '<p class="muted" style="font-size:12px;">Geen bijbehorende mail in de gescande periode. Upload de PDF handmatig (uit een ander archief), of vergroot de periode.</p>';
     html += recMbOnly.map(iv => {
-      const url = `https://moneybird.com/${MB_ADMIN_ID}/documents/purchase_invoices/${iv.id}`;
+      const url = `https://moneybird.com/${MB_ADMIN_ID}/documents/${iv.id}`;
       return `<div class="recmb-row" data-id="${escapeHtml(iv.id)}" style="display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid rgba(127,127,127,.15);flex-wrap:wrap;">
         <span style="width:78px;font-size:12px;color:var(--muted);">${escapeHtml(iv.date)}</span>
         <span style="flex:1;min-width:200px;font-size:13px;"><a href="${url}" target="_blank" rel="noopener" style="color:inherit;">${escapeHtml(iv.supplier)}</a> · ${escapeHtml(iv.ref)} · <strong>€ ${iv.amount.toFixed(2)}</strong></span>
