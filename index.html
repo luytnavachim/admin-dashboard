@@ -592,6 +592,17 @@ body { max-width: 1280px; }
       <div id="backfill-status" class="muted" style="font-size:13px;margin-top:8px;"></div>
     </div>
 
+    <div class="section">
+      <h2>Factureer maand</h2>
+      <p class="muted">Maakt in één keer per project een <strong>concept-verkoopfactuur</strong> uit de open uren van de gekozen maand. Jij controleert en verstuurt zelf vanuit Moneybird. Met "Testfactuur" aangevinkt blijven de uren open (dry-run).</p>
+      <div class="row-btns" style="align-items:center;">
+        <label style="font-size:13px;">Maand <select id="proj-inv-month" style="margin-left:6px;"></select></label>
+        <button class="btn primary" id="proj-inv-btn" onclick="invoiceProjectsForMonth()">Maak conceptfacturen</button>
+        <span class="muted" id="proj-inv-status" style="align-self:center;"></span>
+      </div>
+      <div id="proj-inv-list" style="margin-top:10px;"></div>
+    </div>
+
     <label style="display:flex;align-items:center;gap:6px;margin:0 0 14px;cursor:pointer;font-size:13px;">
       <input type="checkbox" id="proj-test-mode" onchange="saveTestMode()">
       <span><strong>Testfactuur</strong> — alleen concept aanmaken, uren blijven open</span>
@@ -1603,6 +1614,7 @@ function switchTab(name) {
   // Projecten: sync vanaf de Worker, render lijst, relaties laden voor de klant-picker
   if (name === "projecten") {
     if ($("proj-test-mode")) $("proj-test-mode").checked = projTestMode();
+    projInvPopulateMonths();
     ensureRateRows();
     renderProjects();
     if (account && projWorkerBase()) {
@@ -4401,6 +4413,63 @@ async function invoiceProject(id) {
     setS("");
     showToast("Factureren mislukt: " + (e.message || e), "err");
   }
+}
+
+// ---- Bulk: factureer alle projecten voor één maand (concepten) ----
+function projInvPopulateMonths() {
+  const sel = $("proj-inv-month"); if (!sel || sel.options.length) return;
+  const now = new Date(); const mn = ["januari", "februari", "maart", "april", "mei", "juni", "juli", "augustus", "september", "oktober", "november", "december"];
+  let html = "";
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+    const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    html += `<option value="${ym}">${mn[d.getMonth()]} ${d.getFullYear()}</option>`;
+  }
+  sel.innerHTML = html;
+}
+async function invoiceProjectsForMonth() {
+  const ym = ($("proj-inv-month") && $("proj-inv-month").value) || "";
+  if (!ym) { showToast("Kies een maand", "err"); return; }
+  const list = $("proj-inv-list"), st = $("proj-inv-status");
+  const testMode = projTestMode();
+  const projects = (projectsData && projectsData.projects) || [];
+  const todo = [];
+  for (const p of projects) {
+    const ent = projOpenEntries(p).filter(e => (e.date || "").slice(0, 7) === ym);
+    if (ent.length) todo.push({ p, ent });
+  }
+  if (!todo.length) { list.innerHTML = `<p class="muted">Geen open uren in ${escapeHtml(ym)} om te factureren.</p>`; st.textContent = ""; return; }
+  const totH = todo.reduce((s, t) => s + t.ent.reduce((a, e) => a + (Number(e.hours) || 0), 0), 0);
+  if (!confirm(`${todo.length} project(en) met samen ${fmtHrs(totH)} uur in ${ym} factureren als concept in Moneybird?` + (testMode ? "\n\nTESTMODE staat aan: de uren blijven open." : ""))) return;
+  const btn = $("proj-inv-btn"); btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…";
+  let ok = 0, fail = 0; const lines = [];
+  for (let i = 0; i < todo.length; i++) {
+    const { p, ent } = todo[i];
+    st.textContent = `Bezig ${i + 1}/${todo.length}…`;
+    try {
+      const contactId = await mbContactId(p.relationName);
+      if (!contactId) throw new Error(`geen Moneybird-contact voor "${p.relationName}"`);
+      const inv = computeProjectInvoice(p, ent, cfg);
+      const result = await mbFetch("sales_invoices.json", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(mbProjectSalesPayload(p, inv, contactId)) });
+      const invId = result && result.id;
+      if (!invId) throw new Error("geen factuur-id teruggekregen");
+      const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/sales_invoices/${invId}`;
+      if (!testMode) {
+        const stamp = new Date().toISOString();
+        ent.forEach(e => { e.invoiced = true; e.invoiceId = invId; e.invoicedAt = stamp; });
+        if (!Array.isArray(projectsData.invoices)) projectsData.invoices = [];
+        projectsData.invoices.unshift({ id: invId, url: invUrl, projectId: p.id, projectName: p.name, projectNumber: p.projectNumber || "", relationName: p.relationName || "", date: inv.invDate, periodFrom: inv.periodFrom, periodTo: inv.periodTo, amountExcl: inv.amountExcl, amountIncl: inv.totalIncl, hours: inv.totalHours, entryCount: ent.length, createdAt: stamp });
+        saveProjects();
+      }
+      ok++; lines.push(`✓ ${escapeHtml(p.name)} — ${fmtEur(inv.amountExcl)} excl · <a href="${invUrl}" target="_blank" rel="noopener">concept ${escapeHtml(String(invId))}</a>`);
+    } catch (e) { fail++; lines.push(`✗ ${escapeHtml(p.name)} — ${escapeHtml(e.message || String(e))}`); }
+    list.innerHTML = lines.map(l => `<div style="font-size:13px;padding:3px 0;border-bottom:1px solid rgba(127,127,127,.12);">${l}</div>`).join("");
+    await new Promise(r => setTimeout(r, 300));
+  }
+  renderProjects();
+  btn.disabled = false; btn.textContent = t;
+  st.textContent = `Klaar: ${ok} concept(en)${fail ? ", " + fail + " mislukt" : ""}${testMode ? " · TEST: uren open gebleven" : ""}`;
+  showToast(`Maandfacturen klaar: ${ok} concept${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
 }
 
 // ============================================================
