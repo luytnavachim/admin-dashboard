@@ -15,12 +15,13 @@ Eén-persoons inkoop- en verkoopadministratie voor Triplet IT, als single-file w
 
 ## Wat je krijgt
 
-Een dashboard met zeven tabs:
+Een dashboard met acht tabs:
 
 - **Overzicht** — live status over alle gemonitorde mailboxen: facturen die verwerkt/betaald moeten worden, mails die antwoord vragen, openstaande inkoopfacturen uit Moneybird, en je agenda voor de komende 2 dagen. Per factuurrij een `→ Moneybird`-knop (boekt de factuur direct in) en een `Verwerkt ✓`-knop die de mail naar `MoneyMonk Verwerkt` verplaatst.
-- **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt het contact in Moneybird, maakt de inkoopfactuur aan (ingeboekt, niet betaald) mét PDF als bijlage, en verplaatst de mail naar `MoneyMonk Verwerkt`. Ook een **losse-PDF-upload** voor facturen die niet in je inbox zitten.
+- **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt het contact in Moneybird, maakt de inkoopfactuur aan (ingeboekt, niet betaald) mét PDF als bijlage, en verplaatst de mail naar `MoneyMonk Verwerkt`. Ook een **losse-PDF-upload**, een knop **Doorsturen naar Moneybird** (forwardt de mail mét PDF naar het Moneybird inkomend-adres voor scan & herken — vereist `Mail.Send`), een **bulk doorsturen per maand** naar MoneyMonk/Moneybird, en **Ontbrekende bijlagen aanvullen** (PDF koppelen aan bestaande inkoopfacturen).
+- **Moneybird** — controle van mailbox ↔ Moneybird: scant de mailboxen (per maand) op inkoopfactuur-mails en vergelijkt op factuurnummer. Ontbrekende facturen kun je inboeken of doorsturen, facturen zonder bijlage krijgen alsnog hun PDF, en complete facturen → mail naar Verwerkt. Plus **inkoop-categorieregels** (trefwoord → grootboek, automatisch bij inboeken) en een **duplicaat-check** op inkoopfacturen/bonnen (met negeer + undo).
 - **Verkoop migreren** — bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Moneybird (per PDF: Claude extraheert klant + bedragen → contact matchen/aanmaken → verkoopfactuur). Met **Direct inboeken** worden ze gemarkeerd als verstuurd (zonder e-mail), anders blijven ze concept; al bestaande referenties worden overgeslagen.
-- **Projecten** — uren registreren per project en er met één klik een verkoopfactuur (concept) van maken. Elke uren-boeking komt ook direct als **tijdregistratie** in Moneybird. Zie [Projecten & facturen](#projecten--facturen-uren--verkoopfactuur) hieronder. Data staat **cross-device** in **Cloudflare Workers KV** (`/projects`), beveiligd via je **Microsoft-login**.
+- **Projecten** — uren registreren per project en er met één klik een verkoopfactuur (concept) van maken, of in bulk met **Factureer maand** (per project een concept uit de open uren van een gekozen maand). Elke uren-boeking komt ook direct als **tijdregistratie** in Moneybird. Zie [Projecten & facturen](#projecten--facturen-uren--verkoopfactuur) hieronder. Data staat **cross-device** in **Cloudflare Workers KV** (`/projects`), beveiligd via je **Microsoft-login**.
 - **Afboeken** — koppelt nog niet-geboekte banktransacties uit Moneybird aan de juiste grootboek-categorie. Je stelt regels in (trefwoord → categorie); per transactie volgt een voorstel dat je controleert en met één klik boekt (of in bulk). Vereist dat je bankkoppeling in Moneybird transacties importeert, en dat de benodigde categorieën (bv. DGA-loon, vennootschapsbelasting, loonheffing) in Moneybird bestaan.
 - **Instellingen** — Moneybird-verbindingstest. Token + administratie-ID staan in de Worker, niet in de browser.
 - **Uitleg** — beknopte handleiding per tab.
@@ -96,7 +97,7 @@ Microsoft Graph vereist een geregistreerde "app" zodat de pagina mag inloggen. G
    - **Supported account types**: *Accounts in any organizational directory ... and personal Microsoft accounts*.
    - **Redirect URI**: type **Single-page application (SPA)**, URL = waar je host (bv. `https://admin.triplet-it.nl/`, of `http://localhost:8000/` om lokaal te testen — let op de trailing slash).
 4. Klik **Register** en kopieer de **Application (client) ID**.
-5. Links → **API permissions** → **+ Add** → **Microsoft Graph** → **Delegated**. Vink aan: `Mail.ReadWrite`, `Mail.ReadWrite.Shared`, `Calendars.Read`, `User.Read`. → **Add permissions**.
+5. Links → **API permissions** → **+ Add** → **Microsoft Graph** → **Delegated**. Vink aan: `Mail.ReadWrite`, `Mail.ReadWrite.Shared`, `Mail.Send`, `Mail.Send.Shared`, `Calendars.Read`, `User.Read`. → **Add permissions** (+ evt. **Grant admin consent**). `Mail.Send(.Shared)` is nodig voor de "Doorsturen naar Moneybird"-knop; na het toevoegen moet je opnieuw inloggen (consent).
 
 ### Stap 2 — Cloudflare Worker deployen (Moneybird + Claude)
 
