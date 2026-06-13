@@ -502,7 +502,8 @@ body { max-width: 1280px; }
   <!-- ====== TAB: Facturen verwerken (Outlook → Moneybird) ====== -->
   <section id="tab-facturen" class="tab-panel">
     <div class="section">
-      <h2>Facturen verwerken</h2>
+      <h2>Facturen verwerken <span class="muted" style="font-weight:400;font-size:13px;">— inkoop</span></h2>
+      <p class="muted">Voor <strong>inkoopfacturen</strong>: facturen die <strong>jij moet betalen</strong> (van leveranciers). Verkoopfacturen die je klanten aan jóu betalen horen niet hier — gebruik daarvoor de tab <strong>Verkoop migreren</strong>.</p>
 
       <div class="field">
         <label>Onverwerkte facturen in Inbox (zelfde lijst als Overzicht, alleen die met PDF)</label>
@@ -521,7 +522,8 @@ body { max-width: 1280px; }
     </div>
 
     <div class="section">
-      <h2>Losse PDF uploaden</h2>
+      <h2>Losse PDF uploaden <span class="muted" style="font-weight:400;font-size:13px;">— inkoopfactuur</span></h2>
+      <p class="muted">Boekt deze PDF in als <strong>inkoopfactuur</strong> (een factuur die jij moet betalen). Is het een <strong>verkoopfactuur</strong> (klant betaalt jou)? Gebruik dan de tab <strong>Verkoop migreren</strong>, anders belandt 'ie als kost bij je inkoopdocumenten.</p>
       <div class="field">
         <label for="pdf-upload">PDF-bestand</label>
         <input id="pdf-upload" type="file" accept="application/pdf,.pdf" onchange="onPdfPicked()">
@@ -563,8 +565,8 @@ body { max-width: 1280px; }
   <!-- ====== TAB: Verkoop migreren (MoneyMonk PDF → Moneybird sales) ====== -->
   <section id="tab-migratie" class="tab-panel">
     <div class="section">
-      <h2>Verkoopfacturen migreren naar Moneybird</h2>
-      <p class="muted">Bulk-import van MoneyMonk-PDF's: Claude leest klant + bedragen, het contact wordt gematcht of aangemaakt, en de verkoopfactuur komt in Moneybird. Facturen met een referentie die al bestaat worden overgeslagen.</p>
+      <h2>Verkoopfacturen migreren naar Moneybird <span class="muted" style="font-weight:400;font-size:13px;">— verkoop</span></h2>
+      <p class="muted">Voor <strong>verkoopfacturen</strong>: facturen die je <strong>klanten aan jóu betalen</strong> (jouw omzet). Bulk-import van MoneyMonk-PDF's: Claude leest klant + bedragen, het contact wordt gematcht of aangemaakt, en de verkoopfactuur komt in je verkoopoverzicht in Moneybird (met je oude factuurnummer als referentie). Vink <strong>Direct inboeken</strong> aan zodat 'ie als verstuurd in de lijst staat. Dubbele referenties worden overgeslagen.</p>
       <div class="field">
         <label for="sales-upload">Selecteer PDF-bestanden (meerdere mag)</label>
         <input id="sales-upload" type="file" accept="application/pdf,.pdf" multiple onchange="onSalesFilesPicked()">
