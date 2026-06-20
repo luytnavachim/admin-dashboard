@@ -852,7 +852,8 @@ const MAILBOXES = [
   { email: "micha@vantuyl.it",       label: "Van Tuyl",    color: "#5249c4" }
 ];
 
-const SCOPES = ["Mail.ReadWrite", "Mail.ReadWrite.Shared", "Mail.Send", "Mail.Send.Shared", "Calendars.Read", "User.Read"];
+const SCOPES = ["Mail.ReadWrite", "Mail.ReadWrite.Shared", "Mail.Send", "Mail.Send.Shared", "Calendars.ReadWrite", "Calendars.ReadWrite.Shared", "User.Read"];
+const AGENDA_CALENDAR = "venebrugge16@outlook.com";  // agenda waar uren-afspraken in komen ("" = uit / primaire mailbox)
 
 const SELF_DOMAINS = ["triplet-it.nl"];
 const SELF_EMAILS = ["michavantuyl@gmail.com", ...MAILBOXES.map(m => m.email.toLowerCase())];
@@ -3941,6 +3942,30 @@ function addEntry(id) {
   mbCreateTimeEntry(p, entry)
     .then(tid => { if (tid) { entry.mbTimeEntryId = tid; saveProjects(); } showToast("Uren geboekt — ook in Moneybird", "ok"); })
     .catch(e => showToast("Uren lokaal opgeslagen, maar Moneybird-tijdregistratie mislukte: " + (e.message || e), "err"));
+  // En als afspraak in de Outlook-agenda.
+  createAgendaEvent(p, entry)
+    .then(eid => { if (eid) { entry.outlookEventId = eid; saveProjects(); } })
+    .catch(e => showToast("Uren opgeslagen, maar agenda-afspraak mislukte: " + (e.message || e), "err"));
+}
+
+// Uren-boeking als afspraak in de Outlook-agenda (AGENDA_CALENDAR). Vereist Calendars.ReadWrite(.Shared).
+async function createAgendaEvent(p, entry) {
+  if (!AGENDA_CALENDAR) return null;
+  const pad = n => String(n).padStart(2, "0");
+  const s = new Date(`${entry.date}T09:00:00`);
+  const e = new Date(s.getTime() + (Number(entry.hours) || 0) * 3600 * 1000);
+  const fmt = d => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:00`;
+  const ev = {
+    subject: `${p.name}${p.projectNumber ? " (" + p.projectNumber + ")" : ""} — ${fmtHrs(entry.hours)}`,
+    start: { dateTime: fmt(s), timeZone: "Europe/Amsterdam" },
+    end: { dateTime: fmt(e), timeZone: "Europe/Amsterdam" },
+    body: { contentType: "text", content: `${entry.description || "Werkzaamheden"}\nKlant: ${p.relationName || ""}\nUren: ${fmtHrs(entry.hours)} × ${fmtEur(entry.rateAmount || 0)}` },
+    isReminderOn: false
+  };
+  const mine = (account && (account.username || "")).toLowerCase();
+  const path = AGENDA_CALENDAR.toLowerCase() === mine ? "/me/events" : `/users/${encodeURIComponent(AGENDA_CALENDAR)}/events`;
+  const res = await graph("POST", path, ev);
+  return res && res.id;
 }
 
 function deleteEntry(projId, entryId) {
