@@ -534,6 +534,24 @@ body { max-width: 1280px; }
       <div id="upload-log" style="margin-top: 12px;"></div>
     </div>
 
+    <div class="section">
+      <h2>Handmatige inkoopfactuur <span class="muted" style="font-weight:400;font-size:13px;">— zonder bijlage</span></h2>
+      <p class="muted">Voor een inkoopfactuur <strong>zonder PDF</strong> (bv. een bevestiging die alleen in de mailtekst staat, zoals booking.com). Typ de gegevens; het dashboard boekt 'm in Moneybird in — zonder bijlage.</p>
+      <div class="grid-2">
+        <div class="field"><label for="man-supplier">Leverancier</label><input id="man-supplier" type="text" placeholder="bv. Booking.com"></div>
+        <div class="field"><label for="man-number">Factuurnummer (optioneel)</label><input id="man-number" type="text" placeholder="leeg = automatisch"></div>
+        <div class="field"><label for="man-date">Datum</label><input id="man-date" type="date"></div>
+        <div class="field"><label for="man-desc">Omschrijving</label><input id="man-desc" type="text" placeholder="bv. Hotelovernachting"></div>
+        <div class="field"><label for="man-amount">Bedrag (€)</label><input id="man-amount" type="number" min="0" step="0.01" placeholder="bv. 121.00"></div>
+        <div class="field"><label for="man-inclexcl">Bedrag is</label><select id="man-inclexcl"><option value="incl">inclusief btw</option><option value="excl">exclusief btw</option></select></div>
+        <div class="field"><label for="man-vat">Btw</label><select id="man-vat"><option value="21">21%</option><option value="9">9%</option><option value="0">0% / geen</option></select></div>
+      </div>
+      <div class="row-btns">
+        <button class="btn primary" id="man-btn" onclick="bookManualPurchase()">Inboeken in Moneybird &rarr;</button>
+        <span class="muted" id="man-status" style="align-self:center;"></span>
+      </div>
+    </div>
+
     <details class="section" id="missing-att-details">
       <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Ontbrekende bijlagen aanvullen</summary>
       <p class="muted" style="margin-top:8px;">Toont Moneybird-inkoopfacturen <strong>zonder PDF-bijlage</strong> (o.a. de eerder gemigreerde facturen). Upload per factuur de bijbehorende PDF; die wordt dan aan de factuur in Moneybird gehangen.</p>
@@ -2889,6 +2907,39 @@ async function createMissingCats() {
   await renderCatSetup(true);
   if (errs.length && $("cats-status")) $("cats-status").textContent = errs.slice(0, 2).join(" · ");
   showToast(`Klaar: ${ok} aangemaakt${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
+}
+
+// Handmatige inkoopfactuur zonder bijlage → Moneybird (typformulier).
+async function bookManualPurchase() {
+  const sup = ($("man-supplier").value || "").trim();
+  const num = ($("man-number").value || "").trim();
+  const date = $("man-date").value;
+  const desc = ($("man-desc").value || "").trim();
+  const amount = parseFloat($("man-amount").value);
+  const inclExcl = $("man-inclexcl").value;
+  const pct = parseInt($("man-vat").value, 10) || 0;
+  if (!sup) { showToast("Vul een leverancier in", "err"); return; }
+  if (!date) { showToast("Kies een datum", "err"); return; }
+  if (!(amount > 0)) { showToast("Vul een geldig bedrag in", "err"); return; }
+  const excl = inclExcl === "incl" ? Math.round((amount / (1 + pct / 100)) * 100) / 100 : amount;
+  const inclTotal = inclExcl === "incl" ? amount : Math.round(amount * (1 + pct / 100) * 100) / 100;
+  const extracted = {
+    supplier_name: sup, number: num || ("HAND-" + Date.now()),
+    invoice_date: date, invoice_expiry_date: date, currency: "EUR",
+    invoice_total: inclTotal,
+    lines: [{ description: desc || "Kosten", amount: excl, vat_rate: pct }]
+  };
+  const btn = $("man-btn"), st = $("man-status");
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Bezig…"; st.textContent = "";
+  try {
+    const { invId, contactCreated } = await mbBookPurchaseFromExtracted(extracted, null, null);
+    const url = `https://moneybird.com/${MB_ADMIN_ID}/documents/${invId}`;
+    st.innerHTML = `✓ Ingeboekt${contactCreated ? " (nieuw contact)" : ""} — <a href="${escapeHtml(url)}" target="_blank" rel="noopener">openen in Moneybird</a>`;
+    showToast("Inkoopfactuur ingeboekt in Moneybird", "ok");
+    ["man-supplier", "man-number", "man-desc", "man-amount"].forEach(i => { if ($(i)) $(i).value = ""; });
+  } catch (e) {
+    showToast("Inboeken mislukt: " + (e.message || e), "err");
+  } finally { btn.disabled = false; btn.textContent = t; }
 }
 
 // ============================================================
