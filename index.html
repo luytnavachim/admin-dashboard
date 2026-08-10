@@ -2620,7 +2620,7 @@ async function mbCustomerIdOrCreate(ex) {
 }
 
 function mbSalesFromExtractedPayload(ex, contactId) {
-  const src = (ex.lines && ex.lines.length) ? ex.lines : [{ description: ex.number || "Verkoopfactuur", amount: ex.invoice_total || 0, vat_rate: 21 }];
+  const src = (Array.isArray(ex.lines) && ex.lines.length) ? ex.lines : [{ description: ex.number || "Verkoopfactuur", amount: ex.invoice_total || 0, vat_rate: 21 }];
   const details = src.map(l => {
     const p = parseInt(l.vat_rate, 10);
     const pct = String(isNaN(p) ? 21 : p);
@@ -4667,7 +4667,7 @@ async function mbContactIdOrCreate(ex) {
 
 // Geëxtraheerde factuur → Moneybird purchase_invoice payload (bedragen excl. btw).
 function mbPurchaseFromExtractedPayload(ex, contactId, zeroRateId) {
-  const src = (ex.lines && ex.lines.length) ? ex.lines : [{ description: ex.number || "Inkoopfactuur", amount: ex.invoice_total || 0, vat_rate: 0 }];
+  const src = (Array.isArray(ex.lines) && ex.lines.length) ? ex.lines : [{ description: ex.number || "Inkoopfactuur", amount: ex.invoice_total || 0, vat_rate: 0 }];
   const details = src.map(l => {
     const pct = String(parseInt(l.vat_rate, 10) || 0);
     const ledger = mbResolvePurchaseLedgerId(ex, l.description) || MB_PURCHASE_LEDGER;
@@ -4699,7 +4699,7 @@ async function mbBookPurchaseFromExtracted(extracted, pdfB64, filename) {
   try { await mbLoadPurchaseLedgers(); } catch (e) { /* categorisatie best-effort */ }
   const { id: contactId, created } = await mbContactIdOrCreate(extracted);
   // 0%-inkooptarief alleen nodig als er een regel met andere btw dan 21/9 is.
-  const needsZero = ((extracted.lines && extracted.lines.length) ? extracted.lines : []).some(l => { const p = parseInt(l.vat_rate, 10) || 0; return p !== 21 && p !== 9; });
+  const needsZero = (Array.isArray(extracted.lines) ? extracted.lines : []).some(l => { const p = parseInt(l.vat_rate, 10) || 0; return p !== 21 && p !== 9; });
   if (needsZero && _mbZeroRateCache === undefined) _mbZeroRateCache = await mbFindPurchase0Rate();
   const zeroRateId = needsZero ? _mbZeroRateCache : null;
   if (needsZero && !zeroRateId) throw new Error("Factuur heeft 0%/buitenlandse btw maar er is geen 0%-inkoop-btw-tarief in Moneybird. Maak dat eenmalig aan (Moneybird → Instellingen → Btw-tarieven → inkoop, 0%).");
