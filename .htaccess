@@ -1,0 +1,7 @@
+# Alleen het dashboard zelf publiek serveren; repo-bestanden (.git, docs,
+# Worker-code, wrangler-cache) niet. Werkt als Apache "AllowOverride All"
+# (of minimaal FileInfo + AuthConfig) voor deze map toestaat.
+RedirectMatch 404 /\.(git|wrangler|github|DS_Store)(/|$)
+<FilesMatch "\.(md|mjs|jsonc|toml|patch)$|^(worker\.js|informer\.html|\.htaccess|\.assetsignore|\.gitignore)$">
+  Require all denied
+</FilesMatch>
