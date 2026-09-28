@@ -2,7 +2,11 @@
 <html lang="nl">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#f4f6fa">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Administratie">
 <title>Administratie</title>
 <style>
 :root {
@@ -400,6 +404,85 @@ body { max-width: 1280px; }
   .side-nav .tab { width: auto; }
   .side-foot { display: none; }
 }
+
+/* ============================================================
+   MOBIEL (≤ 760px) — onderbalk-navigatie, gestapelde rijen,
+   grote tikvlakken, geen horizontaal scrollen
+   ============================================================ */
+.row .actions .btn, .actions a.btn { white-space: nowrap; }
+.badge.ok-mb { background: var(--ok-bg); color: var(--ok-text); }
+.row .info .top .badge { flex: 0 0 auto; } /* .badge.info matchte ook '.row .info' en rekte uit */
+.pdf-group summary { font-size: 13px; font-weight: 600; color: var(--text); padding: 6px 0; }
+.pdf-group[open] summary { margin-bottom: 4px; }
+.att-names { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 760px) {
+  html, body { overflow-x: hidden; }
+  body { padding: 0 12px calc(78px + env(safe-area-inset-bottom)); font-size: 15px; max-width: 100%; }
+  #app .shell { display: block; }
+  .main { width: 100%; }
+  .sidebar {
+    position: fixed; left: 0; right: 0; bottom: 0; top: auto; z-index: 60;
+    width: auto; min-height: 0; margin: 0; border-radius: 0;
+    border-width: 1px 0 0; padding: 4px 4px calc(4px + env(safe-area-inset-bottom));
+    box-shadow: 0 -6px 18px rgba(20,28,46,.08);
+  }
+  .brand, .side-foot { display: none !important; }
+  .tabs.side-nav { flex-direction: row; flex-wrap: nowrap; overflow-x: auto; gap: 0; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+  .tabs.side-nav::-webkit-scrollbar { display: none; }
+  .side-nav .tab {
+    flex: 1 0 64px; width: auto; flex-direction: column; gap: 2px; justify-content: center;
+    padding: 6px 2px; font-size: 10.5px; line-height: 1.15; text-align: center; white-space: normal; border-radius: 10px;
+  }
+  .side-nav .tab svg { width: 22px; height: 22px; }
+  .topbar {
+    position: sticky; top: 0; z-index: 50; background: var(--bg);
+    margin: 0 -12px 12px; padding: calc(10px + env(safe-area-inset-top)) 12px 10px;
+    border-bottom: 1px solid var(--border); flex-wrap: wrap; gap: 6px 8px;
+  }
+  .page-title { font-size: 18px; }
+  .header-actions { gap: 12px; font-size: 13px; flex-shrink: 0; }
+  .header-actions #user-label { display: none; }
+  .stats { grid-template-columns: 1fr 1fr; gap: 8px; margin-bottom: 12px; }
+  .stat { padding: 10px; gap: 8px; min-width: 0; }
+  .stat .stat-ic { width: 32px; height: 32px; }
+  .stat .value { font-size: 20px; }
+  .stat .label { font-size: 11px; line-height: 1.25; overflow-wrap: anywhere; }
+  .section { padding: 12px; border-radius: 12px; margin-bottom: 12px; }
+  h2 { flex-wrap: wrap; font-size: 15px; }
+  .row { flex-wrap: wrap; gap: 8px; padding: 12px 0; align-items: stretch; }
+  .row > .info { flex: 1 1 100%; }
+  .row .info .from { max-width: 100%; }
+  .row .info .subject { white-space: normal; overflow-wrap: anywhere; }
+  .row .info .meta { overflow-wrap: anywhere; }
+  .actions { width: 100%; flex-wrap: wrap; gap: 6px; }
+  .actions .btn, .actions a.btn { flex: 1 1 0; min-width: 0; min-height: 40px; display: inline-flex; align-items: center; justify-content: center; padding: 8px 10px; font-size: 13px; }
+  .section .row:hover { background: none; }
+  .btn { min-height: 38px; font-size: 13px; }
+  .btn:hover { transform: none; }
+  .row-btns .btn { flex: 1 1 auto; }
+  .field input, .field select, .field textarea, input, select, textarea { font-size: 16px; max-width: 100%; } /* 16px voorkomt iOS-inzoomen */
+  .grid-2 { grid-template-columns: 1fr; }
+  [style*="min-width:1"], [style*="min-width:2"] { min-width: 0 !important; }
+  [style*="width:22"], [style*="width:23"], [style*="width:108"] { max-width: 100%; }
+  .rec-row > span { flex-basis: 100%; }
+  .entry-row { flex-wrap: wrap; }
+  .entry-row .e-desc { white-space: normal; flex-basis: 100%; order: 3; }
+  .entry-add .field, .entry-add .field.desc { flex: 1 1 100%; }
+  .entry-add .field.date input, .entry-add .field.hrs input { width: 100%; }
+  .event-row { flex-wrap: wrap; gap: 4px 12px; }
+  .event-row .when { min-width: 0; }
+  .proj-summary { gap: 12px; }
+  .proj-card > .proj-head { padding: 12px; }
+  .proj-body { padding: 0 12px 12px; }
+  .email-pick { flex-wrap: wrap; }
+  pre, .response, code { max-width: 100%; overflow-x: auto; }
+  table { display: block; max-width: 100%; overflow-x: auto; }
+  #dev-console-toggle { display: none !important; }
+  #toast { bottom: calc(86px + env(safe-area-inset-bottom)); max-width: calc(100% - 24px); text-align: center; }
+  .signin { padding: 48px 8px; }
+  .att-names { white-space: normal; }
+}
+@media (max-width: 420px) { .stat .stat-ic { display: none; } }
 </style>
 <script>try{if(localStorage.getItem("admin-theme")==="dark")document.documentElement.classList.add("dark");}catch(e){}</script>
 </head>
@@ -484,6 +567,11 @@ body { max-width: 1280px; }
     <div class="section">
       <h2>Te verwerken / te betalen <span class="count" id="invoices-count">0</span></h2>
       <div id="invoices-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
+      <details class="pdf-group" id="other-pdf-wrap" style="display:none; margin-top:10px; border-top:1px solid var(--border); padding-top:6px;">
+        <summary>Andere mails met PDF-bijlage <span class="count" id="other-pdf-count">0</span> <span class="muted" style="font-weight:400">— niet herkend als factuur; boek in of negeer</span></summary>
+        <span id="other-pdf-count2" style="display:none">0</span>
+        <div id="other-pdf-list"></div>
+      </details>
     </div>
     <div class="section">
       <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
@@ -848,7 +936,7 @@ body { max-width: 1280px; }
   </div>
 </div>
 <div id="toast"></div>
-<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3/lib/msal-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.30.0/lib/msal-browser.min.js" integrity="sha384-YnOjsoOxSYo65h1BXWnSq24bFbqW8HfzMWSEQxYEMRmjW9Vl1J3HZI3iZxqNYvIi" crossorigin="anonymous"></script>
 <script>
 // ============================================================
 //  CONFIG
@@ -875,6 +963,17 @@ const AGENDA_CALENDAR = "micha@vantuyl.it";  // agenda waar uren-afspraken in ko
 
 const SELF_DOMAINS = ["triplet-it.nl"];
 const SELF_EMAILS = ["michavantuyl@gmail.com", ...MAILBOXES.map(m => m.email.toLowerCase())];
+// Bevestigingsmails van platforms waar jij al een (verkoop)factuur hebt
+// ingediend — niet opnieuw als inkoop inboeken.
+// Eigen adressen bij klanten/opdrachtgevers (urenstaten e.d.) — nooit een inkoopfactuur.
+const SELF_ADDRESS_PREFIXES = ["micha.van.tuyl@"];
+// Hoeveel dagen terug het Overzicht alle mappen scant.
+const SCAN_DAYS = 60;
+const SKIP_INVOICE_DOMAINS = [
+  "headfirst.nl", "headfirst.group",
+  "striive.com", "striive.nl", "striive.eu",
+  "select.hr"
+];
 // ============================================================
 
 let msalInstance = null;
@@ -1166,29 +1265,62 @@ function senderName(e) {
   return at > 0 ? addr.slice(0, at) : addr;
 }
 function isOwnInvoice(email) {
-  // Een doorgestuurde mail (Fwd:/FW:) is een binnenkomende factuur die je
-  // zelf hebt doorgezet — niet je eigen uitgaande factuur, dus wél tonen.
+  // Een doorgestuurde mail is een binnenkomende factuur/bon die je zelf
+  // hebt doorgezet — niet je eigen uitgaande factuur, dus wél tonen.
+  // Prefixen: EN Fwd/FW, NL WG/Doorgestuurd/Doorsturen, DE WG/Weitergeleitet.
+  // Let op: oude regex `doorg[:\s]` matchte "Doorgestuurd:" níet (na "doorg"
+  // komt "e", geen :/spatie) — daardoor verdwenen NL-doorsturen uit het overzicht.
   const subj = (email.subject || "").toLowerCase().trimStart();
-  if (/^(fwd?|fw|doorg)[:\s]/.test(subj)) return false;
+  if (/^(fwd?|fw|wg|vl|doorgestuurd|doorsturen|weitergeleitet)[:\s]/.test(subj)) return false;
   const s = senderEmail(email).toLowerCase();
   if (SELF_EMAILS.includes(s)) return true;
+  if (SELF_ADDRESS_PREFIXES.some(p => s.startsWith(p))) return true;
   return SELF_DOMAINS.some(d => s.endsWith("@" + d) || s.endsWith("." + d));
+}
+// True = niet tonen als "te verwerken" / niet inboeken (platform-bevestiging e.d.).
+function isSkipInvoiceMail(email) {
+  const from = senderEmail(email).toLowerCase();
+  if (SKIP_INVOICE_DOMAINS.some(d => from === d || from.endsWith("@" + d) || from.endsWith("." + d))) return true;
+  // Moneybird's eigen dagelijkse update is geen factuur.
+  if (/@moneybird\.com$/.test(from) && /dagelijkse update|daily update/i.test(email.subject || "")) return true;
+  // Soms via SendGrid/etc. met HeadFirst/Striive alleen in subject/body.
+  const blob = ((email.subject || "") + " " + (email.bodyPreview || "")).toLowerCase();
+  if (/\b(headfirst|striive)\b/.test(blob) && /(factuur|invoice|bevestig|ontvangen|goedgekeurd|akkoord)/.test(blob)) return true;
+  return false;
 }
 function looksLikeInvoice(email) {
   const subj = (email.subject || "").toLowerCase();
   const body = (email.bodyPreview || "").toLowerCase().slice(0, 400);
   const from = senderEmail(email).toLowerCase();
-  const att = !!email.hasAttachments;
-  // Sterke signalen: altijd raak (subject of body).
-  const strong = /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov|receipt|betaalbewijs|betaalbevestiging|creditnota|credit ?note|vervaldatum|te betalen|betaaldatum/;
+  // _hasPdf komt uit de volledige scan (echte PDF/UBL-bijlage, ook inline);
+  // valt terug op Graph's hasAttachments voor oude code-paden.
+  const att = email._hasPdf != null ? !!email._hasPdf : !!email.hasAttachments;
+  const names = (email._attNames || "").toLowerCase();
+  if (att && /factuur|invoice|rechnung|nota|receipt|bon|kwitantie|creditnota|aanslag|premie|termijn/.test(names)) return true;
+  // Sterke signalen: altijd raak (subject of body) — ook zonder bijlage
+  // (PayPal-ontvangstbewijs e.d. zitten alleen in de mailtekst).
+  const strong = /factuur|invoice|rekening|betalingsherinnering|herinnering|premie|aanmaning|incasso|aov|receipt|ontvangstbewijs|betaalbewijs|betaalbevestiging|aankoopbewijs|creditnota|credit ?note|vervaldatum|te betalen|betaaldatum|payment confirmation|purchase confirmation/;
   if (strong.test(subj) || strong.test(body)) return true;
-  // Afzender-adres dat op facturatie/orders wijst + een bijlage → factuur/bon.
-  const fromPat = /(^|[+._-])(invoice|invoices|factuur|facturen|facturatie|billing|orders?|sales|shop|webshop)([+._-]|@)/;
+  // PayPal-betalingsbewijs: afzender + betaald/receipt, ook zonder bijlage.
+  if (/paypal\.(nl|com|be|de|eu)|@paypal\./.test(from) && /(ontvangstbewijs|receipt|betaald aan|you paid|payment to|betalingsbewijs)/.test(subj + " " + body)) return true;
+  // Afzender-adres dat op facturatie/orders/receipts wijst + een bijlage → factuur/bon.
+  const fromPat = /(^|[+._-])(invoice|invoices|factuur|facturen|facturatie|billing|orders?|sales|shop|webshop|receipts?)([+._-]|@)/;
   if (att && fromPat.test(from)) return true;
   // Zwakkere woorden (bestelling/order/bon/betaling) tellen alleen mét bijlage,
   // zodat marketing ("bestel nu!") niet meekomt.
-  const loose = /bestelbevestiging|orderbevestiging|bestelling|\border\b|kassabon|\bbon\b|ontvangstbevestiging|aankoop|purchase|statement|payment|betaling|betaald/;
+  const loose = /bestelbevestiging|orderbevestiging|bestelling|\border\b|kassabon|\bbon\b|ontvangstbevestiging|aankoop|purchase|statement|payment|betaling|betaald|thank you for your (order|purchase)/;
   if (att && (loose.test(subj) || loose.test(body))) return true;
+  return false;
+}
+// True = ontvangstbewijs/betaling waarvan de data in de mailtekst zit (geen PDF).
+// Die maken we zelf tot PDF en boeken we in Moneybird.
+function isBodyReceiptMail(email) {
+  const from = senderEmail(email).toLowerCase();
+  const subj = (email.subject || "").toLowerCase();
+  const body = (email.bodyPreview || "").toLowerCase();
+  const blob = subj + " " + body;
+  if (/paypal\.(nl|com|be|de|eu)|@paypal\./.test(from) && /(ontvangstbewijs|receipt|betaald aan|you paid|payment to|betalingsbewijs)/.test(blob)) return true;
+  if (/ontvangstbewijs/.test(subj) && /(paypal|betaald aan|€|eur)/.test(blob)) return true;
   return false;
 }
 function looksLikePayment(email) {
@@ -1270,41 +1402,80 @@ function mboxBadge(mbox) {
 // ============================================================
 //  RENDER
 // ============================================================
-function renderInvoices(emails) {
-  $("stat-invoices").textContent = emails.length;
-  $("invoices-count").textContent = emails.length;
-  const list = $("invoices-list");
-  if (emails.length === 0) { list.innerHTML = '<div class="empty">Niets te verwerken of te betalen. ✓</div>'; return; }
-  list.innerHTML = emails.map(e => {
-    const unreadBadge = !e.isRead ? '<span class="badge info">Nieuw</span>' : '';
-    const isPayment = looksLikePayment(e);
-    const typeBadge = isPayment ? '<span class="badge danger">Betalen</span>' : (e.hasAttachments ? '<span class="badge">PDF</span>' : '<span class="badge warn">geen bijlage</span>');
-    return `<div class="row" data-id="${escapeHtml(e.id)}">
-      <div class="info">
-        <div class="top">
-          ${mboxBadge(e._mailbox)}
-          <span class="from" title="${escapeHtml(senderEmail(e))}">${escapeHtml(senderName(e))}</span>
-          ${unreadBadge}
-          ${typeBadge}
-        </div>
-        <a href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener" class="subject-link">
-          <div class="subject">${escapeHtml(e.subject || '(geen onderwerp)')}</div>
-        </a>
-        <div class="meta">${escapeHtml(fmtRelative(e.receivedDateTime))} · ${escapeHtml(senderEmail(e))}</div>
+function invoiceRowHtml(e, opts) {
+  opts = opts || {};
+  const unreadBadge = !e.isRead ? '<span class="badge info">Nieuw</span>' : '';
+  const isPayment = looksLikePayment(e);
+  const hasPdf = e._hasPdf != null ? e._hasPdf : e.hasAttachments;
+  const bodyReceipt = !hasPdf && isBodyReceiptMail(e);
+  const canBook = (hasPdf || bodyReceipt) && !e._mbRef;
+  const inMb = e._mbRef ? `<span class="badge ok-mb" title="Factuurnummer ${escapeHtml(e._mbRef)} staat al in Moneybird">in Moneybird ✓</span>` : '';
+  const typeBadge = isPayment ? '<span class="badge danger">Betalen</span>'
+    : (hasPdf ? '<span class="badge">PDF</span>'
+      : (bodyReceipt ? '<span class="badge info">mail→PDF</span>' : '<span class="badge warn" title="Factuur staat niet als bijlage in de mail (link/portaal). Download de PDF en gebruik ‘PDF toevoegen’.">geen bijlage</span>'));
+  const folder = (!e._inInbox && e._folderName) ? ` · map: ${escapeHtml(e._folderName)}` : '';
+  const att = hasPdf && e._attNames ? `<div class="att-names" title="${escapeHtml(e._attNames)}">📎 ${escapeHtml(e._attNames)}</div>` : '';
+  const id = escapeHtml(e.id), mb = escapeHtml(e._mailbox.email);
+  const bookBtn = canBook
+    ? `<button class="btn" data-action="moneybird" data-id="${id}" data-mbox="${mb}" title="${bodyReceipt ? 'Maak PDF uit mailtekst en boek in als inkoopfactuur in Moneybird' : 'Boek PDF + data direct in als inkoopfactuur in Moneybird'}">→ Moneybird</button>`
+    : (!hasPdf && !bodyReceipt && !e._mbRef ? `<button class="btn" data-action="upload" data-id="${id}" title="Factuur-PDF zelf kiezen (bv. gedownload uit het portaal) en inboeken">PDF toevoegen</button>` : '');
+  const lastBtn = opts.other
+    ? `<button class="btn" data-action="ignore" data-id="${id}" title="Geen factuur — niet meer tonen">Negeer</button>`
+    : `<button class="btn primary" data-action="processed" data-id="${id}" data-mbox="${mb}" data-sender="${escapeHtml(senderEmail(e))}">Verwerkt ✓</button>`;
+  return `<div class="row" data-id="${id}">
+    <div class="info">
+      <div class="top">
+        ${mboxBadge(e._mailbox)}
+        <span class="from" title="${escapeHtml(senderEmail(e))}">${escapeHtml(senderName(e))}</span>
+        ${unreadBadge}
+        ${typeBadge}
+        ${inMb}
       </div>
-      <div class="actions">
-        <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Open</a>
-        ${e.hasAttachments ? `<button class="btn" data-action="moneybird" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" title="Boek PDF + data direct in als inkoopfactuur in Moneybird">→ Moneybird</button>` : ''}
-        <button class="btn primary" data-action="processed" data-id="${escapeHtml(e.id)}" data-mbox="${escapeHtml(e._mailbox.email)}" data-sender="${escapeHtml(senderEmail(e))}">Verwerkt ✓</button>
-      </div>
-    </div>`;
-  }).join("");
+      <a href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener" class="subject-link">
+        <div class="subject">${escapeHtml(e.subject || '(geen onderwerp)')}</div>
+      </a>
+      ${att}
+      <div class="meta">${escapeHtml(fmtRelative(e.receivedDateTime))} · ${escapeHtml(senderEmail(e))}${folder}</div>
+    </div>
+    <div class="actions">
+      <a class="btn" href="${escapeHtml(e.webLink || '#')}" target="_blank" rel="noopener">Open</a>
+      ${bookBtn}
+      ${lastBtn}
+    </div>
+  </div>`;
+}
+function wireInvoiceRowButtons(list) {
   list.querySelectorAll('[data-action="processed"]').forEach(btn => {
     btn.addEventListener('click', () => markProcessed(btn, btn.dataset.id, btn.dataset.mbox, btn.dataset.sender));
   });
   list.querySelectorAll('[data-action="moneybird"]').forEach(btn => {
     btn.addEventListener('click', () => sendRowToMoneybird(btn, btn.dataset.id, btn.dataset.mbox));
   });
+  list.querySelectorAll('[data-action="upload"]').forEach(btn => {
+    btn.addEventListener('click', () => pickPdfForRow(btn));
+  });
+  list.querySelectorAll('[data-action="ignore"]').forEach(btn => {
+    btn.addEventListener('click', () => ignoreOverviewMail(btn, btn.dataset.id));
+  });
+}
+function renderInvoices(emails) {
+  $("stat-invoices").textContent = emails.length;
+  $("invoices-count").textContent = emails.length;
+  const list = $("invoices-list");
+  if (emails.length === 0) { list.innerHTML = '<div class="empty">Niets te verwerken of te betalen. ✓</div>'; return; }
+  list.innerHTML = emails.map(e => invoiceRowHtml(e)).join("");
+  wireInvoiceRowButtons(list);
+}
+// Alle overige mails met een PDF/UBL-bijlage die níet als factuur herkend zijn
+// (polis, aanslag, offerte, …) — zodat er nooit een bijlage onzichtbaar blijft.
+function renderOtherPdf(emails) {
+  const wrap = $("other-pdf-wrap"); if (!wrap) return;
+  $("other-pdf-count").textContent = emails.length;
+  $("other-pdf-count2").textContent = emails.length;
+  wrap.style.display = emails.length ? "" : "none";
+  const list = $("other-pdf-list");
+  list.innerHTML = emails.length ? emails.map(e => invoiceRowHtml(e, { other: true })).join("") : '<div class="empty">Geen andere mails met PDF.</div>';
+  wireInvoiceRowButtons(list);
 }
 function renderReply(emails) {
   $("stat-reply").textContent = emails.length;
@@ -1521,6 +1692,176 @@ async function markHandled(btn, id, mboxEmail) {
 }
 
 // ============================================================
+//  MAILBOX-SCAN (vervangt de trefwoord-$search)
+//  Waarom: $search gaf per trefwoord max. 20 resultaten op relevantie
+//  (niet op datum) en alleen uit de Inbox → facturen met PDF vielen
+//  weg zodra de mailbox groot is of een regel ze in een submap zette.
+//  Nu: álle mails van de laatste SCAN_DAYS dagen uit álle mappen
+//  (behalve Verzonden/Verwijderd/Concepten/Ongewenst/Archief en de
+//  Verwerkt-map incl. submappen), met de échte bijlagenlijst erbij.
+// ============================================================
+const _folderInfoCache = {};
+async function mailboxFolderInfo(mbox) {
+  if (_folderInfoCache[mbox.email]) return _folderInfoCache[mbox.email];
+  const base = userPath(mbox);
+  const wk = {};
+  for (const name of ["inbox", "sentitems", "deleteditems", "drafts", "junkemail", "outbox", "archive"]) {
+    try { const f = await graph("GET", `${base}/mailFolders/${name}?$select=id`); if (f && f.id) wk[name] = f.id; } catch (e) { /* bestaat niet */ }
+  }
+  let processedRoot = null;
+  try { processedRoot = await findFolderId(mbox, PROCESSED_FOLDER_NAME); } catch (e) {}
+  const skipRoots = new Set([wk.sentitems, wk.deleteditems, wk.drafts, wk.junkemail, wk.outbox, wk.archive, processedRoot].filter(Boolean));
+  const skip = new Set(skipRoots);
+  const names = {};
+  async function walk(url, skipping, depth) {
+    let r; try { r = await graph("GET", url); } catch (e) { return; }
+    for (const f of (r.value || [])) {
+      names[f.id] = f.displayName;
+      const sk = skipping || skipRoots.has(f.id);
+      if (sk) skip.add(f.id);
+      if (f.childFolderCount > 0 && depth < 6) await walk(`${base}/mailFolders/${f.id}/childFolders?$top=100&$select=id,displayName,childFolderCount`, sk, depth + 1);
+    }
+  }
+  await walk(`${base}/mailFolders?$top=100&$select=id,displayName,childFolderCount`, false, 0);
+  const info = { inboxId: wk.inbox || null, skip, names, processedRoot };
+  _folderInfoCache[mbox.email] = info;
+  return info;
+}
+
+const PDF_ATT_RE = /\.pdf$/i;
+function annotateAttachments(m) {
+  const atts = (m.attachments || []).filter(a => a && a.name);
+  const pdfs = atts.filter(a => PDF_ATT_RE.test(a.name) || /pdf/i.test(a.contentType || ""));
+  const ubl = atts.filter(a => /\.(xml|ubl)$/i.test(a.name) || /xml/i.test(a.contentType || ""));
+  m._hasPdf = pdfs.length > 0 || ubl.length > 0;
+  m._attNames = pdfs.concat(ubl).map(a => a.name).join(", ");
+  m._fileCount = atts.filter(a => !a.isInline).length;
+  delete m.attachments;
+  return m;
+}
+
+async function scanMailbox(mbox, days, info) {
+  const base = userPath(mbox);
+  const since = new Date(Date.now() - days * 86400000).toISOString();
+  const sel = "id,internetMessageId,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId";
+  let url = `${base}/messages?$filter=${encodeURIComponent("receivedDateTime ge " + since)}&$orderby=receivedDateTime desc&$top=100&$select=${sel}&$expand=${encodeURIComponent("attachments($select=name,contentType,size,isInline)")}`;
+  const out = []; let guard = 0;
+  while (url && guard++ < 25) {
+    const r = await graph("GET", url);
+    for (const m of (r.value || [])) {
+      if (info.skip.has(m.parentFolderId)) continue;
+      m._mailbox = mbox;
+      m._folderName = info.names[m.parentFolderId] || "";
+      m._inInbox = m.parentFolderId === info.inboxId;
+      out.push(annotateAttachments(m));
+    }
+    url = r["@odata.nextLink"] || null;
+  }
+  return out;
+}
+
+// Scant alle mailboxen. Aliassen van dezelfde mailbox (bv. micha@triplet-it.nl
+// en micha@vantuyl.it) worden herkend aan hetzelfde Inbox-id en maar één keer
+// gescand; mails die in meerdere mailboxen staan (zelfde internetMessageId)
+// tellen één keer.
+let lastScan = null;
+async function scanAllMailboxes(days) {
+  const infos = await Promise.all(MAILBOXES.map(m => mailboxFolderInfo(m).catch(e => { showError(`${m.email}: ${e.message}`); return null; })));
+  const seenInbox = new Set(); const targets = [];
+  MAILBOXES.forEach((m, i) => {
+    const info = infos[i]; if (!info) return;
+    if (info.inboxId && seenInbox.has(info.inboxId)) { devLog(`${m.email}: alias van een al gescande mailbox — overgeslagen`, "dim"); return; }
+    if (info.inboxId) seenInbox.add(info.inboxId);
+    targets.push([m, info]);
+  });
+  const per = await Promise.all(targets.map(([m, info]) => scanMailbox(m, days, info).catch(e => { showError(`${m.email}: ${e.message}`); return []; })));
+  const seen = new Set(); const all = [];
+  for (const m of per.flat()) {
+    const key = (m.internetMessageId || m.id);
+    if (seen.has(key)) continue;
+    seen.add(key); all.push(m);
+  }
+  all.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+  lastScan = { at: Date.now(), all };
+  return all;
+}
+
+// Negeerlijst voor het Overzicht (per browser).
+const OVZ_IGNORE_KEY = "ovz_ignored_v1";
+function loadOvzIgnored() { try { const a = JSON.parse(localStorage.getItem(OVZ_IGNORE_KEY)); if (Array.isArray(a)) return new Set(a); } catch (e) {} return new Set(); }
+let ovzIgnored = loadOvzIgnored();
+function ovzKey(e) { return e.internetMessageId || e.id; }
+function ignoreOverviewMail(btn, id) {
+  const e = (window.lastScanRows || []).find(x => x.id === id);
+  if (e) { ovzIgnored.add(ovzKey(e)); try { localStorage.setItem(OVZ_IGNORE_KEY, JSON.stringify([...ovzIgnored].slice(-2000))); } catch (err) {} }
+  const row = btn.closest('.row');
+  const inOther = !!btn.closest('#other-pdf-list');
+  fadeOutRow(row, () => inOther
+    ? decrementCount('other-pdf-count', 'other-pdf-count2', 'other-pdf-list', 'Geen andere mails met PDF.')
+    : decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
+}
+
+// Moneybird-referenties (factuurnummers) — cache, zodat we kunnen tonen wat
+// er al in staat én dubbel inboeken voorkomen.
+let _mbRefCache = null;
+async function mbPurchaseRefMap(force) {
+  if (_mbRefCache && !force && Date.now() - _mbRefCache.at < 10 * 60000) return _mbRefCache.map;
+  const map = new Map();
+  for (let p = 1; p <= 60; p++) {
+    const b = await mbFetch(`documents/purchase_invoices.json?per_page=100&page=${p}`);
+    if (!Array.isArray(b) || !b.length) break;
+    b.forEach(iv => { const r = String(iv.reference || "").trim().toLowerCase(); if (r) map.set(r, { id: iv.id, hasAtt: !!(iv.attachments && iv.attachments.length) }); });
+    if (b.length < 100) break;
+  }
+  _mbRefCache = { at: Date.now(), map };
+  return map;
+}
+// Zoekt een Moneybird-factuurnummer terug in onderwerp/preview/bestandsnaam.
+function findMbRefInMail(e, refMap) {
+  if (!refMap || !refMap.size) return null;
+  const hay = ((e.subject || "") + " " + (e.bodyPreview || "").slice(0, 300) + " " + (e._attNames || "")).toLowerCase();
+  const tokens = hay.match(/[a-z0-9][a-z0-9\-\/.]{4,}[a-z0-9]/g) || [];
+  for (const t of tokens) { if (refMap.has(t)) return t; }
+  return null;
+}
+
+// Upload-knop op een Overzicht-rij (factuur zit achter een link/portaal):
+// kies de PDF (werkt ook op iPhone via Bestanden), dan: uitlezen → Moneybird
+// → mail naar Verwerkt.
+function pickPdfForRow(btn) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "application/pdf,.pdf";
+  inp.style.display = "none";
+  inp.onchange = () => { const f = inp.files && inp.files[0]; inp.remove(); if (f) bookRowWithPdf(btn, f); };
+  document.body.appendChild(inp);
+  inp.click();
+}
+async function bookRowWithPdf(btn, file) {
+  const id = btn.dataset.id;
+  const email = (window.lastScanRows || []).find(e => e.id === id);
+  if (!email) { showToast("Mail niet in cache — ververs de pagina", "err"); return; }
+  if (!(/\.pdf$/i.test(file.name) || file.type === "application/pdf")) { showToast("Bestand is geen PDF", "err"); return; }
+  const row = btn.closest('.row'); const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "Uitlezen…";
+  try {
+    const pdfB64 = arrayBufferToBase64(await file.arrayBuffer());
+    const extracted = await extractInvoiceViaWorker(pdfB64);
+    btn.textContent = "Inboeken…";
+    const r = await mbBookPurchaseFromExtracted(extracted, pdfB64, file.name);
+    try {
+      const pid = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
+      const sub = await findOrCreateSubfolder(email._mailbox, pid, senderFolderName(senderEmail(email)));
+      await moveMessage(email._mailbox, email.id, sub || pid);
+    } catch (e) { showToast("In Moneybird, maar mail verplaatsen mislukte: " + e.message, "err"); }
+    showToast(r.duplicate ? `Stond al in Moneybird (${extracted.number}) — mail verwerkt` : `Ingeboekt: ${extracted.supplier_name} € ${(Number(extracted.invoice_total) || 0).toFixed(2)}`, "ok");
+    fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
+  } catch (e) {
+    btn.disabled = false; btn.textContent = orig;
+    showToast("Mislukt: " + (e.message || e), "err");
+  }
+}
+
+// ============================================================
 //  MAIN LOAD
 // ============================================================
 async function loadAll() {
@@ -1530,69 +1871,29 @@ async function loadAll() {
   setStatus("data ophalen…", true);
 
   try {
-    const queries = ["factuur", "invoice", "rekening", "betalingsherinnering", "herinnering", "premie", "aanmaning", "receipt", "bestelbevestiging", "betaalbewijs", "order"];
+    const all = await scanAllMailboxes(SCAN_DAYS);
+    const events = await listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; });
+    window.lastScanRows = all;
+    const allInbox = all.filter(e => e._inInbox);
 
-// Per mailbox: serieel ophalen (om MailboxConcurrency-limiet te respecteren).
-// Tussen mailboxen: parallel.
-async function fetchMailbox(m) {
-  try {
-    const inbox = await listInbox(m, 50);
-    const invoices = [];
-    for (const q of queries) {
-      try {
-        const r = await searchMessages(m, q, 20);
-        invoices.push(...r);
-      } catch (e) { /* swallow individual query failure */ }
-    }
-    return { inbox, invoices };
-  } catch (e) {
-    showError(`${m.email}: ${e.message}`);
-    return { inbox: [], invoices: [] };
-  }
-}
+    let refMap = null;
+    try { refMap = await mbPurchaseRefMap(); } catch (e) { devLog("Moneybird-referenties niet geladen: " + e.message, "warn"); }
 
-const [perMbox, events] = await Promise.all([
-  Promise.all(MAILBOXES.map(fetchMailbox)),
-  listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; })
-]);
-
-const allInbox = perMbox.flatMap(x => x.inbox);
-// Kandidaten = keyword-zoekresultaten ÉN de recente inbox-mails. Zo vallen
-// facturen/bonnen die de zoekwoorden missen (bv. "Bestelbevestiging") niet
-// meer buiten de boot; looksLikeInvoice (incl. bijlage-signaal) filtert.
-const allInvoiceCandidates = perMbox.flatMap(x => x.invoices.concat(x.inbox));
-
-    // Dedupe by id (within a mailbox, ids are unique; across mailboxes they should also be unique)
-    const seen = new Set();
-    const invoiceCandidates = [];
-    for (const m of allInvoiceCandidates) {
-      if (!m.id || seen.has(m.id)) continue;
-      seen.add(m.id);
-      invoiceCandidates.push(m);
-    }
-
-    // Determine "processed" folder IDs per mailbox
-    const processedIds = {};
-    await Promise.all(MAILBOXES.map(async m => {
-      try { processedIds[m.email] = await findFolderId(m, PROCESSED_FOLDER_NAME); }
-      catch (e) { processedIds[m.email] = null; }
-    }));
-
-    const sixtyDaysAgo = Date.now() - 60 * 86400000;
-    const invoices = invoiceCandidates
-      .filter(e => looksLikeInvoice(e))
+    const base = all
       .filter(e => !isOwnInvoice(e))
-      .filter(e => {
-        const pid = e._mailbox && processedIds[e._mailbox.email];
-        return !pid || e.parentFolderId !== pid;
-      })
-      .filter(e => {
-        const t = new Date(e.receivedDateTime).getTime();
-        return !isNaN(t) && t >= sixtyDaysAgo;
-      })
-      .sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+      .filter(e => !isSkipInvoiceMail(e))
+      .filter(e => !ovzIgnored.has(ovzKey(e)));
+    const invoices = base.filter(e => looksLikeInvoice(e));
+    const invIds = new Set(invoices.map(e => e.id));
+    invoices.forEach(e => { e._mbRef = findMbRefInMail(e, refMap); });
+    // Nog niet in Moneybird eerst; wat er al in staat onderaan.
+    invoices.sort((a, b) => (!!a._mbRef - !!b._mbRef) || (new Date(b.receivedDateTime) - new Date(a.receivedDateTime)));
+    const otherPdf = base.filter(e => e._hasPdf && !invIds.has(e.id));
+    otherPdf.forEach(e => { e._mbRef = findMbRefInMail(e, refMap); });
+
     window.lastInvoices = invoices;
     renderInvoices(invoices);
+    renderOtherPdf(otherPdf);
 
     const repliesNeeded = allInbox.filter(needsReply).sort((a,b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime)).slice(0, 12);
     renderReply(repliesNeeded);
@@ -1604,7 +1905,7 @@ const allInvoiceCandidates = perMbox.flatMap(x => x.invoices.concat(x.inbox));
 
     renderEvents(events);
 
-    setStatus(`bijgewerkt ${new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })} · ${MAILBOXES.length} mailboxen`, false);
+    setStatus(`bijgewerkt ${new Date().toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })} · ${all.length} mails (${SCAN_DAYS} dagen) gescand`, false);
   } catch (e) {
     showError("Algemeen: " + (e.message || e));
     setStatus("fout bij laden", false);
@@ -1950,41 +2251,21 @@ function arrayBufferToBase64(buf) {
 async function loadInvoiceEmails() {
   if (!$("emails-list")) return;
   $("emails-list").innerHTML = '<p class="muted">Laden...</p>';
-  invoiceEmails = [];
-  // Zelfde filters als Overzicht's "Te verwerken" zodat de twee lijsten
-  // overeenkomen — alleen extra filter op hasAttachments (PDF-flow heeft
-  // bijlage nodig).
-  const sinceMs = Date.now() - 60 * 86400000;
-  const queries = ["factuur", "invoice", "betalingsherinnering", "premie", "aanmaning", "receipt"];
-
-  // Resolve processed-folder ids parallel — redundant met inbox-scope
-  // (Verwerkt zit buiten inbox) maar defensief.
-  const processedIds = {};
-  await Promise.all(MAILBOXES.map(async m => {
-    try { processedIds[m.email] = await findFolderId(m, PROCESSED_FOLDER_NAME); }
-    catch (e) { processedIds[m.email] = null; }
-  }));
-
-  for (const m of MAILBOXES) {
-    try {
-      for (const q of queries) {
-        let results = [];
-        try { results = await searchMessages(m, q, 25); } catch (e) { continue; }
-        for (const msg of results) {
-          if (invoiceEmails.find(x => x.id === msg.id)) continue;
-          if (!msg.hasAttachments) continue;
-          if (new Date(msg.receivedDateTime).getTime() < sinceMs) continue;
-          const pid = processedIds[m.email];
-          if (pid && msg.parentFolderId === pid) continue;
-          if (!looksLikeInvoice(msg)) continue;
-          if (isOwnInvoice(msg)) continue;
-          invoiceEmails.push(msg);
-        }
-      }
-    } catch (e) { console.warn("Mailbox " + m.email + ": " + e.message); }
+  // Zelfde volledige scan als het Overzicht (alle mappen, echte bijlagen),
+  // alleen mails met PDF/UBL of een ontvangstbewijs in de mailtekst.
+  try {
+    const all = (lastScan && Date.now() - lastScan.at < 5 * 60000) ? lastScan.all : await scanAllMailboxes(SCAN_DAYS);
+    invoiceEmails = all
+      .filter(e => e._hasPdf || isBodyReceiptMail(e))
+      .filter(e => looksLikeInvoice(e))
+      .filter(e => !isOwnInvoice(e))
+      .filter(e => !isSkipInvoiceMail(e))
+      .filter(e => !ovzIgnored.has(ovzKey(e)))
+      .filter(e => !e._mbRef);   // staat al in Moneybird
+  } catch (e) {
+    $("emails-list").innerHTML = `<p class="err">Laden mislukt: ${escapeHtml(e.message || e)}</p>`;
+    return;
   }
-  invoiceEmails.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
-  await annotateFolderNames();
   renderEmails();
 }
 
@@ -2013,7 +2294,7 @@ function renderEmails() {
   const list = $("emails-list");
   if (!list) return;
   if (invoiceEmails.length === 0) {
-    list.innerHTML = '<p class="muted">Geen mails met bijlage gevonden in de laatste 14 dagen.</p>';
+    list.innerHTML = '<p class="muted">Geen onverwerkte factuurmails met bijlage gevonden in de laatste ' + SCAN_DAYS + ' dagen.</p>';
     return;
   }
   list.innerHTML = invoiceEmails.slice(0, 20).map((e) => {
@@ -2095,7 +2376,7 @@ async function extractInvoiceViaWorker(pdfBase64) {
   try {
     res = await fetch(extractUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await projAuthHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ pdf_base64: pdfBase64 })
     });
   } catch (netErr) {
@@ -2140,6 +2421,167 @@ async function findRelationByName(name) {
   return null;
 }
 
+// ============================================================
+//  BODY-RECEIPTS (PayPal e.d. zonder PDF-bijlage)
+// ============================================================
+function htmlToPlainText(html) {
+  if (!html) return "";
+  const d = document.createElement("div");
+  d.innerHTML = String(html)
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(p|div|tr|li|h[1-6])>/gi, "\n")
+    .replace(/&nbsp;/gi, " ");
+  return (d.textContent || d.innerText || "").replace(/[ \t]+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
+}
+function parseEuroAmount(s) {
+  if (!s) return null;
+  const m = String(s).replace(/\s/g, " ").match(/€?\s*(\d{1,3}(?:[.\s]\d{3})*[.,]\d{2}|\d+[.,]\d{2}|\d+)/);
+  if (!m) return null;
+  let n = m[1].replace(/\s/g, "");
+  if (n.includes(",") && n.includes(".")) n = n.replace(/\./g, "").replace(",", ".");
+  else if (n.includes(",")) n = n.replace(",", ".");
+  const v = parseFloat(n);
+  return isNaN(v) ? null : v;
+}
+function parseNlDate(s) {
+  if (!s) return null;
+  const t = String(s).toLowerCase().trim();
+  const iso = t.match(/(\d{4})-(\d{2})-(\d{2})/);
+  if (iso) return `${iso[1]}-${iso[2]}-${iso[3]}`;
+  const months = { jan:1, januari:1, feb:2, februari:2, mrt:3, maart:3, mar:3, apr:4, april:4, mei:5, may:5, jun:6, juni:6, jul:7, juli:7, aug:8, augustus:8, sep:9, sept:9, september:9, okt:10, oct:10, oktober:10, october:10, nov:11, november:11, dec:12, december:12 };
+  const m = t.match(/(\d{1,2})\s+([a-z]+)\.?\s+(\d{4})/i);
+  if (m && months[m[2]]) {
+    const mm = String(months[m[2]]).padStart(2, "0");
+    const dd = String(parseInt(m[1], 10)).padStart(2, "0");
+    return `${m[3]}-${mm}-${dd}`;
+  }
+  const dmy = t.match(/(\d{1,2})[\/\-.](\d{1,2})[\/\-.](\d{4})/);
+  if (dmy) return `${dmy[3]}-${String(dmy[2]).padStart(2,"0")}-${String(dmy[1]).padStart(2,"0")}`;
+  return null;
+}
+function fieldAfterLabel(text, labels) {
+  for (const label of labels) {
+    const re = new RegExp(label + "\\s*[:\\n]\\s*([^\\n]+)", "i");
+    const m = text.match(re);
+    if (m) return m[1].replace(/\s+/g, " ").trim();
+  }
+  return "";
+}
+// PayPal NL/EN ontvangstbewijs → extracted-object (zelfde vorm als /extract).
+function parsePayPalReceipt(bodyText, email) {
+  const text = String(bodyText || "").replace(/\u00a0/g, " ");
+  const subj = (email && email.subject) || "";
+  let merchant = "";
+  let total = null;
+  // "U hebt € 0,99 EUR betaald aan Apple Services" / "You paid €0.99 EUR to Apple Services"
+  let m = text.match(/u hebt\s+€?\s*([\d.,]+)\s*(?:EUR|USD|GBP)?\s*betaald aan\s+([^\n]+)/i)
+        || text.match(/you paid\s+€?\$?\s*([\d.,]+)\s*(?:EUR|USD|GBP)?\s*to\s+([^\n]+)/i);
+  if (m) {
+    total = parseEuroAmount(m[1]);
+    merchant = m[2].replace(/\s+/g, " ").trim();
+  }
+  if (!merchant) {
+    merchant = fieldAfterLabel(text, ["Webwinkel", "Merchant", "Seller", "Betaald aan", "Paid to"])
+      || (subj.match(/(?:aan|to)\s+(.+)$/i) || [])[1]
+      || "";
+    merchant = merchant.replace(/\s+/g, " ").trim();
+  }
+  if (total == null) {
+    total = parseEuroAmount(fieldAfterLabel(text, ["Totaal", "Total", "Amount"]))
+      || parseEuroAmount((text.match(/€\s*([\d.,]+)/) || [])[1]);
+  }
+  const invoiceRef = fieldAfterLabel(text, ["Factuurreferentie", "Invoice ID", "Invoice number", "Invoice #"]);
+  const txRef = fieldAfterLabel(text, ["Transactiereferentie", "Transaction ID", "Transaction reference"]);
+  const dateRaw = fieldAfterLabel(text, ["Transactiedatum", "Date", "Payment date", "Transaction date"]);
+  let invoiceDate = parseNlDate(dateRaw);
+  if (!invoiceDate && email && email.receivedDateTime) {
+    invoiceDate = new Date(email.receivedDateTime).toISOString().slice(0, 10);
+  }
+  if (!invoiceDate) invoiceDate = new Date().toISOString().slice(0, 10);
+  if (!merchant || !(total > 0)) return null;
+
+  // Geen btw-uitsplitsing in PayPal-mail → bedrag is incl. btw; voor NL/EUR 21%.
+  const curMatch = text.match(/\b(EUR|USD|GBP)\b/i);
+  const currency = (curMatch ? curMatch[1] : "EUR").toUpperCase();
+  const vatPct = currency === "EUR" ? 21 : 0;
+  const excl = vatPct ? Math.round((total / (1 + vatPct / 100)) * 100) / 100 : total;
+  const number = invoiceRef || txRef || ("PP-" + invoiceDate.replace(/-/g, ""));
+  const desc = "PayPal-betaling" + (txRef ? " · " + txRef : "");
+  return {
+    supplier_name: merchant.slice(0, 120),
+    number: number.slice(0, 80),
+    invoice_date: invoiceDate,
+    invoice_expiry_date: invoiceDate,
+    currency,
+    invoice_total: total,
+    lines: [{ description: desc.slice(0, 200), amount: excl, vat_rate: vatPct }],
+    _source: "paypal-body",
+    _tx_ref: txRef || "",
+    _paid_with: fieldAfterLabel(text, ["Betaald met", "Paid with", "Funding source"]) || ""
+  };
+}
+// Minimale 1-pagina PDF (Helvetica) uit extracted receipt — geen externe lib.
+function buildReceiptPdfBase64(ex) {
+  const esc = (s) => String(s || "").replace(/\\/g, "\\\\").replace(/\(/g, "\\(").replace(/\)/g, "\\)").replace(/[^\x20-\x7E]/g, "?");
+  const lines = [
+    "BETALINGSBEWIJS (uit PayPal-mail)",
+    "",
+    "Leverancier: " + (ex.supplier_name || ""),
+    "Factuurnr:   " + (ex.number || ""),
+    "Datum:       " + (ex.invoice_date || ""),
+    "Valuta:      " + (ex.currency || "EUR"),
+    "Totaal incl: " + (ex.currency || "EUR") + " " + Number(ex.invoice_total || 0).toFixed(2),
+  ];
+  if (ex._tx_ref) lines.push("Transactie:  " + ex._tx_ref);
+  if (ex._paid_with) lines.push("Betaald met: " + ex._paid_with);
+  lines.push("");
+  (ex.lines || []).forEach(l => {
+    lines.push("- " + (l.description || "Kosten") + "  excl " + Number(l.amount || 0).toFixed(2) + " (btw " + (l.vat_rate || 0) + "%)");
+  });
+  lines.push("");
+  lines.push("Gegenereerd door Triplet Admin Dashboard uit mailtekst.");
+
+  let content = "BT /F1 11 Tf 50 780 Td 14 TL\n";
+  lines.forEach((line, i) => {
+    if (i === 0) content += "/F1 14 Tf (" + esc(line) + ") Tj T*\n/F1 11 Tf\n";
+    else content += "(" + esc(line) + ") Tj T*\n";
+  });
+  content += "ET";
+
+  const objects = [];
+  objects.push("1 0 obj<< /Type /Catalog /Pages 2 0 R >>endobj\n");
+  objects.push("2 0 obj<< /Type /Pages /Kids [3 0 R] /Count 1 >>endobj\n");
+  objects.push("3 0 obj<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Contents 4 0 R /Resources<< /Font<< /F1 5 0 R >> >> >>endobj\n");
+  objects.push("4 0 obj<< /Length " + content.length + " >>stream\n" + content + "\nendstream\nendobj\n");
+  objects.push("5 0 obj<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>endobj\n");
+
+  let pdf = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const obj of objects) {
+    offsets.push(pdf.length);
+    pdf += obj;
+  }
+  const xref = pdf.length;
+  pdf += "xref\n0 " + (objects.length + 1) + "\n";
+  pdf += "0000000000 65535 f \n";
+  for (let i = 1; i < offsets.length; i++) {
+    pdf += String(offsets[i]).padStart(10, "0") + " 00000 n \n";
+  }
+  pdf += "trailer<< /Size " + (objects.length + 1) + " /Root 1 0 R >>\nstartxref\n" + xref + "\n%%EOF";
+  return btoa(pdf);
+}
+async function extractBodyReceiptFromEmail(email) {
+  const base = userPath(email._mailbox);
+  const msg = await graph("GET", `${base}/messages/${email.id}?$select=id,subject,body,bodyPreview,from,receivedDateTime`);
+  const raw = msg.body && msg.body.content || "";
+  const text = (msg.body && msg.body.contentType === "html") ? htmlToPlainText(raw) : (raw || msg.bodyPreview || "");
+  const extracted = parsePayPalReceipt(text, { ...email, subject: msg.subject || email.subject, receivedDateTime: msg.receivedDateTime || email.receivedDateTime });
+  if (!extracted) throw new Error("Kon het ontvangstbewijs niet uitlezen uit de mailtekst (verwacht PayPal-formaat met bedrag + leverancier).");
+  const pdfB64 = buildReceiptPdfBase64(extracted);
+  const filename = "paypal-" + (extracted.number || "receipt").replace(/[^\w.-]+/g, "_") + ".pdf";
+  return { extracted, pdfB64, filename };
+}
+
 async function sendSelectedToMoneybird() {
   $("flow-log").innerHTML = "";
   const email = invoiceEmails.find(e => e.id === selectedEmailId);
@@ -2157,6 +2599,47 @@ async function sendSelectedToMoneybird() {
     const atts = await graph("GET", `${base}/messages/${email.id}/attachments?$select=id,name,contentType,size`);
     const list = atts.value || [];
     const pdf = list.find(a => /\.pdf$/i.test(a.name || "") || a.contentType === "application/pdf");
+
+    // Geen PDF-bijlage maar wél een PayPal/ontvangstbewijs in de mailtekst → PDF synthetiseren.
+    if (!pdf && isBodyReceiptMail(email)) {
+      step1.className = "flow-step ok";
+      step1.textContent = "1/4 — Geen PDF-bijlage; ontvangstbewijs uit mailtekst";
+      step2 = logStep("2/4 — Mailtekst uitlezen + PDF genereren...");
+      const { extracted, pdfB64, filename } = await extractBodyReceiptFromEmail(email);
+      step2.className = "flow-step ok";
+      step2.textContent = `2/4 — Uit mail: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)} (+ PDF gemaakt)`;
+
+      step3 = logStep("3/4 — Inboeken in Moneybird (contact + inkoopfactuur + PDF)...");
+      const { invId, contactCreated, attachErr, duplicate } = await mbBookPurchaseFromExtracted(extracted, pdfB64, filename);
+      const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/${invId}`;
+      step3.className = "flow-step ok";
+      step3.textContent = `3/4 — ${duplicate ? "Stond al in Moneybird — niet dubbel ingeboekt" : "Ingeboekt in Moneybird"}${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
+        (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : (duplicate ? "" : " + PDF bijgevoegd")) + ` — ${invUrl}`;
+
+      step4 = logStep("4/4 — Mail verplaatsen naar Verwerkt-map...");
+      try {
+        const folderId = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
+        if (email.parentFolderId && email.parentFolderId === folderId) {
+          step4.className = "flow-step ok";
+          step4.textContent = `4/4 — Mail stond al in ${PROCESSED_FOLDER_NAME} (geen move nodig)`;
+        } else {
+          await moveMessage(email._mailbox, email.id, folderId);
+          step4.className = "flow-step ok";
+          step4.textContent = "4/4 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
+        }
+      } catch (e) {
+        step4.className = "flow-step err";
+        step4.textContent = "4/4 — Verplaatsen mislukt (factuur staat wel in Moneybird): " + e.message;
+      }
+
+      logStep(`Klaar! Open in Moneybird: ${invUrl}`, "ok");
+      showToast("Ingeboekt in Moneybird", "ok");
+      invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
+      selectedEmailId = null;
+      renderEmails();
+      return;
+    }
+
     if (!pdf) throw new Error("Geen PDF-bijlage gevonden in deze mail.");
     const ubl = list.find(a => /\.(xml|ubl)$/i.test(a.name || "") || /xml/i.test(a.contentType || ""));
     step1.className = "flow-step ok";
@@ -2179,11 +2662,11 @@ async function sendSelectedToMoneybird() {
     step2.textContent = `2/4 — Geëxtraheerd via ${extractedVia}: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
 
     step3 = logStep("3/4 — Inboeken in Moneybird (contact + inkoopfactuur + PDF)...");
-    const { invId, contactCreated, attachErr } = await mbBookPurchaseFromExtracted(extracted, pdfB64, pdf.name);
+    const { invId, contactCreated, attachErr, duplicate } = await mbBookPurchaseFromExtracted(extracted, pdfB64, pdf.name);
     const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/${invId}`;
     step3.className = "flow-step ok";
-    step3.textContent = `3/4 — Ingeboekt in Moneybird${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
-      (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : " + PDF bijgevoegd") + ` — ${invUrl}`;
+    step3.textContent = `3/4 — ${duplicate ? "Stond al in Moneybird — niet dubbel ingeboekt" : "Ingeboekt in Moneybird"}${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
+      (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : (duplicate ? "" : " + PDF bijgevoegd")) + ` — ${invUrl}`;
 
     step4 = logStep("4/4 — Mail verplaatsen naar Verwerkt-map...");
     try {
@@ -2223,7 +2706,7 @@ async function sendSelectedToMoneybird() {
 // kort de globale state na te bootsen die sendSelectedToMoneybird verwacht.
 // Voordeel: één gedeelde flow, geen code-duplicatie.
 async function sendRowToMoneybird(btn, id, mboxEmail) {
-  const email = (window.lastInvoices || []).find(e =>
+  const email = (window.lastScanRows || window.lastInvoices || []).find(e =>
     e.id === id && e._mailbox && e._mailbox.email === mboxEmail
   );
   if (!email) { showToast("Mail niet in cache — ververs de pagina", "err"); return; }
@@ -2362,11 +2845,11 @@ async function sendUploadedPdfToMoneybird() {
     s2.textContent = `2/3 — Geëxtraheerd: ${extracted.supplier_name} — nr ${extracted.number} — €${(extracted.invoice_total ?? 0).toFixed(2)}`;
 
     s3 = logStep(`3/3 — Inboeken in Moneybird (contact + inkoopfactuur + PDF)...`, "active", "upload-log");
-    const { invId, contactCreated, attachErr } = await mbBookPurchaseFromExtracted(extracted, pdfB64, file.name);
+    const { invId, contactCreated, attachErr, duplicate } = await mbBookPurchaseFromExtracted(extracted, pdfB64, file.name);
     const invUrl = `https://moneybird.com/${MB_ADMIN_ID}/documents/${invId}`;
     s3.className = "flow-step ok";
-    s3.textContent = `3/3 — Ingeboekt in Moneybird${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
-      (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : " + PDF bijgevoegd") + ` — ${invUrl}`;
+    s3.textContent = `3/3 — ${duplicate ? "Stond al in Moneybird — niet dubbel ingeboekt" : "Ingeboekt in Moneybird"}${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
+      (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : (duplicate ? "" : " + PDF bijgevoegd")) + ` — ${invUrl}`;
 
     logStep(`Klaar! Open in Moneybird: ${invUrl}`, "ok", "upload-log");
     showToast("PDF ingeboekt in Moneybird", "ok");
@@ -2465,7 +2948,7 @@ async function extractSalesInvoiceViaWorker(pdfBase64) {
   try {
     res = await fetch(extractUrl, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await projAuthHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ pdf_base64: pdfBase64 })
     });
   } catch (netErr) {
@@ -3272,15 +3755,17 @@ async function recGatherMails(ym) {
   const seen = new Set(); const out = [];
   for (const m of MAILBOXES) {
     const filter = `hasAttachments eq true and receivedDateTime ge ${startISO} and receivedDateTime lt ${endISO}`;
-    let url = `${userPath(m)}/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
+    let url = `${userPath(m)}/messages?$filter=${encodeURIComponent(filter)}&$top=100&$select=id,internetMessageId,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId`;
     let guard = 0;
     while (url && guard++ < 12) {
       let r; try { r = await graph("GET", url); } catch (e) { break; }
       for (const msg of (r.value || [])) {
-        if (seen.has(msg.id)) continue;
+        const key = msg.internetMessageId || msg.id;   // alias-mailboxen → zelfde mail maar één keer
+        if (seen.has(key)) continue;
         if (!looksLikeInvoice(msg)) continue;
         if (isOwnInvoice(msg)) continue;
-        msg._mailbox = m; seen.add(msg.id); out.push(msg);
+        if (isSkipInvoiceMail(msg)) continue;
+        msg._mailbox = m; seen.add(key); out.push(msg);
       }
       url = r["@odata.nextLink"] || null;
     }
@@ -4144,7 +4629,7 @@ async function importDoorbelasting(id) {
     const b64 = arrayBufferToBase64(await file.arrayBuffer());
     setS("Factuur extraheren via Claude…");
     const res = await fetch(projWorkerBase() + "/extract", {
-      method: "POST", headers: { "Content-Type": "application/json" },
+      method: "POST", headers: await projAuthHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({ pdf_base64: b64 })
     });
     const txt = await res.text();
@@ -4565,7 +5050,10 @@ async function invoiceProjectsForMonth() {
 // ============================================================
 function mbBase() { return projWorkerBase() + "/mb"; }
 async function mbFetch(path, opts) {
-  const res = await fetch(mbBase() + "/" + path.replace(/^\//, ""), opts || {});
+  // Worker vereist een Microsoft-login: token meesturen (zie requireMsUser in worker.js).
+  opts = Object.assign({}, opts || {});
+  opts.headers = await projAuthHeaders(opts.headers);
+  const res = await fetch(mbBase() + "/" + path.replace(/^\//, ""), opts);
   const txt = await res.text();
   let body = null; try { body = JSON.parse(txt); } catch {}
   if (!res.ok) {
@@ -4696,6 +5184,19 @@ async function mbAttachPdfToPurchase(invId, pdfB64, filename) {
 // (ingeboekt, NIET betaald) → PDF als bijlage. Geeft {invId, contactCreated}.
 let _mbZeroRateCache = undefined;
 async function mbBookPurchaseFromExtracted(extracted, pdfB64, filename) {
+  // Dubbel-check: staat dit factuurnummer al in Moneybird? Dan niet opnieuw
+  // aanmaken; hoogstens de PDF koppelen als die daar nog ontbreekt.
+  const _ref = String((extracted && extracted.number) || "").trim().toLowerCase();
+  if (_ref) {
+    let refMap = null;
+    try { refMap = await mbPurchaseRefMap(!_mbRefCache || Date.now() - _mbRefCache.at > 120000); } catch (e) { /* check best-effort */ }
+    const hit = refMap && refMap.get(_ref);
+    if (hit) {
+      let attachErr = null;
+      if (!hit.hasAtt && pdfB64) { try { await mbAttachPdfToPurchase(hit.id, pdfB64, filename); hit.hasAtt = true; } catch (e) { attachErr = e.message || String(e); } }
+      return { invId: hit.id, contactCreated: false, attachErr, duplicate: true };
+    }
+  }
   try { await mbLoadPurchaseLedgers(); } catch (e) { /* categorisatie best-effort */ }
   const { id: contactId, created } = await mbContactIdOrCreate(extracted);
   // 0%-inkooptarief alleen nodig als er een regel met andere btw dan 21/9 is.
@@ -4708,6 +5209,7 @@ async function mbBookPurchaseFromExtracted(extracted, pdfB64, filename) {
   if (!invId) throw new Error("Inkoopfactuur aangemaakt maar geen ID teruggekregen.");
   let attachErr = null;
   if (pdfB64) { try { await mbAttachPdfToPurchase(invId, pdfB64, filename); } catch (e) { attachErr = e.message || String(e); } }
+  if (_ref && _mbRefCache) _mbRefCache.map.set(_ref, { id: invId, hasAtt: !!pdfB64 && !attachErr });
   return { invId, contactCreated: created, attachErr };
 }
 

@@ -17,8 +17,21 @@ function assert(cond, label, detail) {
   }
 }
 
+// Beveiligde routes vereisen een Microsoft-token: de mock beantwoordt de
+// Graph /me-check van de Worker automatisch met een toegestane gebruiker
+// (token "test"), of een andere gebruiker (token "stranger").
+const AUTH = { Authorization: "Bearer test" };
+function authed(url, init = {}) {
+  return new Request(url, { ...init, headers: { ...(init.headers || {}), ...AUTH } });
+}
 function mockUpstream(handler) {
   globalThis.fetch = async (url, init) => {
+    if (String(url).startsWith("https://graph.microsoft.com/v1.0/me")) {
+      const tok = new Headers(init?.headers || {}).get("Authorization") || "";
+      if (tok === "Bearer bad") return new Response("{}", { status: 401 });
+      const mail = tok === "Bearer stranger" ? "iemand@example.com" : "micha@triplet-it.nl";
+      return new Response(JSON.stringify({ mail }), { status: 200, headers: { "content-type": "application/json" } });
+    }
     const captured = {
       url,
       method: init?.method ?? "GET",
@@ -67,7 +80,7 @@ await run("root returns ok (treated like health)", async () => {
 
 await run("OPTIONS preflight returns 204 with CORS", async () => {
   const res = await worker.fetch(
-    new Request("https://w.workers.dev/api/administration/", { method: "OPTIONS" }),
+    authed("https://w.workers.dev/api/administration/", { method: "OPTIONS" }),
     baseEnv
   );
   assert(res.status === 204, "status 204");
@@ -80,13 +93,15 @@ await run("non-/api path returns 404", async () => {
 });
 
 await run("missing API key returns 500", async () => {
+  const restore = mockUpstream(() => new Response("{}", { status: 200 }));
   const res = await worker.fetch(
-    new Request("https://w.workers.dev/api/administration/"),
+    authed("https://w.workers.dev/api/administration/"),
     { ...baseEnv, INFORMER_API_KEY: undefined }
   );
   assert(res.status === 500, "status 500");
   const body = await res.json();
   assert(body.error?.includes("INFORMER_API_KEY"), "error mentions INFORMER_API_KEY");
+  restore();
 });
 
 // ---------------------------------------------------------------------------
@@ -102,7 +117,7 @@ await run("apikey auth: sends Apikey + Securitycode, routes to /administration/"
   });
   try {
     const res = await worker.fetch(
-      new Request("https://w.workers.dev/api/administration/"),
+      authed("https://w.workers.dev/api/administration/"),
       baseEnv
     );
     assert(res.status === 200, "worker returns 200");
@@ -118,7 +133,7 @@ await run("apikey auth: Securitycode falls back to API key when not set", async 
   const restore = mockUpstream(req => { captured = req; return new Response("{}", { status: 200 }); });
   try {
     await worker.fetch(
-      new Request("https://w.workers.dev/api/administration/"),
+      authed("https://w.workers.dev/api/administration/"),
       { ...baseEnv, INFORMER_SECURITY_CODE: undefined }
     );
     assert(captured.headers.securitycode === "test-key-123", "Securitycode fell back to api key");
@@ -130,7 +145,7 @@ await run("bearer auth sends Authorization: Bearer", async () => {
   const restore = mockUpstream(req => { captured = req; return new Response("{}", { status: 200 }); });
   try {
     await worker.fetch(
-      new Request("https://w.workers.dev/api/whatever"),
+      authed("https://w.workers.dev/api/whatever"),
       { ...baseEnv, INFORMER_AUTH_METHOD: "bearer" }
     );
     assert(captured.headers.authorization === "Bearer test-key-123", "Authorization: Bearer ...");
@@ -143,7 +158,7 @@ await run("x-api-key auth sends X-API-Key header", async () => {
   const restore = mockUpstream(req => { captured = req; return new Response("{}", { status: 200 }); });
   try {
     await worker.fetch(
-      new Request("https://w.workers.dev/api/whatever"),
+      authed("https://w.workers.dev/api/whatever"),
       { ...baseEnv, INFORMER_AUTH_METHOD: "x-api-key" }
     );
     assert(captured.headers["x-api-key"] === "test-key-123", "X-API-Key header set");
@@ -152,7 +167,7 @@ await run("x-api-key auth sends X-API-Key header", async () => {
 
 await run("unknown auth method returns 500", async () => {
   const res = await worker.fetch(
-    new Request("https://w.workers.dev/api/whatever"),
+    authed("https://w.workers.dev/api/whatever"),
     { ...baseEnv, INFORMER_AUTH_METHOD: "voodoo" }
   );
   assert(res.status === 500, "status 500");
@@ -163,7 +178,7 @@ await run("POST body is forwarded upstream", async () => {
   const restore = mockUpstream(req => { captured = req; return new Response("{}", { status: 200 }); });
   try {
     await worker.fetch(
-      new Request("https://w.workers.dev/api/purchases", {
+      authed("https://w.workers.dev/api/purchases", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ amount: 100 })
@@ -182,7 +197,7 @@ await run("query string is preserved on upstream URL", async () => {
   const restore = mockUpstream(req => { captured = req; return new Response("{}", { status: 200 }); });
   try {
     await worker.fetch(
-      new Request("https://w.workers.dev/api/administration/?limit=10&offset=20"),
+      authed("https://w.workers.dev/api/administration/?limit=10&offset=20"),
       baseEnv
     );
     assert(
@@ -196,7 +211,7 @@ await run("upstream network failure → 502 with debug info", async () => {
   const restore = mockUpstream(() => { throw new Error("ECONNREFUSED simulated"); });
   try {
     const res = await worker.fetch(
-      new Request("https://w.workers.dev/api/administration/"),
+      authed("https://w.workers.dev/api/administration/"),
       baseEnv
     );
     assert(res.status === 502, "status 502 on upstream failure");
@@ -214,7 +229,7 @@ await run("upstream 401 is passed through (worker is a proxy)", async () => {
   );
   try {
     const res = await worker.fetch(
-      new Request("https://w.workers.dev/api/administration/"),
+      authed("https://w.workers.dev/api/administration/"),
       baseEnv
     );
     assert(res.status === 401, "status 401 passed through");
@@ -259,7 +274,7 @@ await run("upstream 200 with error object → 422", async () => {
     })
   );
   try {
-    const res = await worker.fetch(new Request("https://w.workers.dev/api/invoice/purchase/", { method: "POST" }), baseEnv);
+    const res = await worker.fetch(authed("https://w.workers.dev/api/invoice/purchase/", { method: "POST" }), baseEnv);
     assert(res.status === 422, "200-with-error object → 422, got " + res.status);
     const body = await res.json();
     assert(body.error?.["3000101"]?.includes("relation_id"), "error body still surfaced");
@@ -273,7 +288,7 @@ await run("upstream 200 with error array → 422", async () => {
     })
   );
   try {
-    const res = await worker.fetch(new Request("https://w.workers.dev/api/purchases"), baseEnv);
+    const res = await worker.fetch(authed("https://w.workers.dev/api/purchases"), baseEnv);
     assert(res.status === 422, "200-with-error array → 422");
   } finally { restore(); }
 });
@@ -285,7 +300,7 @@ await run("upstream 200 with error string → 422", async () => {
     })
   );
   try {
-    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    const res = await worker.fetch(authed("https://w.workers.dev/api/x"), baseEnv);
     assert(res.status === 422, "200-with-error string → 422");
   } finally { restore(); }
 });
@@ -297,7 +312,7 @@ await run("upstream 200 with empty error array stays 200", async () => {
     })
   );
   try {
-    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    const res = await worker.fetch(authed("https://w.workers.dev/api/x"), baseEnv);
     assert(res.status === 200, "empty error → still 200");
   } finally { restore(); }
 });
@@ -309,7 +324,7 @@ await run("upstream 200 without error field stays 200", async () => {
     })
   );
   try {
-    const res = await worker.fetch(new Request("https://w.workers.dev/api/invoice/purchase/", { method: "POST" }), baseEnv);
+    const res = await worker.fetch(authed("https://w.workers.dev/api/invoice/purchase/", { method: "POST" }), baseEnv);
     assert(res.status === 200, "success response stays 200");
     const body = await res.json();
     assert(body.invoice_id === 16053831, "body preserved");
@@ -323,7 +338,7 @@ await run("upstream 200 with non-JSON content stays 200", async () => {
     })
   );
   try {
-    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    const res = await worker.fetch(authed("https://w.workers.dev/api/x"), baseEnv);
     assert(res.status === 200, "non-JSON → no rewrite");
   } finally { restore(); }
 });
@@ -336,7 +351,7 @@ await run("upstream non-200 with error field is not rewritten", async () => {
     })
   );
   try {
-    const res = await worker.fetch(new Request("https://w.workers.dev/api/x"), baseEnv);
+    const res = await worker.fetch(authed("https://w.workers.dev/api/x"), baseEnv);
     assert(res.status === 403, "403 stays 403");
   } finally { restore(); }
 });
@@ -345,7 +360,7 @@ await run("upstream non-200 with error field is not rewritten", async () => {
 // /extract — PDF invoice extraction via Claude API.
 
 await run("/extract requires POST", async () => {
-  const res = await worker.fetch(new Request("https://w.workers.dev/extract"), {
+  const res = await worker.fetch(authed("https://w.workers.dev/extract"), {
     ...baseEnv, ANTHROPIC_API_KEY: "sk-test"
   });
   assert(res.status === 405, "GET /extract returns 405");
@@ -353,7 +368,7 @@ await run("/extract requires POST", async () => {
 
 await run("/extract requires ANTHROPIC_API_KEY", async () => {
   const res = await worker.fetch(
-    new Request("https://w.workers.dev/extract", {
+    authed("https://w.workers.dev/extract", {
       method: "POST", body: JSON.stringify({ pdf_base64: "x" }),
       headers: { "content-type": "application/json" }
     }),
@@ -366,7 +381,7 @@ await run("/extract requires ANTHROPIC_API_KEY", async () => {
 
 await run("/extract rejects missing pdf_base64", async () => {
   const res = await worker.fetch(
-    new Request("https://w.workers.dev/extract", {
+    authed("https://w.workers.dev/extract", {
       method: "POST", body: "{}", headers: { "content-type": "application/json" }
     }),
     { ...baseEnv, ANTHROPIC_API_KEY: "sk-test" }
@@ -376,7 +391,7 @@ await run("/extract rejects missing pdf_base64", async () => {
 
 await run("/extract rejects non-JSON body", async () => {
   const res = await worker.fetch(
-    new Request("https://w.workers.dev/extract", {
+    authed("https://w.workers.dev/extract", {
       method: "POST", body: "not json", headers: { "content-type": "application/json" }
     }),
     { ...baseEnv, ANTHROPIC_API_KEY: "sk-test" }
@@ -389,7 +404,7 @@ await run("/extract: forwards to Anthropic with the right shape and returns extr
   const restore = mockUpstream(req => {
     captured = req;
     return new Response(JSON.stringify({
-      id: "msg_test", role: "assistant", model: "claude-opus-4-7",
+      id: "msg_test", role: "assistant", model: "claude-haiku-4-5",
       content: [{
         type: "tool_use", id: "toolu_1", name: "report_purchase_invoice",
         input: {
@@ -405,7 +420,7 @@ await run("/extract: forwards to Anthropic with the right shape and returns extr
   });
   try {
     const res = await worker.fetch(
-      new Request("https://w.workers.dev/extract", {
+      authed("https://w.workers.dev/extract", {
         method: "POST",
         body: JSON.stringify({ pdf_base64: "JVBERi0xLjQK" }),
         headers: { "content-type": "application/json" }
@@ -423,7 +438,7 @@ await run("/extract: forwards to Anthropic with the right shape and returns extr
     assert(captured.headers["anthropic-version"] === "2023-06-01", "anthropic-version sent");
 
     const sentBody = JSON.parse(typeof captured.body === "string" ? captured.body : new TextDecoder().decode(captured.body));
-    assert(sentBody.model === "claude-opus-4-7", "model is opus-4-7");
+    assert(sentBody.model === "claude-haiku-4-5", "model is haiku-4-5");
     assert(!sentBody.thinking, "thinking omitted (incompatible with forced tool_choice)");
     assert(sentBody.tool_choice?.name === "report_purchase_invoice", "tool_choice forces our tool");
     assert(sentBody.tools[0].cache_control?.type === "ephemeral", "tool def is cache-controlled");
@@ -441,7 +456,7 @@ await run("/extract: Anthropic error is passed through", async () => {
   );
   try {
     const res = await worker.fetch(
-      new Request("https://w.workers.dev/extract", {
+      authed("https://w.workers.dev/extract", {
         method: "POST",
         body: JSON.stringify({ pdf_base64: "x" }),
         headers: { "content-type": "application/json" }
@@ -461,7 +476,7 @@ await run("/extract: 502 when response has no tool_use block", async () => {
   );
   try {
     const res = await worker.fetch(
-      new Request("https://w.workers.dev/extract", {
+      authed("https://w.workers.dev/extract", {
         method: "POST",
         body: JSON.stringify({ pdf_base64: "x" }),
         headers: { "content-type": "application/json" }
@@ -473,8 +488,52 @@ await run("/extract: 502 when response has no tool_use block", async () => {
 });
 
 // ---------------------------------------------------------------------------
+// ---------------------------------------------------------------------------
+// Toegangscontrole op /mb, /extract en /api (Microsoft-login verplicht).
+await run("guard: /mb zonder token → 401, geen Moneybird-call", async () => {
+  let called = false;
+  const restore = mockUpstream(() => { called = true; return new Response("[]", { status: 200 }); });
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/mb/contacts.json"), { MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" });
+    assert(res.status === 401, "401 zonder token", "got " + res.status);
+    assert(!called, "Moneybird niet aangeroepen");
+  } finally { restore(); }
+});
+await run("guard: /mb met ongeldig token → 401", async () => {
+  const restore = mockUpstream(() => new Response("[]", { status: 200 }));
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/mb/contacts.json", { headers: { Authorization: "Bearer bad" } }), { MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" });
+    assert(res.status === 401, "401 bij ongeldig token", "got " + res.status);
+  } finally { restore(); }
+});
+await run("guard: /mb met token van vreemde gebruiker → 403", async () => {
+  let mbCalled = false;
+  const restore = mockUpstream(() => { mbCalled = true; return new Response("[]", { status: 200 }); });
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/mb/contacts.json", { headers: { Authorization: "Bearer stranger" } }), { MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" });
+    assert(res.status === 403, "403 voor niet-toegestane gebruiker", "got " + res.status);
+    assert(!mbCalled, "Moneybird niet aangeroepen");
+  } finally { restore(); }
+});
+await run("guard: /mb met geldig token → doorgezet naar Moneybird", async () => {
+  let target = null;
+  const restore = mockUpstream((c) => { target = c; return new Response("[]", { status: 200, headers: { "content-type": "application/json" } }); });
+  try {
+    const res = await worker.fetch(authed("https://w.workers.dev/mb/contacts.json?per_page=1"), { MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" });
+    assert(res.status === 200, "200", "got " + res.status);
+    assert(target && target.url === "https://moneybird.com/api/v2/1/contacts.json?per_page=1", "juiste Moneybird-URL", target && target.url);
+    assert(target && target.headers.authorization === "Bearer t", "Moneybird-token server-side gezet");
+  } finally { restore(); }
+});
+await run("guard: /extract zonder token → 401", async () => {
+  const restore = mockUpstream(() => new Response("{}", { status: 200 }));
+  try {
+    const res = await worker.fetch(new Request("https://w.workers.dev/extract", { method: "POST", body: "{}" }), { ANTHROPIC_API_KEY: "k" });
+    assert(res.status === 401, "401 zonder token", "got " + res.status);
+  } finally { restore(); }
+});
 
 console.log(`\n${"=".repeat(60)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log("=".repeat(60));
-if (failed > 0) process.exit(1);
+if (failed > 0) process.exit(1)

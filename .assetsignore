@@ -4,3 +4,8 @@ wrangler.jsonc
 wrangler.toml
 .gitignore
 .assetsignore
+*.md
+informer.html
+.wrangler
+.git
+.github

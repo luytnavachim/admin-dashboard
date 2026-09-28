@@ -33,6 +33,17 @@ export default {
       return json({ ok: true, hint: "POST/GET via /api/<path>, POST /extract for PDF extraction" }, 200, cors);
     }
 
+    // Alles hieronder (behalve /projects, dat z'n eigen check doet) vereist een
+    // geldige Microsoft-login van een toegestane gebruiker. Zonder deze check was
+    // de Moneybird-proxy voor iedereen op internet te gebruiken.
+    const guarded = url.pathname === "/extract" || url.pathname === "/extract-sales"
+      || url.pathname === "/mb" || url.pathname.startsWith("/mb/")
+      || url.pathname.startsWith("/api/");
+    if (guarded) {
+      const auth = await requireMsUser(request, env);
+      if (!auth.ok) return json({ error: auth.error }, auth.status, cors);
+    }
+
     if (url.pathname === "/extract") {
       return await handleExtract(request, env, cors, "purchase");
     }
@@ -332,24 +343,48 @@ function isAllowedProjectsUser(email, env) {
   return email.endsWith("@triplet-it.nl");   // default: eigen bedrijfsdomein
 }
 
+// Verifieert het meegestuurde Microsoft-token (Graph /me) en checkt of de
+// gebruiker is toegestaan. Resultaat wordt per Worker-instantie kort gecached
+// (op SHA-256 van het token), zodat niet elke Moneybird-call een Graph-call kost.
+const _authCache = new Map();   // hash → { email, exp }
+async function sha256Hex(text) {
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text));
+  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
+}
+async function requireMsUser(request, env) {
+  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
+  if (!token) return { ok: false, status: 401, error: "Unauthorized — geen Microsoft-token meegestuurd." };
+  const key = await sha256Hex(token);
+  const now = Date.now();
+  const hit = _authCache.get(key);
+  let email;
+  if (hit && hit.exp > now) {
+    email = hit.email;
+  } else {
+    let me;
+    try {
+      const r = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,id", {
+        headers: { Authorization: "Bearer " + token }
+      });
+      if (!r.ok) return { ok: false, status: 401, error: "Unauthorized — Microsoft-token ongeldig of verlopen (" + r.status + ")." };
+      me = await r.json();
+    } catch (e) {
+      return { ok: false, status: 502, error: "Microsoft-verificatie faalde: " + e.message };
+    }
+    email = String(me.mail || me.userPrincipalName || "").toLowerCase().trim();
+    if (_authCache.size > 200) _authCache.clear();
+    _authCache.set(key, { email, exp: now + 5 * 60 * 1000 });
+  }
+  if (!isAllowedProjectsUser(email, env)) {
+    return { ok: false, status: 403, error: "Geen toegang voor " + (email || "onbekende gebruiker") + "." };
+  }
+  return { ok: true, email };
+}
+
 async function handleProjects(request, env, cors) {
   // Identiteit verifiëren via Microsoft (Graph /me met het meegestuurde token).
-  const token = (request.headers.get("Authorization") || "").replace(/^Bearer\s+/i, "").trim();
-  if (!token) return json({ error: "Unauthorized — geen Microsoft-token meegestuurd." }, 401, cors);
-  let me;
-  try {
-    const r = await fetch("https://graph.microsoft.com/v1.0/me?$select=mail,userPrincipalName,id", {
-      headers: { Authorization: "Bearer " + token }
-    });
-    if (!r.ok) return json({ error: "Unauthorized — Microsoft-token ongeldig of verlopen (" + r.status + ")." }, 401, cors);
-    me = await r.json();
-  } catch (e) {
-    return json({ error: "Microsoft-verificatie faalde: " + e.message }, 502, cors);
-  }
-  const email = String(me.mail || me.userPrincipalName || "").toLowerCase().trim();
-  if (!isAllowedProjectsUser(email, env)) {
-    return json({ error: "Geen toegang voor " + (email || "onbekende gebruiker") + "." }, 403, cors);
-  }
+  const auth = await requireMsUser(request, env);
+  if (!auth.ok) return json({ error: auth.error }, auth.status, cors);
   if (!env.PROJECTS_KV) {
     return json({ error: "Worker mist PROJECTS_KV binding (kv_namespaces in wrangler.jsonc)." }, 500, cors);
   }
