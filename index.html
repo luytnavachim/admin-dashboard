@@ -621,6 +621,52 @@ details summary { color: var(--muted); }
   .section .row:hover { background: none; }
   .btn { padding: 8px 10px; font-size: 13px; }
 }
+
+/* ============================================================
+   DESIGN v2.1 — structuur: gegroepeerde nav, 2-koloms overzicht,
+   avatars, bedragen rechts, klikbare tegels
+   ============================================================ */
+.nav-label { font-size: 10.5px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); opacity: .7; padding: 14px 10px 4px; }
+.nav-label:first-child { padding-top: 2px; }
+.header-actions { gap: 10px; }
+.header-actions .signout { font-size: 12.5px; }
+#user-label { font-size: 12px; color: var(--muted); padding: 0 2px; }
+.refresh-btn { display: inline-flex; align-items: center; gap: 6px; }
+.refresh-btn svg { width: 14px; height: 14px; }
+.refresh-btn.spinning svg { animation: spin 0.9s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+.stat[data-target] { cursor: pointer; }
+.stat[data-target]:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.stat .stat-sub { font-size: 11.5px; color: var(--muted); margin-top: 1px; font-variant-numeric: tabular-nums; }
+.section.flash { box-shadow: 0 0 0 2px var(--accent); transition: box-shadow .2s; }
+
+.ovz-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(0, 1fr); gap: 12px; align-items: start; }
+.ovz-main, .ovz-side { min-width: 0; }
+.ovz-side .section .row .actions .btn:not(.primary) { display: none; } /* zijkolom: alleen hoofdactie */
+.ovz-side .row .info .subject { white-space: nowrap; }
+@media (max-width: 1100px) { .ovz-grid { grid-template-columns: 1fr; } .ovz-side .section .row .actions .btn:not(.primary) { display: inline-flex; } }
+
+.avatar {
+  --av-h: 220; flex: 0 0 auto; width: 30px; height: 30px; border-radius: 8px; align-self: flex-start; margin-top: 2px;
+  display: inline-flex; align-items: center; justify-content: center; font-size: 11.5px; font-weight: 650; letter-spacing: .02em;
+  background: hsl(var(--av-h) 55% 92%); color: hsl(var(--av-h) 45% 32%);
+}
+:root.dark .avatar { background: hsl(var(--av-h) 35% 20%); color: hsl(var(--av-h) 70% 78%); }
+.amount { font-variant-numeric: tabular-nums; font-weight: 650; font-size: 14px; white-space: nowrap; color: var(--text); padding: 0 4px; }
+.amount.danger { color: var(--danger-text); }
+.amount.warn { color: var(--warn-text); }
+.row .actions .btn[href]:not(.primary) { color: var(--muted); }
+
+@media (max-width: 760px) {
+  .nav-label { display: none; }
+  .refresh-btn span { display: none; }
+  .refresh-btn { padding: 6px 8px; }
+  .avatar { width: 34px; height: 34px; }
+  .row > .info { flex: 1 1 calc(100% - 46px); }
+  .amount { order: 3; margin-left: 44px; font-size: 15px; }
+  .ovz-side .section .row .actions .btn:not(.primary) { display: inline-flex; }
+}
 </style>
 <script>try{if(localStorage.getItem("admin-theme-v2")!=="light")document.documentElement.classList.add("dark");}catch(e){document.documentElement.classList.add("dark");}</script>
 </head>
@@ -654,12 +700,15 @@ details summary { color: var(--muted); }
     <aside class="sidebar">
       <div class="brand"><span class="brand-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>Administratie</div>
       <nav class="tabs side-nav" role="tablist">
+        <div class="nav-label">Dagelijks</div>
         <button class="tab active" data-tab="overzicht"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>Overzicht</button>
         <button class="tab" data-tab="facturen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l4 4v16H6z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>Facturen verwerken</button>
-        <button class="tab" data-tab="migratie"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/><path d="M3 4h2l2.4 11.5h9.6L19 7H6.5"/></svg>Verkoop migreren</button>
-        <button class="tab" data-tab="projecten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M7 8V6a1 1 0 0 1 1-1h4l2 2"/></svg>Projecten</button>
         <button class="tab" data-tab="afboeken"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6 14h4"/></svg>Afboeken</button>
         <button class="tab" data-tab="moneybird"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h13l-3-3M20 17H7l3 3"/><path d="M9 11h6M9 14h4"/></svg>Moneybird</button>
+        <div class="nav-label">Werk</div>
+        <button class="tab" data-tab="projecten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M7 8V6a1 1 0 0 1 1-1h4l2 2"/></svg>Projecten</button>
+        <button class="tab" data-tab="migratie"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/><path d="M3 4h2l2.4 11.5h9.6L19 7H6.5"/></svg>Verkoop migreren</button>
+        <div class="nav-label">Systeem</div>
         <button class="tab" data-tab="instellingen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.5M12 18.5V21M4.2 7l2.1 1.2M17.7 15.8l2.1 1.2M4.2 17l2.1-1.2M17.7 8.2l2.1-1.2"/></svg>Instellingen</button>
         <button class="tab" data-tab="uitleg"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.6 9.2a2.4 2.4 0 1 1 3.4 2.2c-.8.4-1 .9-1 1.6M12 16.8h.01"/></svg>Uitleg</button>
       </nav>
@@ -674,9 +723,9 @@ details summary { color: var(--muted); }
         </div>
         <div class="header-actions">
           <button class="icon-pill" id="theme-toggle" onclick="toggleTheme()" title="Licht/donker"></button>
-          <a onclick="loadAll()">Verversen</a>
+          <button class="btn refresh-btn" id="refresh-btn" onclick="loadAll()" title="Opnieuw ophalen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg><span>Vernieuwen</span></button>
           <span id="user-label"></span>
-          <a onclick="signOut()">Uitloggen</a>
+          <a class="signout" onclick="signOut()">Uitloggen</a>
         </div>
       </div>
 
@@ -685,23 +734,25 @@ details summary { color: var(--muted); }
   <!-- ====== TAB: Overzicht ====== -->
   <section id="tab-overzicht" class="tab-panel active">
     <div class="stats">
-      <div class="stat warn">
+      <div class="stat warn" data-target="invoices-list" role="button" tabindex="0">
         <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h12v20l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg></span>
         <div class="stat-body"><div class="label">Te verwerken / betalen</div><div class="value" id="stat-invoices">–</div></div>
       </div>
-      <div class="stat danger">
+      <div class="stat danger" data-target="reply-list" role="button" tabindex="0">
         <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 5h18v14H3z"/><path d="M3 6l9 7 9-7"/></svg></span>
         <div class="stat-body"><div class="label">Wacht op antwoord</div><div class="value" id="stat-reply">–</div></div>
       </div>
-      <div class="stat">
+      <div class="stat" data-target="deadlines-list" role="button" tabindex="0">
         <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg></span>
-        <div class="stat-body"><div class="label">Openstaand in Moneybird</div><div class="value" id="stat-deadlines">–</div></div>
+        <div class="stat-body"><div class="label">Openstaand in Moneybird</div><div class="value" id="stat-deadlines">–</div><div class="stat-sub" id="stat-deadlines-sub"></div></div>
       </div>
-      <div class="stat ok">
+      <div class="stat ok" data-target="events-list" role="button" tabindex="0">
         <span class="stat-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="17" rx="2"/><path d="M3 9h18M8 2v4M16 2v4"/></svg></span>
         <div class="stat-body"><div class="label">Komende afspraken</div><div class="value" id="stat-events">–</div></div>
       </div>
     </div>
+    <div class="ovz-grid">
+      <div class="ovz-main">
     <div class="section">
       <h2>Te verwerken / te betalen <span class="count" id="invoices-count">0</span></h2>
       <div id="invoices-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
@@ -711,17 +762,21 @@ details summary { color: var(--muted); }
         <div id="other-pdf-list"></div>
       </details>
     </div>
-    <div class="section">
-      <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
-      <div id="reply-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
-    </div>
+      </div>
+      <div class="ovz-side">
     <div class="section">
       <h2>Openstaande inkoopfacturen (Moneybird) <span class="count" id="deadlines-count">0</span></h2>
       <div id="deadlines-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
     </div>
     <div class="section">
+      <h2>Wacht op antwoord <span class="count" id="reply-count">0</span></h2>
+      <div id="reply-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
+    </div>
+    <div class="section">
       <h2>Komende 2 dagen <span class="count" id="events-count">0</span></h2>
       <div id="events-list"><div class="skel"><div class="skel-row w90"></div><div class="skel-row w70"></div><div class="skel-row w45"></div></div></div>
+    </div>
+      </div>
     </div>
   </section>
 
@@ -1149,6 +1204,7 @@ function showToast(text, kind) {
 function setStatus(text, live) {
   $("status-text").textContent = text;
   $("status-dot").className = "dot" + (live ? " live" : "");
+  const rb = $("refresh-btn"); if (rb) rb.classList.toggle("spinning", !!live);
 }
 function showError(msg) {
   const el = document.createElement('div');
@@ -1551,6 +1607,14 @@ function mboxBadge(mbox) {
 // ============================================================
 //  RENDER
 // ============================================================
+// Rondje met initialen per afzender/leverancier (kleur afgeleid van de naam).
+function avatarHtml(name) {
+  const n = String(name || "?").trim();
+  const words = n.replace(/[^\p{L}\p{N} ]/gu, " ").split(/\s+/).filter(Boolean);
+  const ini = ((words[0] || "?")[0] + (words[1] ? words[1][0] : "")).toUpperCase();
+  let h = 0; for (const c of n.toLowerCase()) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  return `<span class="avatar" style="--av-h:${h % 360}" aria-hidden="true">${escapeHtml(ini)}</span>`;
+}
 function invoiceRowHtml(e, opts) {
   opts = opts || {};
   const unreadBadge = !e.isRead ? '<span class="badge info">Nieuw</span>' : '';
@@ -1572,6 +1636,7 @@ function invoiceRowHtml(e, opts) {
     ? `<button class="btn" data-action="ignore" data-id="${id}" title="Geen factuur — niet meer tonen">Negeer</button>`
     : `<button class="btn primary" data-action="processed" data-id="${id}" data-mbox="${mb}" data-sender="${escapeHtml(senderEmail(e))}">Verwerkt ✓</button>`;
   return `<div class="row" data-id="${id}">
+    ${avatarHtml(senderName(e))}
     <div class="info">
       <div class="top">
         ${mboxBadge(e._mailbox)}
@@ -1636,6 +1701,7 @@ function renderReply(emails) {
     const old = Date.now() - new Date(e.receivedDateTime).getTime() > 3 * 86400000;
     const ageBadge = `<span class="badge ${old ? 'warn' : ''}">${escapeHtml(rel)}</span>`;
     return `<div class="row" data-id="${escapeHtml(e.id)}">
+      ${avatarHtml(senderName(e))}
       <div class="info">
         <div class="top">
           ${mboxBadge(e._mailbox)}
@@ -1658,6 +1724,11 @@ function renderReply(emails) {
 }
 function renderOpenInvoices(invoices, relationNames) {
   $("stat-deadlines").textContent = invoices.length;
+  const _sum = invoices.reduce((t, inv) => {
+    const tot = Number(inv.totals?.incl_vat ?? inv.total_price_incl_vat ?? 0), pd = Number(inv.totals?.paid ?? inv.paid ?? 0);
+    return t + (inv.totals?.open != null ? Number(inv.totals.open) : Math.max(0, tot - pd));
+  }, 0);
+  if ($("stat-deadlines-sub")) $("stat-deadlines-sub").textContent = invoices.length ? "€ " + _sum.toLocaleString("nl-NL", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + " open" : "";
   $("deadlines-count").textContent = invoices.length;
   const list = $("deadlines-list");
   if (invoices.length === 0) {
@@ -1694,14 +1765,16 @@ function renderOpenInvoices(invoices, relationNames) {
       ? `<div class="actions"><a class="btn primary" href="${escapeHtml(link)}" target="_blank" rel="noopener" title="Open in Moneybird">→ Moneybird</a></div>`
       : '';
     return `<div class="row">
+      ${avatarHtml(supplier)}
       <div class="info">
         <div class="top">
           <span class="from">${escapeHtml(supplier)}</span>
           <span class="badge ${urgencyClass}">${escapeHtml(urgencyLabel)}</span>
         </div>
         ${subjectBlock}
-        <div class="meta">${escapeHtml(datePretty)} · € ${outstanding.toFixed(2)}${paid > 0 ? ` open van € ${total.toFixed(2)}` : ''}</div>
+        <div class="meta">${escapeHtml(datePretty)}${paid > 0 ? ` · open van € ${total.toFixed(2).replace(".", ",")}` : ''}</div>
       </div>
+      <div class="amount ${urgencyClass}">€ ${outstanding.toFixed(2).replace(".", ",")}</div>
       ${actions}
     </div>`;
   }).join("");
@@ -2015,7 +2088,10 @@ async function bookRowWithPdf(btn, file) {
 // ============================================================
 async function loadAll() {
   devLog(`loadAll: ${MAILBOXES.length} mailboxen ophalen`, "info");
-  $("today-line").textContent = new Date().toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const _h = new Date().getHours();
+  const _greet = _h < 6 ? "Goedenacht" : _h < 12 ? "Goedemorgen" : _h < 18 ? "Goedemiddag" : "Goedenavond";
+  const _first = ((account && account.name) || "").split(" ")[0];
+  $("today-line").textContent = `${_greet}${_first ? ", " + _first : ""} · ` + new Date().toLocaleDateString('nl-NL', { weekday: 'long', day: 'numeric', month: 'long' });
   $("alert-area").innerHTML = "";   // alleen voor foutmeldingen; uitleg staat op de Uitleg-tab
   setStatus("data ophalen…", true);
 
@@ -2061,6 +2137,12 @@ async function loadAll() {
   }
 }
 
+document.addEventListener("click", ev => {
+  const st = ev.target.closest && ev.target.closest(".stat[data-target]");
+  if (!st) return;
+  const el = $(st.dataset.target); const sec = el && el.closest(".section");
+  if (sec) { sec.scrollIntoView({ behavior: "smooth", block: "start" }); sec.classList.add("flash"); setTimeout(() => sec.classList.remove("flash"), 900); }
+});
 function showApp() {
   $("signin").style.display = "none";
   $("app").style.display = "block";
