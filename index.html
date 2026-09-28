@@ -781,6 +781,17 @@ body { max-width: 1280px; }
 
   <!-- ====== TAB: Afboeken (banktransacties → grootboek koppelen) ====== -->
   <section id="tab-afboeken" class="tab-panel">
+    <div class="section" id="match-section">
+      <h2>Betalingen koppelen aan inkoopfacturen <span class="count" id="match-count">–</span></h2>
+      <p class="muted">Zoekt bij elke openstaande inkoopfactuur de banktransactie met hetzelfde bedrag (max. 5 cent verschil), van 10 dagen vóór tot 90 dagen na de factuurdatum. <strong>Zeker</strong> = bedrag klopt op de cent, de leveranciersnaam staat in de transactie én er is maar één kandidaat. Er wordt pas iets in Moneybird gekoppeld als jij op een knop drukt.</p>
+      <div class="row-btns" style="align-items:center;">
+        <button class="btn primary" id="match-load-btn" onclick="loadPaymentMatches()">Zoek koppelingen</button>
+        <button class="btn" id="match-all-btn" onclick="linkAllSureMatches()" disabled>Koppel alle zekere</button>
+        <span class="muted" id="match-status" style="align-self:center;"></span>
+      </div>
+      <div id="match-list" style="margin-top:8px;"></div>
+    </div>
+
     <div class="section">
       <h2>Banktransacties afboeken op de juiste categorie</h2>
       <p class="muted">Haalt de nog niet-geboekte transacties uit Moneybird op. Per transactie stelt het dashboard op basis van jouw regels een grootboek-categorie voor — controleer en klik <em>Boek</em>. Zo houdt je boekhouder een sluitend jaar. Komt er nog niets binnen? Dan moet je eerst de bankkoppeling in Moneybird activeren.</p>
@@ -3227,8 +3238,11 @@ async function loadAfboekTransactions() {
   list.innerHTML = '<p class="muted">Laden…</p>';
   try {
     await mbLoadBankLedgers();
-    const muts = await mbFetch(`financial_mutations.json?filter=${encodeURIComponent("period:" + period + ",state:unprocessed")}`);
-    afboekMutations = (Array.isArray(muts) ? muts : []).filter(m => Math.abs(parseFloat(m.amount_open) || 0) > 0.0001);
+    // Via de synchronisatie-API: de gewone lijst weigert bij veel transacties
+    // ("Too many financial mutations to return, please use sync API").
+    const muts = await mbLoadMutations("period:" + period + ",state:unprocessed");
+    afboekMutations = muts.filter(m => Math.abs(parseFloat(m.amount_open) || 0) > 0.0001)
+      .sort((a, b) => String(b.date).localeCompare(String(a.date)));
     renderAfboekTransactions();
   } catch (e) {
     list.innerHTML = `<p class="err">Laden mislukt: ${escapeHtml(e.message || String(e))}</p>`;
@@ -3263,6 +3277,171 @@ function renderAfboekTransactions() {
   }).join("");
   if ($("afboek-bookall-btn")) $("afboek-bookall-btn").disabled = withSugg === 0;
   if ($("afboek-summary")) $("afboek-summary").textContent = `${afboekMutations.length} openstaand · ${withSugg} met suggestie`;
+}
+
+// ============================================================
+//  BETALINGEN KOPPELEN — banktransactie ↔ openstaande inkoopfactuur
+// ============================================================
+// Alle banktransacties voor een filter, via de synchronisatie-API
+// (ids ophalen, daarna per 100 de volledige transacties).
+async function mbLoadMutations(filter) {
+  const ids = await mbFetch(`financial_mutations/synchronization.json?filter=${encodeURIComponent(filter)}`);
+  const list = Array.isArray(ids) ? ids.map(x => x.id) : [];
+  const out = [];
+  for (let i = 0; i < list.length; i += 100) {
+    const b = await mbFetch("financial_mutations/synchronization.json", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ids: list.slice(i, i + 100) })
+    });
+    if (Array.isArray(b)) out.push(...b);
+  }
+  return out;
+}
+
+const MATCH_STOPWORDS = new Set(["b", "v", "bv", "nv", "vof", "gmbh", "co", "kg", "inc", "ltd", "llc", "limited", "plc", "sa", "sarl", "srl", "ag",
+  "nederland", "netherlands", "ireland", "europe", "international", "operations", "services", "service", "group", "holding", "the", "and", "van", "der", "den", "het", "store", "payments", "payment", "online", "com", "www"]);
+function matchTokens(s) {
+  return String(s || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").split(" ").filter(w => w.length >= 3 && !MATCH_STOPWORDS.has(w));
+}
+function invoiceOpenAmount(iv) {
+  const total = Number(iv.total_price_incl_tax) || 0;
+  const paid = (iv.payments || []).reduce((s, p) => s + (Number(p.price_base) || Number(p.price) || 0), 0);
+  return Math.round((total - paid) * 100) / 100;
+}
+// Pure kern (los testbaar): per factuur de kandidaat-transacties + of het zeker is.
+function computePaymentMatches(invoices, mutations, opts) {
+  opts = Object.assign({ tol: 0.05, before: 10, after: 90 }, opts || {});
+  const rows = [];
+  for (const iv of invoices) {
+    const open = invoiceOpenAmount(iv);
+    if (open <= 0.01) continue;
+    const nameToks = matchTokens(iv.contact && (iv.contact.company_name || [iv.contact.firstname, iv.contact.lastname].join(" ")));
+    const ivDate = new Date(iv.date || iv.invoice_date || 0).getTime();
+    const cands = [];
+    for (const m of mutations) {
+      const mo = Number(m.amount_open);
+      if (!(mo < 0)) continue;                         // alleen uitgaande betalingen met open bedrag
+      const diff = Math.round(Math.abs(Math.abs(mo) - open) * 100) / 100;
+      if (diff > opts.tol) continue;
+      const dd = Math.round((new Date(m.date).getTime() - ivDate) / 86400000);
+      if (isNaN(dd) || dd < -opts.before || dd > opts.after) continue;
+      const hay = new Set(matchTokens((m.contra_account_name || "") + " " + (m.message || "")));
+      const nameHit = nameToks.some(t => hay.has(t) || [...hay].some(h => h.startsWith(t) || t.startsWith(h) && h.length >= 4));
+      const score = (nameHit ? 100 : 0) - diff * 100 - Math.abs(dd) / 10;
+      cands.push({ m, diff, dd, nameHit, score });
+    }
+    if (!cands.length) continue;
+    cands.sort((a, b) => b.score - a.score);
+    rows.push({ inv: iv, open, cands });
+  }
+  // Zeker: precies één kandidaat met naam + exact bedrag, en die transactie is
+  // niet ook "sterk" voor een andere factuur (bv. dubbele facturen).
+  const strongUse = new Map();
+  for (const r of rows) for (const c of r.cands) if (c.nameHit && c.diff < 0.005) strongUse.set(c.m.id, (strongUse.get(c.m.id) || 0) + 1);
+  for (const r of rows) {
+    const strong = r.cands.filter(c => c.nameHit && c.diff < 0.005);
+    r.sure = strong.length === 1 && strongUse.get(strong[0].m.id) === 1;
+    r.best = r.sure ? strong[0] : r.cands[0];
+  }
+  rows.sort((a, b) => (b.sure - a.sure) || String(b.inv.date).localeCompare(String(a.inv.date)));
+  return rows;
+}
+
+let paymentMatches = [];
+async function loadPaymentMatches() {
+  const st = $("match-status"), list = $("match-list"), btn = $("match-load-btn");
+  btn.disabled = true; st.textContent = "Openstaande inkoopfacturen laden…"; list.innerHTML = "";
+  try {
+    const invoices = [];
+    for (let p = 1; p <= 20; p++) {
+      const b = await mbFetch(`documents/purchase_invoices.json?per_page=100&page=${p}&filter=${encodeURIComponent("state:open|late")}`);
+      if (!Array.isArray(b) || !b.length) break;
+      invoices.push(...b);
+      if (b.length < 100) break;
+    }
+    if (!invoices.length) { st.textContent = "Geen openstaande inkoopfacturen. ✓"; $("match-count").textContent = "0"; return; }
+    const minDate = invoices.reduce((m, iv) => (iv.date && iv.date < m ? iv.date : m), new Date().toISOString().slice(0, 10));
+    const from = new Date(new Date(minDate).getTime() - 10 * 86400000).toISOString().slice(0, 10).replace(/-/g, "");
+    const to = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+    st.textContent = `${invoices.length} openstaande facturen · banktransacties laden…`;
+    const muts = await mbLoadMutations(`period:${from}..${to},state:unprocessed`);
+    paymentMatches = computePaymentMatches(invoices, muts);
+    renderPaymentMatches();
+    const sure = paymentMatches.filter(r => r.sure).length;
+    st.textContent = `${invoices.length} openstaande facturen · ${muts.length} onverwerkte transacties · ${sure} zeker · ${paymentMatches.length - sure} te controleren · ${invoices.length - paymentMatches.length} zonder passende betaling`;
+  } catch (e) {
+    st.textContent = "";
+    list.innerHTML = `<p class="err">Laden mislukt: ${escapeHtml(e.message || String(e))}</p>`;
+  } finally { btn.disabled = false; }
+}
+function fmtEur(n) { return "€ " + Number(n).toFixed(2).replace(".", ","); }
+function renderPaymentMatches() {
+  const list = $("match-list"); if (!list) return;
+  $("match-count").textContent = paymentMatches.length;
+  $("match-all-btn").disabled = !paymentMatches.some(r => r.sure);
+  if (!paymentMatches.length) { list.innerHTML = '<p class="muted">Geen banktransacties gevonden die bij een openstaande factuur passen. Betaal je die facturen met een creditcard die niet in Moneybird staat? Dan ontbreken die transacties.</p>'; return; }
+  list.innerHTML = paymentMatches.map((r, i) => {
+    const sup = (r.inv.contact && r.inv.contact.company_name) || "Leverancier";
+    const opt = r.cands.map((c, j) => `<option value="${j}" ${c === r.best ? "selected" : ""}>${escapeHtml(c.m.date)} · ${fmtEur(Math.abs(c.m.amount_open))} · ${escapeHtml((c.m.contra_account_name || c.m.message || "?").slice(0, 40))}${c.nameHit ? "" : " (andere naam)"}${c.diff > 0 ? ` (verschil ${fmtEur(c.diff)})` : ""}</option>`).join("");
+    const badge = r.sure ? '<span class="badge ok">zeker</span>' : '<span class="badge warn">controleer</span>';
+    return `<div class="row" data-i="${i}">
+      <div class="info">
+        <div class="top"><span class="from">${escapeHtml(sup)}</span> ${badge} <span class="badge">${escapeHtml(r.inv.state || "")}</span></div>
+        <div class="subject">Factuur ${escapeHtml(r.inv.reference || "?")} · ${escapeHtml(r.inv.date || "")} · open ${fmtEur(r.open)}</div>
+        <div class="meta" style="margin-top:4px;">Betaling: <select class="match-cand" style="max-width:100%;">${opt}</select></div>
+      </div>
+      <div class="actions">
+        <a class="btn" href="https://moneybird.com/${MB_ADMIN_ID}/documents/${escapeHtml(r.inv.id)}" target="_blank" rel="noopener">Open</a>
+        <button class="btn primary" onclick="linkMatchRow(this)">Koppel</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+// Koppelt één transactie aan de factuur (bedrag altijd positief; richting
+// volgt uit de transactie). Bij centverschil: het kleinste van beide — het
+// restje blijft open staan en kun je in de lijst hieronder afboeken.
+async function mbLinkMutationToInvoice(mutation, invoiceId, openAmount) {
+  const amt = Math.min(Math.abs(Number(mutation.amount_open)), openAmount).toFixed(2);
+  return mbFetch(`financial_mutations/${mutation.id}/link_booking.json`, {
+    method: "PATCH", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ booking_type: "Document", booking_id: invoiceId, price_base: amt, price: amt })
+  });
+}
+async function linkMatch(r, cand) {
+  await mbLinkMutationToInvoice(cand.m, r.inv.id, r.open);
+  // Deze transactie is nu gebruikt: uit alle andere rijen halen.
+  paymentMatches = paymentMatches.filter(x => x !== r);
+  for (const x of paymentMatches) { x.cands = x.cands.filter(c => c.m.id !== cand.m.id); if (!x.cands.includes(x.best)) { x.best = x.cands[0]; x.sure = false; } }
+  paymentMatches = paymentMatches.filter(x => x.cands.length);
+}
+async function linkMatchRow(btn) {
+  const row = btn.closest(".row"); const r = paymentMatches[Number(row.dataset.i)]; if (!r) return;
+  const cand = r.cands[Number(row.querySelector(".match-cand").value)] || r.best;
+  btn.disabled = true; const t = btn.textContent; btn.textContent = "Koppelen…";
+  try {
+    await linkMatch(r, cand);
+    showToast(`Gekoppeld: ${(r.inv.contact && r.inv.contact.company_name) || ""} ${fmtEur(r.open)}`, "ok");
+    renderPaymentMatches();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = t;
+    showToast("Koppelen mislukt: " + (e.message || e), "err");
+  }
+}
+async function linkAllSureMatches() {
+  const sure = paymentMatches.filter(r => r.sure);
+  if (!sure.length) return;
+  const btn = $("match-all-btn"); btn.disabled = true;
+  let ok = 0, fail = 0;
+  for (const r of sure) {
+    if (!paymentMatches.includes(r)) continue;
+    $("match-status").textContent = `Koppelen ${ok + fail + 1}/${sure.length}…`;
+    try { await linkMatch(r, r.best); ok++; } catch (e) { fail++; devLog("koppelen mislukt: " + e.message, "err"); }
+    await new Promise(res => setTimeout(res, 150));
+  }
+  renderPaymentMatches();
+  $("match-status").textContent = `${ok} gekoppeld${fail ? ` · ${fail} mislukt (zie console)` : ""}`;
+  showToast(`${ok} betalingen gekoppeld`, fail ? "err" : "ok");
 }
 
 // Banktransactie koppelen aan een grootboekrekening (volledige openstaande bedrag).
