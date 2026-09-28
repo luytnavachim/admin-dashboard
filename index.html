@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#f4f6fa">
+<meta name="theme-color" content="#0c0d10">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="Administratie">
@@ -483,8 +483,146 @@ body { max-width: 1280px; }
   .att-names { white-space: normal; }
 }
 @media (max-width: 420px) { .stat .stat-ic { display: none; } }
+
+/* ============================================================
+   DESIGN v2 — donker & zakelijk (standaard), licht als optie.
+   Rustige neutrale grijzen, één accentkleur, compacte lijsten.
+   Staat onderaan zodat het alle eerdere lagen overschrijft.
+   ============================================================ */
+:root {
+  --bg: #f6f7f9; --surface: #ffffff; --surface-2: #f1f3f6;
+  --border: #e4e7ec; --border-strong: #d3d8e0;
+  --text: #14161b; --muted: #677084;
+  --accent: #4f5bd5; --accent-strong: #3f4ac2; --accent-bg: rgba(79,91,213,.09); --accent-text: #ffffff;
+  --warn-bg: rgba(214,140,20,.12); --warn-text: #9a5b00;
+  --danger-bg: rgba(210,60,60,.10); --danger-text: #c0392f;
+  --ok-bg: rgba(40,150,80,.11); --ok-text: #1f7a3d;
+  --info-bg: rgba(110,90,230,.10); --info-text: #5a45c9;
+  --shadow-sm: none; --shadow-md: 0 8px 24px rgba(15,20,30,.08);
+  --radius: 12px; --radius-sm: 8px; --code-bg: #f1f3f6;
+}
+:root.dark {
+  --bg: #0c0d10; --surface: #131519; --surface-2: #1a1c22;
+  --border: #23262d; --border-strong: #2f333c;
+  --text: #e6e8ec; --muted: #8b92a1;
+  --accent: #7c8aff; --accent-strong: #97a2ff; --accent-bg: rgba(124,138,255,.13); --accent-text: #0c0d10;
+  --warn-bg: rgba(240,176,70,.13); --warn-text: #f0bf66;
+  --danger-bg: rgba(240,100,100,.13); --danger-text: #f28c8c;
+  --ok-bg: rgba(90,200,120,.12); --ok-text: #7fd49a;
+  --info-bg: rgba(160,150,255,.13); --info-text: #b5aeff;
+  --shadow-sm: none; --shadow-md: 0 10px 30px rgba(0,0,0,.45);
+  --code-bg: #1a1c22;
+}
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Inter", "Segoe UI", Roboto, sans-serif;
+  font-size: 13.5px; letter-spacing: -0.003em; background: var(--bg); color: var(--text);
+}
+::selection { background: var(--accent-bg); }
+a { color: var(--accent); }
+
+/* Shell */
+.sidebar { background: var(--surface); border: 1px solid var(--border); box-shadow: none; border-radius: var(--radius); padding: 12px 10px; }
+.brand { font-weight: 650; font-size: 14px; padding: 4px 8px 14px; }
+.brand-ic { background: var(--accent); color: var(--accent-text); border-radius: 7px; }
+.side-nav .tab { font-size: 13px; font-weight: 500; color: var(--muted); padding: 7px 10px; border-radius: 7px; }
+.side-nav .tab svg { width: 16px; height: 16px; opacity: .75; }
+.side-nav .tab:hover { background: var(--surface-2); color: var(--text); }
+.side-nav .tab.active { background: var(--surface-2); color: var(--text); box-shadow: inset 2px 0 0 var(--accent); }
+.side-nav .tab.active svg { color: var(--accent); opacity: 1; }
+.side-foot { border-top-color: var(--border); font-size: 11.5px; }
+.topbar { margin-bottom: 16px; }
+.page-title { font-size: 18px; font-weight: 650; letter-spacing: -.02em; }
+.page-sub { font-size: 12px; }
+.header-actions a { color: var(--muted); font-weight: 500; }
+.header-actions a:hover { color: var(--text); text-decoration: none; }
+.icon-pill { width: 30px; height: 30px; border-radius: 8px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--muted); }
+.icon-pill:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
+
+/* Kaarten & secties */
+.section { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); box-shadow: none; padding: 14px 16px; margin-bottom: 12px; }
+h2 { font-size: 13.5px; font-weight: 600; letter-spacing: -.005em; margin-bottom: 8px; }
+h2 .count { background: var(--surface-2); color: var(--muted); font-size: 11px; font-weight: 600; padding: 1px 7px; border: 1px solid var(--border); }
+
+/* Stat-tegels: plat, cijfer voorop */
+.stats { gap: 10px; margin-bottom: 14px; }
+.stat { background: var(--surface); border: 1px solid var(--border); box-shadow: none; padding: 12px 14px; gap: 10px; }
+.stat .stat-ic { width: 30px; height: 30px; border-radius: 8px; background: var(--surface-2); color: var(--muted); }
+.stat .stat-ic svg { width: 16px; height: 16px; }
+.stat.warn .stat-ic { background: var(--warn-bg); color: var(--warn-text); }
+.stat.danger .stat-ic { background: var(--danger-bg); color: var(--danger-text); }
+.stat.ok .stat-ic { background: var(--ok-bg); color: var(--ok-text); }
+.stat .label { font-size: 11.5px; color: var(--muted); }
+.stat .value { font-size: 22px; font-weight: 650; letter-spacing: -.03em; font-variant-numeric: tabular-nums; color: var(--text); }
+.stat.warn .value, .stat.danger .value, .stat.ok .value { color: var(--text); }
+
+/* Lijsten: compact, subtiele scheiding */
+.row { padding: 9px 8px; margin: 0 -8px; border-top: 1px solid var(--border); border-radius: 0; gap: 10px; }
+.row:first-of-type { border-top: none; }
+.section .row:hover { background: var(--surface-2); border-radius: 8px; }
+.row .info .top { font-size: 12px; margin-bottom: 1px; gap: 6px; }
+.row .info .from { font-weight: 600; font-size: 13px; }
+.row .info .subject { font-size: 13.5px; color: var(--text); }
+.row .info .meta, .att-names { font-size: 11.5px; color: var(--muted); }
+.subject-link:hover .subject { color: var(--accent); }
+
+/* Badges: klein en rustig */
+.badge { font-size: 10.5px; font-weight: 600; padding: 1px 7px; border-radius: 6px; letter-spacing: .01em; background: var(--surface-2); color: var(--muted); }
+.badge.info { background: var(--info-bg); color: var(--info-text); }
+.badge.warn { background: var(--warn-bg); color: var(--warn-text); }
+.badge.danger { background: var(--danger-bg); color: var(--danger-text); }
+.badge.ok, .badge.ok-mb { background: var(--ok-bg); color: var(--ok-text); }
+.badge.mbox { background: transparent; border: 1px solid var(--border-strong); padding: 0 6px; }
+:root.dark .badge.mbox { filter: brightness(1.7) saturate(.85); } /* mailbox-kleuren zijn voor licht gekozen */
+
+/* Knoppen */
+.btn { background: var(--surface-2); border: 1px solid var(--border-strong); color: var(--text); border-radius: var(--radius-sm); box-shadow: none; font-weight: 550; font-size: 12.5px; padding: 5px 11px; }
+.btn:hover { background: var(--border); border-color: var(--border-strong); transform: none; }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+.btn.primary:hover { background: var(--accent-strong); border-color: var(--accent-strong); color: var(--accent-text); }
+.btn.danger { background: transparent; color: var(--danger-text); }
+.btn.danger:hover { background: var(--danger-bg); border-color: var(--danger-text); }
+
+/* Formulieren */
+.field input, .field select, .field textarea, select, input[type="text"], input[type="number"], input[type="date"], textarea {
+  background: var(--surface-2); color: var(--text); border: 1px solid var(--border-strong); border-radius: var(--radius-sm);
+}
+.field input:focus, .field select:focus, .field textarea:focus, select:focus, input:focus, textarea:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-bg); }
+.field label { color: var(--muted); }
+
+/* Meldingen & blokken die hard-coded licht waren */
+.help { background: var(--accent-bg); color: var(--text); }
+.help strong { color: var(--accent); }
+.warn-box { background: var(--warn-bg); color: var(--warn-text); }
+.err { background: var(--danger-bg); color: var(--danger-text); }
+.config-warning code { background: var(--surface-2); }
+.response { background: var(--code-bg); border-color: var(--border); color: var(--text); }
+.response.ok { background: var(--ok-bg); border-color: transparent; color: var(--text); }
+.response.err { background: var(--danger-bg); border-color: transparent; color: var(--danger-text); }
+.flow-step { border-left-color: var(--border-strong); }
+.flow-step.active { background: var(--accent-bg); border-left-color: var(--accent); }
+.flow-step.ok { background: var(--ok-bg); border-left-color: var(--ok-text); }
+.flow-step.err { background: var(--danger-bg); border-left-color: var(--danger-text); }
+.email-pick { border-color: var(--border); }
+.email-pick:hover, .email-pick.selected { border-color: var(--accent); background: var(--accent-bg); }
+details summary { color: var(--muted); }
+.skel-row { background: linear-gradient(90deg, var(--surface-2) 25%, var(--border) 37%, var(--surface-2) 63%); background-size: 400% 100%; }
+#toast { background: var(--text) !important; color: var(--bg) !important; border-radius: 10px; box-shadow: var(--shadow-md); }
+.proj-summary, .proj-card { background: var(--surface); border: 1px solid var(--border); box-shadow: none; }
+.psum-ic { background: var(--surface-2); color: var(--muted); }
+.entry-row { border-color: var(--border); }
+:root.dark ::-webkit-scrollbar { width: 10px; height: 10px; }
+:root.dark ::-webkit-scrollbar-thumb { background: #2a2e36; border-radius: 6px; border: 2px solid var(--bg); }
+:root.dark ::-webkit-scrollbar-track { background: transparent; }
+
+@media (max-width: 760px) {
+  .sidebar { border-radius: 0; background: var(--surface); }
+  .side-nav .tab.active { box-shadow: none; background: var(--surface-2); }
+  .row { margin: 0; padding: 12px 0; }
+  .section .row:hover { background: none; }
+  .btn { padding: 8px 10px; font-size: 13px; }
+}
 </style>
-<script>try{if(localStorage.getItem("admin-theme")==="dark")document.documentElement.classList.add("dark");}catch(e){}</script>
+<script>try{if(localStorage.getItem("admin-theme-v2")!=="light")document.documentElement.classList.add("dark");}catch(e){document.documentElement.classList.add("dark");}</script>
 </head>
 <body>
 <button id="dev-console-toggle" onclick="toggleDevConsole()" title="Toggle dev console">console</button>
@@ -3261,7 +3399,7 @@ function renderAfboekTransactions() {
     const sugg = suggestLedgerFor(m);
     if (sugg && sugg.id) withSugg++;
     const amt = parseFloat(m.amount_open) || 0;
-    const amtColor = amt < 0 ? "var(--err-text, #c0392b)" : "var(--ok-text, #1e7e34)";
+    const amtColor = amt < 0 ? "var(--danger-text)" : "var(--ok-text)";
     const tegen = [m.contra_account_name, m.contra_account_number].filter(Boolean).join(" · ");
     const badge = sugg
       ? (sugg.id ? `<span class="badge ok">suggestie: ${escapeHtml(sugg.cat)}</span>`
@@ -3449,7 +3587,10 @@ async function mbBookMutation(id, ledgerId, amountOpen) {
   return mbFetch(`financial_mutations/${id}/link_booking.json`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ booking_type: "LedgerAccount", booking_id: ledgerId, price_base: String(amountOpen) })
+    // Let op het teken: Moneybird wil het tegengestelde van amount_open
+    // (afschrijving -50 → price_base 50). Met hetzelfde teken verdubbelt het
+    // openstaande bedrag in plaats van dat het 0 wordt (getest 28-9-2026).
+    body: JSON.stringify({ booking_type: "LedgerAccount", booking_id: ledgerId, price_base: (-Number(amountOpen)).toFixed(2) })
   });
 }
 async function bookAfboekRow(btn) {
@@ -5705,18 +5846,21 @@ const THEME_ICONS = {
 function applyTheme(t) {
   const dark = t === "dark";
   document.documentElement.classList.toggle("dark", dark);
+  const tc = document.querySelector('meta[name="theme-color"]');
+  if (tc) tc.setAttribute("content", dark ? "#0c0d10" : "#f6f7f9");
   const el = document.getElementById("theme-toggle");
   if (el) { el.innerHTML = dark ? THEME_ICONS.dark : THEME_ICONS.light; el.title = dark ? "Naar lichte modus" : "Naar donkere modus"; }
 }
 function toggleTheme() {
   const dark = !document.documentElement.classList.contains("dark");
-  try { localStorage.setItem("admin-theme", dark ? "dark" : "light"); } catch (e) {}
+  try { localStorage.setItem("admin-theme-v2", dark ? "dark" : "light"); } catch (e) {}
   applyTheme(dark ? "dark" : "light");
 }
 function initTheme() {
-  let saved = "light";
-  try { saved = localStorage.getItem("admin-theme") || "light"; } catch (e) {}
-  applyTheme(saved === "dark" ? "dark" : "light");
+  // Donker is standaard; alleen een bewuste keuze voor licht wordt onthouden.
+  let saved = "dark";
+  try { saved = localStorage.getItem("admin-theme-v2") || "dark"; } catch (e) {}
+  applyTheme(saved === "light" ? "light" : "dark");
 }
 initTheme();
 
