@@ -1,0 +1,487 @@
+From cf567b6965d59d7c311b0359eba347453a1afce8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Thu, 15 Oct 2026 22:15:11 +0200
+Subject: [PATCH] Gmail-mailbox: facturen uit michavantuyl@gmail.com in het
+ overzicht
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- MAILBOXES: Gmail-regel (provider: gmail) + GMAIL_CLIENT_ID / GMAIL_SCAN_QUERY in CONFIG
+- Login via Google Identity Services (scope gmail.modify), knop 'Gmail koppelen' in topbar
+- gmailShim(): vertaalt de gebruikte Graph-endpoints (mappen, scan, bijlagen, move, isRead, forward) naar de Gmail-API, zodat scan / → Moneybird / Verwerkt / doorsturen / Moneybird-controle ongewijzigd werken
+- Labels = mappen: Verwerkt = label 'MoneyMonk Verwerkt/<afzender>' + uit Inbox
+- README stap 4 + CLAUDE.md bijgewerkt
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_012G4Zwf5vabFU9JST3YpK9N
+---
+ CLAUDE.md  |   3 +-
+ README.md  |  12 ++
+ index.html | 347 ++++++++++++++++++++++++++++++++++++++++++++++++++++-
+ 3 files changed, 358 insertions(+), 4 deletions(-)
+
+diff --git a/CLAUDE.md b/CLAUDE.md
+index 52b41a2..5648f08 100644
+--- a/CLAUDE.md
++++ b/CLAUDE.md
+@@ -38,7 +38,8 @@ Administratie-ID `489478494017815934` (ook in `wrangler.jsonc` als `MONEYBIRD_AD
+ 
+ - **Hosting gesplitst**: frontend (statische HTML/JS) op Hetzner via Apache; Worker is puur de API-backend. Moneybird-token en Anthropic-key staan alleen in de Worker (Secrets), nooit in de frontend.
+ - **MSAL met Single-page-app type** in Azure. Redirect URI = `https://admin.triplet-it.nl/`. Scopes: `Mail.ReadWrite Mail.ReadWrite.Shared Mail.Send Mail.Send.Shared Calendars.ReadWrite Calendars.ReadWrite.Shared User.Read`. `CLIENT_ID` staat bovenaan het script. **Mail.Send(.Shared)** is nodig voor "Doorsturen naar Moneybird" (`forwardToMoneybird` → Graph `/messages/{id}/forward` naar `MONEYBIRD_INBOX`); na het toevoegen moeten deze permissions in Azure → API permissions staan én moet de gebruiker opnieuw inloggen (consent). Doorsturen vanuit shared mailboxes vereist Send-As/Send-on-Behalf op die mailbox.
+-- **Multi-mailbox**: `MAILBOXES` bovenaan script = micha@vantuyl.it + micha@, info@, administratie@, inkoop@, finance@ (triplet-it.nl). Eerste = primair (agenda). `/me` voor primaire, `/users/{email}` voor shared.
++- **Multi-mailbox**: `MAILBOXES` bovenaan script = micha@vantuyl.it + micha@, info@, administratie@, inkoop@, finance@ (triplet-it.nl) + michavantuyl@gmail.com (`provider: "gmail"`). Eerste = primair (agenda). `/me` voor primaire, `/users/{email}` voor shared.
++- **Gmail-mailbox** (sectie GMAIL in `index.html`, na GRAPH API): login via Google Identity Services (`GMAIL_CLIENT_ID`, scope `gmail.modify`, token alleen in sessionStorage, knop "Gmail koppelen" in topbar / hint in alert-area). `userPath()` geeft `/gmail`; `graph()` en `graphBinary()` sturen `/gmail/*`-paden naar `gmailShim()`/`gmailBinary()`, die de gebruikte Graph-endpoints vertalen naar de Gmail REST API: `mailFolders` = labels (geneste labels `A/B` = submappen, well-known inbox/sentitems/… = INBOX/SENT/TRASH/DRAFT/SPAM, "archive" = ARCHIVE = alleen INBOX-label weghalen), `messages?$filter` = `messages.list` met `after:/before:/has:attachment` + `GMAIL_SCAN_QUERY`, daarna per bericht `messages.get` (6 parallel, `fields`-beperkt) → Graph-vorm (`from`, `toRecipients`, `receivedDateTime`, `webLink`, `attachments`, `parentFolderId` = overslaan-label > INBOX > eerste eigen label > ARCHIVE), `move` = `modify` (label erbij, INBOX eraf), `isRead` = UNREAD-label, `forward` = nieuwe MIME-mail met de PDF/UBL-bijlagen opnieuw bijgevoegd via `messages.send`. Zonder token wordt Gmail in `scanAllMailboxes` overgeslagen (`gmailReadyForScan`).
+ - **Worker-beveiliging**: `/mb/*`, `/extract`, `/extract-sales` en `/api/*` vereisen een Microsoft-token (`Authorization: Bearer`, via `projAuthHeaders()`); de Worker checkt Graph `/me` (`requireMsUser`, 5 min cache) tegen dezelfde allowlist als `/projects`. `ALLOWED_ORIGIN` = admin.triplet-it.nl + localhost:8000. `.assetsignore` houdt *.md/informer.html uit de publieke Worker-assets.
+ - **Overzicht-scan**: geen trefwoord-`$search` meer; `scanAllMailboxes(SCAN_DAYS)` haalt alle mails van de laatste 60 dagen uit alle mappen (excl. Verzonden/Verwijderd/Concepten/Ongewenst/Archief + Verwerkt-map incl. submappen) mét bijlagenlijst. Alias-mailboxen (zelfde Inbox-id, bv. micha@triplet-it.nl = micha@vantuyl.it) worden één keer gescand; dedupe op `internetMessageId`. Niet-herkende PDF-mails staan onder 'Andere mails met PDF-bijlage'. `mbBookPurchaseFromExtracted` boekt niet dubbel (check op factuurnummer).
+ - **Moneybird-proxy**: `mbFetch(path, opts)` → `<worker>/mb/<path>`. De Worker forwardt body + content-type ongewijzigd (dus ook multipart voor bijlagen) en zet `Authorization: Bearer MONEYBIRD_TOKEN`. `mbBase()` leidt de Worker-origin af via `projWorkerBase()` (niet meer uit de oude Informer-config).
+diff --git a/README.md b/README.md
+index 6377ffd..caec484 100644
+--- a/README.md
++++ b/README.md
+@@ -138,6 +138,18 @@ const CLIENT_ID = "...";
+ 
+ Vervang door je client-ID uit stap 1. In dezelfde sectie staan ook `MAILBOXES`, `MONEYMONK_ADDRESS`, `PROCESSED_FOLDER_NAME` en `SELF_EMAILS`/`SELF_DOMAINS` — pas die aan naar je eigen situatie.
+ 
++### Stap 4 (optioneel) — Gmail-mailbox
++
++Het dashboard kan naast Microsoft 365 ook één Gmail-account scannen (de regel met `provider: "gmail"` in `MAILBOXES`). Dat loopt rechtstreeks vanuit de browser via de Gmail-API; er is geen Worker-wijziging nodig.
++
++1. [console.cloud.google.com](https://console.cloud.google.com) → nieuw project (bv. "Admin dashboard").
++2. *APIs & Services → Library* → **Gmail API** → Enable.
++3. *APIs & Services → OAuth consent screen* → External → app-naam + je e-mail → scope `https://www.googleapis.com/auth/gmail.modify` → jezelf als **Test user** toevoegen (verificatie door Google is dan niet nodig; publishing status mag op *Testing* blijven).
++4. *Credentials → Create credentials → OAuth client ID* → type **Web application** → *Authorized JavaScript origins*: `https://admin.triplet-it.nl` (en `http://localhost:8000` voor lokaal testen). Geen redirect-URI nodig.
++5. Plak de client-ID (eindigt op `.apps.googleusercontent.com`) in `index.html` bij `GMAIL_CLIENT_ID`.
++
++Daarna staat bovenin de topbar **Gmail koppelen**. Het token leeft alleen in de sessie van het tabblad (1 uur, stil vernieuwd zolang je bij Google ingelogd bent). "Verwerkt" zet in Gmail het label `MoneyMonk Verwerkt/<afzender>` en haalt de mail uit de Inbox; "→ Moneybird" en "Doorsturen naar Moneybird" werken hetzelfde als voor Outlook. `GMAIL_SCAN_QUERY` beperkt de scan tot mails met bijlage of factuur-woorden (zet op `""` om alles te scannen).
++
+ ---
+ 
+ ## Deployen
+diff --git a/index.html b/index.html
+index 456d081..89aa9c5 100644
+--- a/index.html
++++ b/index.html
+@@ -724,6 +724,7 @@ details summary { color: var(--muted); }
+         <div class="header-actions">
+           <button class="icon-pill" id="theme-toggle" onclick="toggleTheme()" title="Licht/donker"></button>
+           <button class="btn refresh-btn" id="refresh-btn" onclick="loadAll()" title="Opnieuw ophalen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg><span>Vernieuwen</span></button>
++          <button class="btn" id="gmail-connect-btn" style="display:none"></button>
+           <span id="user-label"></span>
+           <a class="signout" onclick="signOut()">Uitloggen</a>
+         </div>
+@@ -1141,6 +1142,8 @@ details summary { color: var(--muted); }
+ </div>
+ <div id="toast"></div>
+ <script src="https://cdn.jsdelivr.net/npm/@azure/msal-browser@3.30.0/lib/msal-browser.min.js" integrity="sha384-YnOjsoOxSYo65h1BXWnSq24bFbqW8HfzMWSEQxYEMRmjW9Vl1J3HZI3iZxqNYvIi" crossorigin="anonymous"></script>
++<!-- Google Identity Services — alleen nodig voor de Gmail-mailbox (GMAIL_CLIENT_ID). -->
++<script src="https://accounts.google.com/gsi/client" async defer onload="if (window.gmailInit) gmailInit()"></script>
+ <script>
+ // ============================================================
+ //  CONFIG
+@@ -1159,9 +1162,19 @@ const MAILBOXES = [
+   { email: "administratie@triplet-it.nl",label: "Administratie",       color: "#3b6d11" },
+   { email: "inkoop@triplet-it.nl",       label: "Inkoop",      color: "#854f0b" },
+   { email: "finance@triplet-it.nl",  label: "Finance", color: "#d4537e" },
+-  { email: "micha@vantuyl.it",       label: "Van Tuyl",    color: "#5249c4" }
++  { email: "micha@vantuyl.it",       label: "Van Tuyl",    color: "#5249c4" },
++  // Gmail (privé-adres waar o.a. Rork/Stripe-facturen binnenkomen). Loopt niet
++  // via Graph maar via de Gmail-API (zie sectie GMAIL); labels = mappen.
++  { email: "michavantuyl@gmail.com", label: "Gmail",       color: "#c5221f", provider: "gmail" }
+ ];
+ 
++// Google OAuth client-id (type "Web application", origin https://admin.triplet-it.nl).
++// Leeg = Gmail-mailbox uit. Niet geheim; de login loopt via een Google-popup (GIS).
++const GMAIL_CLIENT_ID = "";
++// Extra Gmail-zoekfilter voor de Overzicht-scan (Gmail-zoeksyntaxis). Houdt de
++// scan klein: alleen mails met bijlage of factuur-achtige woorden. "" = alles.
++const GMAIL_SCAN_QUERY = "(has:attachment OR factuur OR invoice OR receipt OR bon OR betaling OR payment OR order OR bestelling OR abonnement OR subscription OR rekening OR incasso)";
++
+ const SCOPES = ["Mail.ReadWrite", "Mail.ReadWrite.Shared", "Mail.Send", "Mail.Send.Shared", "Calendars.ReadWrite", "Calendars.ReadWrite.Shared", "User.Read"];
+ const AGENDA_CALENDAR = "micha@vantuyl.it";  // agenda waar uren-afspraken in komen ("" = uit). /me als dit de ingelogde account is, anders /users/{email}
+ 
+@@ -1328,6 +1341,7 @@ async function getToken() {
+ // ============================================================
+ // `userPath` is empty string for /me, or `/users/{email}` for shared mailboxes.
+ async function graph(method, path, body, retries) {
++  if (path.startsWith("/gmail/")) return gmailShim(method, path, body);   // Gmail-mailbox (zie sectie GMAIL)
+   const token = await getToken();
+   const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + path;
+   const t0 = performance.now();
+@@ -1367,6 +1381,8 @@ async function graph(method, path, body, retries) {
+ 
+ function userPath(mbox) {
+   // Use /me for the signed-in user's own mailbox; /users/{email} for shared ones.
++  // "/gmail" = Gmail-mailbox; graph()/graphBinary() sturen dat pad naar gmailShim().
++  if (mbox.provider === "gmail") return "/gmail";
+   const signedIn = (account && account.username || "").toLowerCase();
+   return mbox.email.toLowerCase() === signedIn ? "/me" : `/users/${encodeURIComponent(mbox.email)}`;
+ }
+@@ -1458,6 +1474,326 @@ async function markRead(mbox, messageId) {
+   return graph("PATCH", `${base}/messages/${messageId}`, { isRead: true });
+ }
+ 
++// ============================================================
++//  GMAIL (Google Identity Services + Gmail REST API)
++//  De Gmail-mailbox gedraagt zich als een Graph-mailbox: userPath() geeft
++//  "/gmail" en graph()/graphBinary() sturen die paden naar gmailShim(), die
++//  de handvol gebruikte Graph-endpoints vertaalt naar Gmail-calls. Zo werken
++//  scan, → Moneybird, Verwerkt (label "MoneyMonk Verwerkt/<afzender>"),
++//  doorsturen en de Moneybird-controle ongewijzigd voor Gmail.
++//  Token: alleen in sessionStorage (1 uur); stil vernieuwd zolang de
++//  Google-sessie leeft, anders knop "Gmail koppelen" in de topbar.
++// ============================================================
++const GMAIL_API = "https://gmail.googleapis.com/gmail/v1/users/me";
++const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.modify";   // lezen + labels + versturen (geen permanent verwijderen)
++const GMAIL_TOKEN_KEY = "gmail_token_v1";
++const GMAIL_WELLKNOWN = { inbox: "INBOX", sentitems: "SENT", deleteditems: "TRASH", drafts: "DRAFT", junkemail: "SPAM" };
++let _gmailTokenClient = null;
++let _gmailTok = null;          // { access_token, exp }
++let _gmailLabels = null;
++let _gmailHinted = false;
++
++function gmailMbox() { return MAILBOXES.find(m => m.provider === "gmail"); }
++function gmailEnabled() { return !!(GMAIL_CLIENT_ID && gmailMbox()); }
++function gmailLoadStoredToken() {
++  try { const t = JSON.parse(sessionStorage.getItem(GMAIL_TOKEN_KEY)); if (t && t.access_token && t.exp > Date.now() + 60000) _gmailTok = t; } catch (e) {}
++}
++function gmailIsConnected() { if (!_gmailTok) gmailLoadStoredToken(); return !!(_gmailTok && _gmailTok.exp > Date.now() + 60000); }
++function gmailInit() {
++  if (!gmailEnabled() || _gmailTokenClient) return;
++  if (!(window.google && google.accounts && google.accounts.oauth2)) return;   // GIS nog niet geladen → onload roept opnieuw
++  _gmailTokenClient = google.accounts.oauth2.initTokenClient({
++    client_id: GMAIL_CLIENT_ID, scope: GMAIL_SCOPE, hint: gmailMbox().email,
++    callback: (resp) => {
++      const pend = _gmailPending; _gmailPending = null;
++      if (resp && resp.access_token) {
++        _gmailTok = { access_token: resp.access_token, exp: Date.now() + (Number(resp.expires_in) || 3600) * 1000 };
++        try { sessionStorage.setItem(GMAIL_TOKEN_KEY, JSON.stringify(_gmailTok)); } catch (e) {}
++        gmailUpdateUi();
++        if (pend) pend.resolve(_gmailTok.access_token);
++      } else if (pend) pend.reject(new Error((resp && (resp.error_description || resp.error)) || "Gmail-token geweigerd"));
++    },
++    error_callback: (err) => { const pend = _gmailPending; _gmailPending = null; if (pend) pend.reject(new Error((err && (err.message || err.type)) || "Gmail-popup mislukt")); }
++  });
++  gmailLoadStoredToken();
++  gmailUpdateUi();
++}
++let _gmailPending = null;
++function gmailRequestToken(interactive) {
++  return new Promise((resolve, reject) => {
++    if (!_gmailTokenClient) return reject(new Error("Gmail niet geconfigureerd (GMAIL_CLIENT_ID leeg of Google-script niet geladen)"));
++    if (_gmailPending) return reject(new Error("Gmail-login loopt al"));
++    _gmailPending = { resolve, reject };
++    // prompt "" = geen scherm als de Google-sessie + toestemming er al zijn (eerste keer toont Google zelf de consent);
++    // "none" = nooit een scherm (stil vernieuwen; mislukt zonder klik als de browser de popup blokkeert).
++    try { _gmailTokenClient.requestAccessToken({ prompt: interactive ? "" : "none" }); }
++    catch (e) { _gmailPending = null; reject(e); }
++  });
++}
++async function gmailToken() {
++  if (gmailIsConnected()) return _gmailTok.access_token;
++  try { return await gmailRequestToken(false); }   // stil vernieuwen
++  catch (e) {
++    gmailUpdateUi();
++    const err = new Error("Gmail niet gekoppeld — klik op 'Gmail koppelen' bovenin"); err.gmailNotConnected = true; throw err;
++  }
++}
++// Voor de Overzicht-scan: zonder token Gmail overslaan en één keer een hint tonen.
++function gmailReadyForScan() {
++  if (!gmailEnabled()) return false;
++  if (gmailIsConnected()) return true;
++  if (!_gmailHinted) {
++    _gmailHinted = true;
++    const el = document.createElement("div"); el.className = "err";
++    el.innerHTML = 'ℹ Gmail staat nog niet aan voor deze sessie. <button class="btn" onclick="gmailConnect()">Gmail koppelen</button>';
++    $("alert-area").appendChild(el);
++  }
++  return false;
++}
++async function gmailConnect() {
++  try {
++    await gmailRequestToken(true);
++    devLog("gmail: gekoppeld", "ok");
++    showToast("Gmail gekoppeld", "ok");
++    $("alert-area").innerHTML = ""; _gmailHinted = false;
++    loadAll();
++  } catch (e) { showToast("Gmail koppelen mislukt: " + (e.message || e), "err"); }
++}
++function gmailUpdateUi() {
++  const b = $("gmail-connect-btn"); if (!b) return;
++  if (!gmailEnabled()) { b.style.display = "none"; return; }
++  b.style.display = "";
++  const on = gmailIsConnected();
++  b.textContent = on ? "Gmail ✓" : "Gmail koppelen";
++  b.title = on ? "Gmail gekoppeld — klik om het token te vernieuwen" : "Koppel " + gmailMbox().email + " zodat facturen uit Gmail in het overzicht komen";
++  b.onclick = gmailConnect;
++}
++
++async function gmailFetch(method, path, body, retries) {
++  const token = await gmailToken();
++  const url = path.startsWith("http") ? path : GMAIL_API + path;
++  const t0 = performance.now();
++  devLog(`gmail ${method} ${path.replace(/\?.*$/, "").slice(0, 70)}`, "dim");
++  const opts = { method, headers: { Authorization: "Bearer " + token } };
++  if (body !== undefined) { opts.headers["Content-Type"] = "application/json"; opts.body = JSON.stringify(body); }
++  const res = await fetch(url, opts);
++  const ms = Math.round(performance.now() - t0);
++  if (!res.ok) {
++    if (res.status === 401) { _gmailTok = null; try { sessionStorage.removeItem(GMAIL_TOKEN_KEY); } catch (e) {} gmailUpdateUi(); }
++    const txt = await res.text();
++    let msg; try { msg = JSON.parse(txt).error.message; } catch (e) { msg = txt.slice(0, 120) || ("HTTP " + res.status); }
++    const left = (retries == null ? 3 : retries);
++    if ((res.status === 429 || res.status >= 500) && left > 0) {
++      const waitMs = 1500 * (4 - left);
++      devLog(`  throttled · retry in ${waitMs}ms`, "warn");
++      await new Promise(r => setTimeout(r, waitMs));
++      return gmailFetch(method, path, body, left - 1);
++    }
++    devLog(`  ✗ ${res.status} ${ms}ms · ${msg.slice(0, 80)}`, "err");
++    throw new Error("Gmail " + res.status + ": " + msg);
++  }
++  devLog(`  ✓ ${res.status} ${ms}ms`, "ok");
++  if (res.status === 204) return null;
++  return await res.json();
++}
++async function gmailMapLimit(items, limit, fn) {
++  const out = new Array(items.length); let i = 0;
++  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, async () => {
++    while (i < items.length) { const k = i++; out[k] = await fn(items[k], k); }
++  }));
++  return out;
++}
++function gmailB64urlToBytes(s) {
++  s = String(s || "").replace(/-/g, "+").replace(/_/g, "/");
++  while (s.length % 4) s += "=";
++  const bin = atob(s); const u = new Uint8Array(bin.length);
++  for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i);
++  return u;
++}
++function gmailBytesToB64url(bytes) { return arrayBufferToBase64(bytes.buffer || bytes).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, ""); }
++
++// ---- labels (= mappen) ----
++async function gmailLabels(force) {
++  if (_gmailLabels && !force) return _gmailLabels;
++  const r = await gmailFetch("GET", "/labels");
++  _gmailLabels = (r.labels || []);
++  return _gmailLabels;
++}
++function gmailLabelLeaf(name) { const i = name.lastIndexOf("/"); return i < 0 ? name : name.slice(i + 1); }
++async function gmailCreateLabel(name) {
++  const existing = (await gmailLabels(true)).find(l => l.name === name);
++  if (existing) return { id: existing.id, displayName: gmailLabelLeaf(existing.name) };
++  const lab = await gmailFetch("POST", "/labels", { name, labelListVisibility: "labelShow", messageListVisibility: "show" });
++  _gmailLabels = null;
++  return { id: lab.id, displayName: gmailLabelLeaf(lab.name) };
++}
++
++// ---- berichten → Graph-vorm ----
++function gmailHeader(hs, name) { const h = (hs || []).find(x => (x.name || "").toLowerCase() === name.toLowerCase()); return h ? h.value : ""; }
++function gmailParseAddr(s) {
++  const m = /^\s*"?([^"<]*?)"?\s*<([^>]+)>\s*$/.exec(s || "");
++  if (m) return { emailAddress: { name: m[1].trim(), address: m[2].trim().toLowerCase() } };
++  return { emailAddress: { name: "", address: (s || "").trim().toLowerCase() } };
++}
++function gmailParseAddrList(s) { return (s || "").split(/,(?![^<]*>)/).map(x => x.trim()).filter(Boolean).map(gmailParseAddr); }
++function gmailWalkParts(p, out) { if (!p) return out; if (p.parts && p.parts.length) p.parts.forEach(x => gmailWalkParts(x, out)); else out.push(p); return out; }
++function gmailAttachmentsOf(payload) {
++  return gmailWalkParts(payload, []).filter(p => p.filename && p.body && p.body.attachmentId).map(p => ({
++    id: p.body.attachmentId, name: p.filename, contentType: p.mimeType || "", size: (p.body && p.body.size) || 0,
++    isInline: /inline/i.test(gmailHeader(p.headers, "Content-Disposition")) && !!gmailHeader(p.headers, "Content-ID")
++  }));
++}
++function gmailToGraphMessage(m) {
++  const hs = (m.payload && m.payload.headers) || [];
++  const labels = m.labelIds || [];
++  const atts = gmailAttachmentsOf(m.payload);
++  const info = _folderInfoCache[(gmailMbox() || {}).email];
++  // "Map": een overslaan-label (Verzonden/Prullenbak/Verwerkt…) wint, dan Inbox, dan het eerste eigen label, anders "ARCHIVE".
++  const folder = (info && labels.find(l => info.skip.has(l)))
++    || (labels.includes("INBOX") ? "INBOX" : (labels.find(l => /^Label_/.test(l)) || "ARCHIVE"));
++  return {
++    id: m.id, internetMessageId: gmailHeader(hs, "Message-ID") || m.id, subject: gmailHeader(hs, "Subject"),
++    from: gmailParseAddr(gmailHeader(hs, "From")), toRecipients: gmailParseAddrList(gmailHeader(hs, "To")),
++    receivedDateTime: new Date(Number(m.internalDate) || Date.now()).toISOString(),
++    hasAttachments: atts.some(a => !a.isInline), isRead: !labels.includes("UNREAD"), bodyPreview: m.snippet || "",
++    webLink: `https://mail.google.com/mail/u/0/#all/${m.id}`, parentFolderId: folder, _labelIds: labels, attachments: atts
++  };
++}
++const GMAIL_META_FIELDS = "id,labelIds,snippet,internalDate,payload(mimeType,filename,headers,body(size,attachmentId),parts(partId,mimeType,filename,headers,body(size,attachmentId),parts(partId,mimeType,filename,headers,body(size,attachmentId),parts(partId,mimeType,filename,headers,body(size,attachmentId)))))";
++async function gmailGetMeta(id) { return gmailFetch("GET", `/messages/${encodeURIComponent(id)}?format=full&fields=${encodeURIComponent(GMAIL_META_FIELDS)}`); }
++
++// Graph-$filter → Gmail-zoekopdracht (alleen wat het dashboard gebruikt).
++function gmailQueryFromFilter(filter) {
++  const q = ["-in:sent", "-in:trash", "-in:drafts", "-in:spam", "-in:chats"];
++  let m;
++  const re = /receivedDateTime\s+(ge|gt|lt|le)\s+([0-9T:.\-]+Z?)/g;
++  while ((m = re.exec(filter || ""))) {
++    const ts = Math.floor(new Date(m[2]).getTime() / 1000);
++    if (m[1] === "ge" || m[1] === "gt") q.push("after:" + ts); else q.push("before:" + ts);
++  }
++  if (/hasAttachments\s+eq\s+true/.test(filter || "")) q.push("has:attachment");
++  else if (GMAIL_SCAN_QUERY) q.push(GMAIL_SCAN_QUERY);
++  return q.join(" ");
++}
++function gmailFindBody(payload) {
++  const parts = gmailWalkParts(payload, []);
++  const pick = (type) => parts.find(p => (p.mimeType || "").toLowerCase() === type && p.body && p.body.data);
++  const html = pick("text/html"), text = pick("text/plain");
++  const p = html || text;
++  if (!p) return { contentType: "text", content: "" };
++  return { contentType: html ? "html" : "text", content: new TextDecoder().decode(gmailB64urlToBytes(p.body.data)) };
++}
++function gmailRfc2047(s) { return /^[\x20-\x7e]*$/.test(s) ? s : "=?UTF-8?B?" + arrayBufferToBase64(new TextEncoder().encode(s)) + "?="; }
++// Doorsturen: PDF/UBL-bijlagen opnieuw als echte bijlagen meesturen (Moneybird
++// scan & herken leest geen geneste .eml).
++async function gmailForward(id, toAddress, comment) {
++  const meta = await gmailGetMeta(id);
++  const g = gmailToGraphMessage(meta);
++  const atts = g.attachments.filter(a => !a.isInline && (/\.(pdf|xml|ubl)$/i.test(a.name) || /pdf|xml/i.test(a.contentType)));
++  if (!atts.length) throw new Error("Geen PDF/UBL-bijlage om door te sturen");
++  const boundary = "b" + Date.now().toString(36) + Math.random().toString(36).slice(2);
++  const enc = new TextEncoder(); const chunks = [];
++  const push = (s) => chunks.push(enc.encode(s));
++  push(`From: ${gmailMbox().email}\r\nTo: ${toAddress}\r\nSubject: ${gmailRfc2047("Fwd: " + (g.subject || ""))}\r\nMIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="${boundary}"\r\n\r\n`);
++  push(`--${boundary}\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n${arrayBufferToBase64(enc.encode((comment || "") + "\n\nVan: " + senderEmail(g) + "\nOnderwerp: " + (g.subject || "")))}\r\n`);
++  for (const a of atts) {
++    const bytes = await gmailBinary(`/gmail/messages/${id}/attachments/${a.id}/$value`);
++    push(`--${boundary}\r\nContent-Type: ${a.contentType || "application/octet-stream"}; name="${a.name.replace(/"/g, "")}"\r\nContent-Disposition: attachment; filename="${a.name.replace(/"/g, "")}"\r\nContent-Transfer-Encoding: base64\r\n\r\n${arrayBufferToBase64(bytes).replace(/(.{76})/g, "$1\r\n")}\r\n`);
++  }
++  push(`--${boundary}--\r\n`);
++  const total = chunks.reduce((n, c) => n + c.length, 0); const raw = new Uint8Array(total); let o = 0;
++  for (const c of chunks) { raw.set(c, o); o += c.length; }
++  return gmailFetch("POST", "/messages/send", { raw: gmailBytesToB64url(raw) });
++}
++
++// Bijlage-inhoud (Graph: /messages/{id}/attachments/{att}/$value).
++async function gmailBinary(path) {
++  const m = /^\/gmail\/messages\/([^/]+)\/attachments\/([^/]+)\/\$value$/.exec(path);
++  if (!m) throw new Error("Gmail: onbekend binair pad " + path);
++  const r = await gmailFetch("GET", `/messages/${encodeURIComponent(m[1])}/attachments/${encodeURIComponent(m[2])}`);
++  return gmailB64urlToBytes(r.data).buffer;
++}
++
++// De Graph-endpoints die het dashboard gebruikt, vertaald naar Gmail.
++async function gmailShim(method, path, body) {
++  const qi = path.indexOf("?");
++  const p = decodeURIComponent((qi < 0 ? path : path.slice(0, qi)).replace(/^\/gmail/, ""));
++  const params = new URLSearchParams(qi < 0 ? "" : path.slice(qi + 1));
++  let m;
++  // -- mappen --
++  if (method === "GET" && p === "/mailFolders") {
++    const labs = (await gmailLabels(true)).filter(l => l.type === "user");
++    return { value: labs.filter(l => !l.name.includes("/")).map(l => ({ id: l.id, displayName: l.name, childFolderCount: labs.filter(x => x.name.startsWith(l.name + "/")).length })) };
++  }
++  if (method === "POST" && p === "/mailFolders") return gmailCreateLabel(body.displayName);
++  if (method === "GET" && (m = /^\/mailFolders\/([^/]+)\/childFolders$/.exec(p))) {
++    const labs = await gmailLabels(true); const parent = labs.find(l => l.id === m[1]);
++    if (!parent) return { value: [] };
++    const pre = parent.name + "/";
++    return { value: labs.filter(l => l.name.startsWith(pre) && !l.name.slice(pre.length).includes("/")).map(l => ({ id: l.id, displayName: l.name.slice(pre.length), childFolderCount: labs.filter(x => x.name.startsWith(l.name + "/")).length })) };
++  }
++  if (method === "POST" && (m = /^\/mailFolders\/([^/]+)\/childFolders$/.exec(p))) {
++    const parent = (await gmailLabels()).find(l => l.id === m[1]);
++    if (!parent) throw new Error("Gmail: bovenliggend label niet gevonden");
++    return gmailCreateLabel(parent.name + "/" + body.displayName);
++  }
++  if (method === "GET" && (m = /^\/mailFolders\/([^/]+)$/.exec(p))) {
++    const key = m[1].toLowerCase();
++    if (key === "archive") return { id: "ARCHIVE", displayName: "Archief" };
++    if (GMAIL_WELLKNOWN[key]) return { id: GMAIL_WELLKNOWN[key], displayName: key };
++    if (m[1] === "ARCHIVE") return { id: "ARCHIVE", displayName: "Archief" };
++    if (m[1] === "INBOX") return { id: "INBOX", displayName: "Inbox" };
++    const lab = (await gmailLabels()).find(l => l.id === m[1]);
++    if (!lab) throw new Error("Gmail: label niet gevonden");
++    return { id: lab.id, displayName: gmailLabelLeaf(lab.name) };
++  }
++  // -- berichten --
++  if (method === "GET" && p === "/messages") {
++    const q = params.get("gmailq") || gmailQueryFromFilter(params.get("$filter") || "");
++    let lp = `/messages?maxResults=100&q=${encodeURIComponent(q)}`;
++    if (params.get("pageToken")) lp += `&pageToken=${encodeURIComponent(params.get("pageToken"))}`;
++    const r = await gmailFetch("GET", lp);
++    const ids = (r.messages || []).map(x => x.id);
++    const metas = await gmailMapLimit(ids, 6, id => gmailGetMeta(id).catch(e => { devLog("gmail: bericht overgeslagen: " + e.message, "warn"); return null; }));
++    const out = { value: metas.filter(Boolean).map(gmailToGraphMessage) };
++    if (r.nextPageToken) {
++      const np = new URLSearchParams(); np.set("gmailq", q); np.set("pageToken", r.nextPageToken);
++      out["@odata.nextLink"] = "/gmail/messages?" + np.toString();
++    }
++    return out;
++  }
++  if (method === "GET" && (m = /^\/messages\/([^/]+)\/attachments$/.exec(p))) {
++    const g = gmailToGraphMessage(await gmailGetMeta(m[1]));
++    return { value: g.attachments.filter(a => !a.isInline) };
++  }
++  if (method === "GET" && (m = /^\/messages\/([^/]+)$/.exec(p))) {
++    const full = await gmailFetch("GET", `/messages/${encodeURIComponent(m[1])}?format=full`);
++    const g = gmailToGraphMessage(full);
++    g.body = gmailFindBody(full.payload);
++    delete g.attachments;
++    return g;
++  }
++  if (method === "POST" && (m = /^\/messages\/([^/]+)\/move$/.exec(p))) {
++    const dest = body && body.destinationId;
++    const mod = { removeLabelIds: ["INBOX"] };
++    if (dest && dest !== "ARCHIVE" && dest !== "INBOX") mod.addLabelIds = [dest];
++    if (dest === "INBOX") { mod.removeLabelIds = []; mod.addLabelIds = ["INBOX"]; }
++    return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/modify`, mod);
++  }
++  if (method === "PATCH" && (m = /^\/messages\/([^/]+)$/.exec(p))) {
++    if (body && body.isRead === true) return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/modify`, { removeLabelIds: ["UNREAD"] });
++    if (body && body.isRead === false) return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/modify`, { addLabelIds: ["UNREAD"] });
++    return null;
++  }
++  if (method === "POST" && (m = /^\/messages\/([^/]+)\/forward$/.exec(p))) {
++    const to = body && body.toRecipients && body.toRecipients[0] && body.toRecipients[0].emailAddress && body.toRecipients[0].emailAddress.address;
++    if (!to) throw new Error("Gmail: geen ontvanger");
++    await gmailForward(m[1], to, body.comment);
++    return null;
++  }
++  throw new Error(`Gmail: niet ondersteund (${method} ${p})`);
++}
++
+ // ============================================================
+ //  HEURISTICS
+ // ============================================================
+@@ -1928,6 +2264,7 @@ async function mailboxFolderInfo(mbox) {
+   const base = userPath(mbox);
+   const wk = {};
+   for (const name of ["inbox", "sentitems", "deleteditems", "drafts", "junkemail", "outbox", "archive"]) {
++    if (mbox.provider === "gmail" && name === "archive") continue;   // Gmail: gearchiveerd = gewoon niet in Inbox, wél scannen
+     try { const f = await graph("GET", `${base}/mailFolders/${name}?$select=id`); if (f && f.id) wk[name] = f.id; } catch (e) { /* bestaat niet */ }
+   }
+   let processedRoot = null;
+@@ -1988,9 +2325,11 @@ async function scanMailbox(mbox, days, info) {
+ // tellen één keer.
+ let lastScan = null;
+ async function scanAllMailboxes(days) {
+-  const infos = await Promise.all(MAILBOXES.map(m => mailboxFolderInfo(m).catch(e => { showError(`${m.email}: ${e.message}`); return null; })));
++  // Gmail alleen meenemen als er een token is; anders één hint (geen foutmelding).
++  const boxes = MAILBOXES.filter(m => m.provider !== "gmail" || gmailReadyForScan());
++  const infos = await Promise.all(boxes.map(m => mailboxFolderInfo(m).catch(e => { showError(`${m.email}: ${e.message}`); return null; })));
+   const seenInbox = new Set(); const targets = [];
+-  MAILBOXES.forEach((m, i) => {
++  boxes.forEach((m, i) => {
+     const info = infos[i]; if (!info) return;
+     if (info.inboxId && seenInbox.has(info.inboxId)) { devLog(`${m.email}: alias van een al gescande mailbox — overgeslagen`, "dim"); return; }
+     if (info.inboxId) seenInbox.add(info.inboxId);
+@@ -2466,6 +2805,7 @@ async function createPurchase() {
+ //  OUTLOOK INVOICE PICKER + INFORMER UPLOAD
+ // ============================================================
+ async function graphBinary(path) {
++  if (path.startsWith("/gmail/")) return gmailBinary(path);
+   const token = await getToken();
+   const res = await fetch("https://graph.microsoft.com/v1.0" + path, { headers: { Authorization: "Bearer " + token } });
+   if (!res.ok) throw new Error("Graph " + res.status + ": " + (await res.text()));
+@@ -5947,6 +6287,7 @@ function initTheme() {
+ initTheme();
+ 
+ (async function init() {
++  gmailInit();   // no-op als GIS nog niet geladen is (de script-onload roept 'm dan)
+   const ok = await initAuth();
+   if (!ok) return;
+   if (account) showApp();
+-- 
+2.43.0
+
