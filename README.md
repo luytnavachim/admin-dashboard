@@ -138,6 +138,18 @@ const CLIENT_ID = "...";
 
 Vervang door je client-ID uit stap 1. In dezelfde sectie staan ook `MAILBOXES`, `MONEYMONK_ADDRESS`, `PROCESSED_FOLDER_NAME` en `SELF_EMAILS`/`SELF_DOMAINS` — pas die aan naar je eigen situatie.
 
+### Stap 4 (optioneel) — Gmail-mailbox
+
+Het dashboard kan naast Microsoft 365 ook één Gmail-account scannen (de regel met `provider: "gmail"` in `MAILBOXES`). Dat loopt rechtstreeks vanuit de browser via de Gmail-API; er is geen Worker-wijziging nodig.
+
+1. [console.cloud.google.com](https://console.cloud.google.com) → nieuw project (bv. "Admin dashboard").
+2. *APIs & Services → Library* → **Gmail API** → Enable.
+3. *APIs & Services → OAuth consent screen* → External → app-naam + je e-mail → scope `https://www.googleapis.com/auth/gmail.modify` → jezelf als **Test user** toevoegen (verificatie door Google is dan niet nodig; publishing status mag op *Testing* blijven).
+4. *Credentials → Create credentials → OAuth client ID* → type **Web application** → *Authorized JavaScript origins*: `https://admin.triplet-it.nl` (en `http://localhost:8000` voor lokaal testen). Geen redirect-URI nodig.
+5. Plak de client-ID (eindigt op `.apps.googleusercontent.com`) in `index.html` bij `GMAIL_CLIENT_ID`.
+
+Daarna staat bovenin de topbar **Gmail koppelen**. Het token leeft alleen in de sessie van het tabblad (1 uur, stil vernieuwd zolang je bij Google ingelogd bent). "Verwerkt" zet in Gmail het label `MoneyMonk Verwerkt/<afzender>` en haalt de mail uit de Inbox; "→ Moneybird" en "Doorsturen naar Moneybird" werken hetzelfde als voor Outlook. `GMAIL_SCAN_QUERY` beperkt de scan tot mails met bijlage of factuur-woorden (zet op `""` om alles te scannen).
+
 ---
 
 ## Deployen
