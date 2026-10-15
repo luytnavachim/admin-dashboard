@@ -17,8 +17,8 @@ Eén-persoons inkoop- en verkoopadministratie voor Triplet IT, als single-file w
 
 Een dashboard met acht tabs:
 
-- **Overzicht** — live status over alle gemonitorde mailboxen: facturen die verwerkt/betaald moeten worden, mails die antwoord vragen, openstaande inkoopfacturen uit Moneybird, en je agenda voor de komende 2 dagen. Per factuurrij een `→ Moneybird`-knop (boekt de factuur direct in) en een `Verwerkt ✓`-knop die de mail naar `MoneyMonk Verwerkt` verplaatst.
-- **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt het contact in Moneybird, maakt de inkoopfactuur aan (ingeboekt, niet betaald) mét PDF als bijlage, en verplaatst de mail naar `MoneyMonk Verwerkt`. Ook een **losse-PDF-upload**, een knop **Doorsturen naar Moneybird** (forwardt de mail mét PDF naar het Moneybird inkomend-adres voor scan & herken — vereist `Mail.Send`), een **bulk doorsturen per maand** naar MoneyMonk/Moneybird, en **Ontbrekende bijlagen aanvullen** (PDF koppelen aan bestaande inkoopfacturen).
+- **Overzicht** — live status over alle gemonitorde mailboxen: facturen die verwerkt/betaald moeten worden, mails die antwoord vragen, openstaande inkoopfacturen uit Moneybird, en je agenda voor de komende 2 dagen. Per factuurrij een `→ Moneybird`-knop (boekt de factuur direct in) en een `Verwerkt ✓`-knop die de mail naar `Administratie/<jaar>/<afzender>` verplaatst.
+- **Facturen verwerken** — wizard met flow-log: kies een factuurmail, het dashboard leest de PDF (en eventuele UBL-bijlage), extraheert leverancier + bedragen via Claude, matcht/maakt het contact in Moneybird, maakt de inkoopfactuur aan (ingeboekt, niet betaald) mét PDF als bijlage, en verplaatst de mail naar `Administratie/<jaar>/<afzender>`. Ook een **losse-PDF-upload**, een knop **Doorsturen naar Moneybird** (forwardt de mail mét PDF naar het Moneybird inkomend-adres voor scan & herken — vereist `Mail.Send`), een **bulk doorsturen per maand** naar MoneyMonk/Moneybird, en **Ontbrekende bijlagen aanvullen** (PDF koppelen aan bestaande inkoopfacturen).
 - **Moneybird** — controle van mailbox ↔ Moneybird: scant de mailboxen (per maand) op inkoopfactuur-mails en vergelijkt op factuurnummer. Ontbrekende facturen kun je inboeken of doorsturen, facturen zonder bijlage krijgen alsnog hun PDF, en complete facturen → mail naar Verwerkt. Plus **inkoop-categorieregels** (trefwoord → grootboek, automatisch bij inboeken) en een **duplicaat-check** op inkoopfacturen/bonnen (met negeer + undo).
 - **Verkoop migreren** — bulk-import van MoneyMonk PDF-exports als verkoopfacturen in Moneybird (per PDF: Claude extraheert klant + bedragen → contact matchen/aanmaken → verkoopfactuur). Met **Direct inboeken** worden ze gemarkeerd als verstuurd (zonder e-mail), anders blijven ze concept; al bestaande referenties worden overgeslagen.
 - **Projecten** — uren registreren per project en er met één klik een verkoopfactuur (concept) van maken, of in bulk met **Factureer maand** (per project een concept uit de open uren van een gekozen maand). Elke uren-boeking komt ook direct als **tijdregistratie** in Moneybird. Zie [Projecten & facturen](#projecten--facturen-uren--verkoopfactuur) hieronder. Data staat **cross-device** in **Cloudflare Workers KV** (`/projects`), beveiligd via je **Microsoft-login**.
@@ -148,7 +148,7 @@ Het dashboard kan naast Microsoft 365 ook één Gmail-account scannen (de regel 
 4. *Credentials → Create credentials → OAuth client ID* → type **Web application** → *Authorized JavaScript origins*: `https://admin.triplet-it.nl` (en `http://localhost:8000` voor lokaal testen). Geen redirect-URI nodig.
 5. Plak de client-ID (eindigt op `.apps.googleusercontent.com`) in `index.html` bij `GMAIL_CLIENT_ID`.
 
-Daarna staat bovenin de topbar **Gmail koppelen**. Het token leeft alleen in de sessie van het tabblad (1 uur, stil vernieuwd zolang je bij Google ingelogd bent). "Verwerkt" zet in Gmail het label `MoneyMonk Verwerkt/<afzender>` en haalt de mail uit de Inbox; "→ Moneybird" en "Doorsturen naar Moneybird" werken hetzelfde als voor Outlook. `GMAIL_SCAN_QUERY` beperkt de scan tot mails met bijlage of factuur-woorden (zet op `""` om alles te scannen).
+Daarna staat bovenin de topbar **Gmail koppelen**. Het token leeft alleen in de sessie van het tabblad (1 uur, stil vernieuwd zolang je bij Google ingelogd bent). "Verwerkt" zet in Gmail het label `Administratie/<jaar>/<afzender>` en haalt de mail uit de Inbox; "→ Moneybird" en "Doorsturen naar Moneybird" werken hetzelfde als voor Outlook. `GMAIL_SCAN_QUERY` beperkt de scan tot mails met bijlage of factuur-woorden (zet op `""` om alles te scannen).
 
 ---
 
@@ -200,7 +200,7 @@ Check ook of zo'n token in `~/.zshrc` / `~/.zprofile` staat (`grep CLOUDFLARE ~/
 Alle vaste instellingen staan in het `CONFIG`-blok bovenaan het `<script>` in `index.html`:
 
 - `MAILBOXES` — lijst met te monitoren mailboxen (primaire = eerste, gebruikt voor agenda).
-- `PROCESSED_FOLDER_NAME` — doelmap voor verwerkte facturen (default `MoneyMonk Verwerkt`).
+- `PROCESSED_FOLDER_NAME` — archiefmap voor afgehandelde mails (default `Administratie`; submappen `<jaar>/<afzender>`, uit te zetten met `PROCESSED_BY_YEAR = false`). Oude mappen uit `LEGACY_PROCESSED_FOLDER_NAMES` (`MoneyMonk Verwerkt`) worden bij eerste gebruik automatisch hernoemd.
 - `MONEYMONK_ADDRESS` — inkoopadres voor doorsturen.
 - `SELF_EMAILS` / `SELF_DOMAINS` — eigen adressen die als "eigen factuur" worden uitgefilterd.
 - Factuur-/betaling-detectie: zoek `looksLikeInvoice` en `looksLikePayment` in de code.
@@ -222,7 +222,7 @@ Moneybird-ID's (btw-tarieven, grootboeken, administratie-ID, user-ID voor tijdre
 
 **"AADSTS50011: Reply URL mismatch"** → De browser-URL komt niet exact overeen met de Redirect URI in Azure (trailing slash, http vs https tellen mee).
 
-**"Map 'MoneyMonk Verwerkt' niet gevonden"** → De map wordt normaal auto-aangemaakt; controleer anders `PROCESSED_FOLDER_NAME` en de mailbox-permissies.
+**"Map 'Administratie' niet gevonden"** → De map wordt normaal auto-aangemaakt; controleer anders `PROCESSED_FOLDER_NAME` en de mailbox-permissies.
 
 **Moneybird-call faalt** → Test de verbinding op de **Instellingen**-tab en check de dev-console. Vaak een ontbrekende Worker-variabele (`MONEYBIRD_TOKEN`, `MONEYBIRD_ADMIN_ID`). De foutmelding uit Moneybird wordt doorgegeven naar het dashboard.
 

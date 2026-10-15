@@ -846,7 +846,7 @@ details summary { color: var(--muted); }
 
     <details class="section" id="bulkfwd-details">
       <summary style="cursor:pointer;font-size:15px;font-weight:500;list-style:none;">Bulk doorsturen per maand (naar MoneyMonk / Moneybird)</summary>
-      <p class="muted" style="margin-top:8px;">Stuurt alle factuurmails van een maand in één keer door naar je boekhouding (scan &amp; herken doet de rest). Handig om 2025 in MoneyMonk compleet te maken zonder elke factuur los te uploaden. Verstuurde mails gaan naar de Verwerkt-map, zodat je niets dubbel doorstuurt.</p>
+      <p class="muted" style="margin-top:8px;">Stuurt alle factuurmails van een maand in één keer door naar je boekhouding (scan &amp; herken doet de rest). Verstuurde mails gaan naar de archiefmap <code>Administratie/&lt;jaar&gt;/&lt;afzender&gt;</code>, zodat je niets dubbel doorstuurt.</p>
       <div class="row-btns" style="align-items:center;">
         <label style="font-size:13px;">Maand <select id="bf-month" style="margin-left:6px;"></select></label>
         <label style="font-size:13px;">Doel
@@ -1091,12 +1091,12 @@ details summary { color: var(--muted); }
 
     <div class="section">
       <h2>Overzicht</h2>
-      <p class="muted">Live status over alle mailboxen: te verwerken/betalen facturen, mails die antwoord vragen, openstaande inkoopfacturen uit Moneybird en je agenda. <strong>Workflow inkoopfactuur:</strong> gebruik de knop <em>→ Moneybird</em> om de factuur direct in te boeken, of klik <em>Verwerkt ✓</em> om de mail naar <code>MoneyMonk Verwerkt</code> te verplaatsen.</p>
+      <p class="muted">Live status over alle mailboxen: te verwerken/betalen facturen, mails die antwoord vragen, openstaande inkoopfacturen uit Moneybird en je agenda. <strong>Workflow inkoopfactuur:</strong> gebruik de knop <em>→ Moneybird</em> om de factuur direct in te boeken, of klik <em>Verwerkt ✓</em> om de mail te archiveren in <code>Administratie/&lt;jaar&gt;/&lt;afzender&gt;</code> (zonder iets in Moneybird te doen).</p>
     </div>
 
     <div class="section">
       <h2>Facturen verwerken</h2>
-      <p class="muted">Kies een factuur-mail uit de Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) matcht of maakt het contact in Moneybird, (4) maakt de inkoopfactuur aan mét PDF als bijlage, (5) verplaatst de mail naar <code>MoneyMonk Verwerkt</code>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur. Met <em>Losse PDF uploaden</em> verwerk je een factuur die niet in je inbox zit (download/scan) via dezelfde flow, zonder Outlook-stappen.</p>
+      <p class="muted">Kies een factuur-mail uit de Inbox. Het dashboard: (1) leest de PDF (en eventuele UBL-bijlage), (2) extraheert leverancier + bedragen via Claude, (3) matcht of maakt het contact in Moneybird, (4) maakt de inkoopfactuur aan mét PDF als bijlage, (5) archiveert de mail in <code>Administratie/&lt;jaar&gt;/&lt;afzender&gt;</code>. <strong>Negeren</strong> verplaatst de mail naar Archive zonder factuur. Met <em>Losse PDF uploaden</em> verwerk je een factuur die niet in je inbox zit (download/scan) via dezelfde flow, zonder Outlook-stappen.</p>
     </div>
 
     <div class="section">
@@ -1152,7 +1152,11 @@ const CLIENT_ID = "866230d7-2236-4814-af6f-cffb47d3ab08";
 const TENANT = "common";
 const MONEYMONK_ADDRESS = "triplet-it@inkomend.moneymonk.nl";
 const MONEYBIRD_INBOX = "triplet-it-579bdb3f@inkomend.moneybird.nl";  // Moneybird "Inkomend"-adres (scan & herken)
-const PROCESSED_FOLDER_NAME = "MoneyMonk Verwerkt";
+// Archiefmap voor afgehandelde mails, per mailbox: Administratie/<jaar>/<Afzender>.
+// Oude mappen met een naam uit LEGACY_PROCESSED_FOLDER_NAMES worden automatisch hernoemd.
+const PROCESSED_FOLDER_NAME = "Administratie";
+const LEGACY_PROCESSED_FOLDER_NAMES = ["MoneyMonk Verwerkt"];
+const PROCESSED_BY_YEAR = true;   // false = Administratie/<Afzender> zonder jaarlaag
 
 // All mailboxes to monitor. The first one is the "primary" — used for calendar.
 // label = short name shown as badge; color = badge text color.
@@ -1420,11 +1424,14 @@ async function listEvents(daysAhead) {
   const r = await graph("GET", url);
   return (r.value || []).filter(e => !e.isCancelled);
 }
-async function findFolderId(mbox, name) {
+async function findFolderId(mbox, name, noCreate) {
   const cacheKey = "folder_id_" + mbox.email + "_" + name;
   const cached = localStorage.getItem(cacheKey);
   if (cached) return cached;
   const base = userPath(mbox);
+  // De archiefmap (en oude naam) alleen op het topniveau zoeken — een gelijknamige
+  // submap ergens anders mag nooit het archief worden.
+  const topOnly = name === PROCESSED_FOLDER_NAME || LEGACY_PROCESSED_FOLDER_NAMES.includes(name);
   async function walk(parentId) {
     const url = parentId
       ? `${base}/mailFolders/${parentId}/childFolders?$top=100&$select=id,displayName,childFolderCount`
@@ -1432,13 +1439,26 @@ async function findFolderId(mbox, name) {
     const r = await graph("GET", url);
     const folders = r.value || [];
     for (const f of folders) if (f.displayName === name) return f.id;
+    if (topOnly) return null;
     for (const f of folders) if (f.childFolderCount > 0) {
       const sub = await walk(f.id); if (sub) return sub;
     }
     return null;
   }
   let id = await walk();
-  if (!id) {
+  if (!id && name === PROCESSED_FOLDER_NAME) {
+    // Oude archiefmap (bv. "MoneyMonk Verwerkt") → hernoemen i.p.v. een tweede map maken
+    for (const legacy of LEGACY_PROCESSED_FOLDER_NAMES) {
+      const oldId = await findFolderId(mbox, legacy, true);
+      if (oldId) {
+        await renameFolder(mbox, oldId, name);
+        localStorage.removeItem("folder_id_" + mbox.email + "_" + legacy);
+        devLog(`${mbox.label}: map "${legacy}" hernoemd naar "${name}"`, "info");
+        id = oldId; break;
+      }
+    }
+  }
+  if (!id && !noCreate) {
     // Niet gevonden → maak hem aan op het topniveau van deze mailbox
     const created = await graph("POST", `${base}/mailFolders`, { displayName: name });
     id = created && created.id;
@@ -1465,6 +1485,30 @@ async function findOrCreateSubfolder(mbox, parentId, name) {
   }
   return null;
 }
+async function renameFolder(mbox, folderId, newName) {
+  const base = userPath(mbox);
+  return graph("PATCH", `${base}/mailFolders/${folderId}`, { displayName: newName });
+}
+// Doelmap voor een afgehandelde mail: Administratie/<jaar>/<Afzender> (mappen worden aangemaakt).
+async function archiveFolderFor(mbox, email) {
+  const rootId = await findFolderId(mbox, PROCESSED_FOLDER_NAME);
+  if (!rootId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" kon niet gemaakt worden in ${mbox.email}.`);
+  const yr = String(new Date(email.receivedDateTime || Date.now()).getFullYear());
+  let parentId = rootId;
+  if (PROCESSED_BY_YEAR) parentId = (await findOrCreateSubfolder(mbox, rootId, yr)) || rootId;
+  const sub = senderFolderName(senderEmail(email));
+  const subId = await findOrCreateSubfolder(mbox, parentId, sub);
+  if (!subId) throw new Error(`Submap "${sub}" kon niet gemaakt worden in ${mbox.email}.`);
+  return { id: subId, path: PROCESSED_FOLDER_NAME + "/" + (PROCESSED_BY_YEAR ? yr + "/" : "") + sub };
+}
+// Mail archiveren (no-op als 'ie al in die submap staat). Geeft het pad terug voor de melding.
+async function archiveMail(email) {
+  const mbox = email._mailbox;
+  const target = await archiveFolderFor(mbox, email);
+  if (email.parentFolderId && email.parentFolderId === target.id) return { moved: false, path: target.path };
+  await moveMessage(mbox, email.id, target.id);
+  return { moved: true, path: target.path };
+}
 async function moveMessage(mbox, messageId, folderId) {
   const base = userPath(mbox);
   return graph("POST", `${base}/messages/${messageId}/move`, { destinationId: folderId });
@@ -1479,7 +1523,7 @@ async function markRead(mbox, messageId) {
 //  De Gmail-mailbox gedraagt zich als een Graph-mailbox: userPath() geeft
 //  "/gmail" en graph()/graphBinary() sturen die paden naar gmailShim(), die
 //  de handvol gebruikte Graph-endpoints vertaalt naar Gmail-calls. Zo werken
-//  scan, → Moneybird, Verwerkt (label "MoneyMonk Verwerkt/<afzender>"),
+//  scan, → Moneybird, Verwerkt (label "Administratie/<jaar>/<afzender>"),
 //  doorsturen en de Moneybird-controle ongewijzigd voor Gmail.
 //  Token: alleen in sessionStorage (1 uur); stil vernieuwd zolang de
 //  Google-sessie leeft, anders knop "Gmail koppelen" in de topbar.
@@ -1736,6 +1780,18 @@ async function gmailShim(method, path, body) {
     const parent = (await gmailLabels()).find(l => l.id === m[1]);
     if (!parent) throw new Error("Gmail: bovenliggend label niet gevonden");
     return gmailCreateLabel(parent.name + "/" + body.displayName);
+  }
+  if (method === "PATCH" && (m = /^\/mailFolders\/([^/]+)$/.exec(p))) {
+    // Label hernoemen; geneste labels ("Oud/Ziggo") zijn losse labels en gaan mee.
+    const labs = await gmailLabels(true); const lab = labs.find(l => l.id === m[1]);
+    if (!lab) throw new Error("Gmail: label niet gevonden");
+    const i = lab.name.lastIndexOf("/");
+    const newName = (i < 0 ? "" : lab.name.slice(0, i + 1)) + body.displayName;
+    for (const child of labs.filter(l => l.name.startsWith(lab.name + "/")))
+      await gmailFetch("PATCH", `/labels/${encodeURIComponent(child.id)}`, { name: newName + child.name.slice(lab.name.length) });
+    const r = await gmailFetch("PATCH", `/labels/${encodeURIComponent(lab.id)}`, { name: newName });
+    _gmailLabels = null;
+    return { id: r.id, displayName: gmailLabelLeaf(r.name) };
   }
   if (method === "GET" && (m = /^\/mailFolders\/([^/]+)$/.exec(p))) {
     const key = m[1].toLowerCase();
@@ -2219,13 +2275,10 @@ async function markProcessed(btn, id, mboxEmail, senderAddr) {
   btn.disabled = true; btn.textContent = 'Verplaatsen…';
   devLog(`verwerk: ${(senderAddr || '?').split('@')[0]} → ${mbox.label}/${PROCESSED_FOLDER_NAME}`, "info");
   try {
-    const parentId = await findFolderId(mbox, PROCESSED_FOLDER_NAME);
-    if (!parentId) throw new Error(`Map "${PROCESSED_FOLDER_NAME}" kon niet gemaakt worden in ${mbox.email}.`);
-    const subName = senderFolderName(senderAddr);
-    const targetId = await findOrCreateSubfolder(mbox, parentId, subName);
-    if (!targetId) throw new Error(`Submap "${subName}" kon niet gemaakt worden in ${mbox.email}.`);
-    await moveMessage(mbox, id, targetId);
-    showToast(`→ ${PROCESSED_FOLDER_NAME}/${subName} (${mbox.label})`, 'ok');
+    const email = (window.lastScanRows || []).find(e => e.id === id && e._mailbox === mbox)
+      || { id, _mailbox: mbox, from: { emailAddress: { address: senderAddr } }, receivedDateTime: null };
+    const r = await archiveMail(email);
+    showToast(`→ ${r.path} (${mbox.label})`, 'ok');
     fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
   } catch (e) {
     btn.disabled = false; btn.textContent = orig;
@@ -2409,11 +2462,8 @@ async function bookRowWithPdf(btn, file) {
     const extracted = await extractInvoiceViaWorker(pdfB64);
     btn.textContent = "Inboeken…";
     const r = await mbBookPurchaseFromExtracted(extracted, pdfB64, file.name);
-    try {
-      const pid = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
-      const sub = await findOrCreateSubfolder(email._mailbox, pid, senderFolderName(senderEmail(email)));
-      await moveMessage(email._mailbox, email.id, sub || pid);
-    } catch (e) { showToast("In Moneybird, maar mail verplaatsen mislukte: " + e.message, "err"); }
+    try { await archiveMail(email); }
+    catch (e) { showToast("In Moneybird, maar mail verplaatsen mislukte: " + e.message, "err"); }
     showToast(r.duplicate ? `Stond al in Moneybird (${extracted.number}) — mail verwerkt` : `Ingeboekt: ${extracted.supplier_name} € ${(Number(extracted.invoice_total) || 0).toFixed(2)}`, "ok");
     fadeOutRow(row, () => decrementCount('stat-invoices', 'invoices-count', 'invoices-list', 'Niets te verwerken of te betalen. ✓'));
   } catch (e) {
@@ -3187,17 +3237,11 @@ async function sendSelectedToMoneybird() {
       step3.textContent = `3/4 — ${duplicate ? "Stond al in Moneybird — niet dubbel ingeboekt" : "Ingeboekt in Moneybird"}${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
         (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : (duplicate ? "" : " + PDF bijgevoegd")) + ` — ${invUrl}`;
 
-      step4 = logStep("4/4 — Mail verplaatsen naar Verwerkt-map...");
+      step4 = logStep("4/4 — Mail archiveren...");
       try {
-        const folderId = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
-        if (email.parentFolderId && email.parentFolderId === folderId) {
-          step4.className = "flow-step ok";
-          step4.textContent = `4/4 — Mail stond al in ${PROCESSED_FOLDER_NAME} (geen move nodig)`;
-        } else {
-          await moveMessage(email._mailbox, email.id, folderId);
-          step4.className = "flow-step ok";
-          step4.textContent = "4/4 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
-        }
+        const r = await archiveMail(email);
+        step4.className = "flow-step ok";
+        step4.textContent = r.moved ? "4/4 — Mail gearchiveerd in " + r.path : `4/4 — Mail stond al in ${r.path} (geen move nodig)`;
       } catch (e) {
         step4.className = "flow-step err";
         step4.textContent = "4/4 — Verplaatsen mislukt (factuur staat wel in Moneybird): " + e.message;
@@ -3239,17 +3283,11 @@ async function sendSelectedToMoneybird() {
     step3.textContent = `3/4 — ${duplicate ? "Stond al in Moneybird — niet dubbel ingeboekt" : "Ingeboekt in Moneybird"}${contactCreated ? " (nieuw contact aangemaakt)" : ""}` +
       (attachErr ? ` — let op: PDF-bijlage mislukte (${attachErr})` : (duplicate ? "" : " + PDF bijgevoegd")) + ` — ${invUrl}`;
 
-    step4 = logStep("4/4 — Mail verplaatsen naar Verwerkt-map...");
+    step4 = logStep("4/4 — Mail archiveren...");
     try {
-      const folderId = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
-      if (email.parentFolderId && email.parentFolderId === folderId) {
-        step4.className = "flow-step ok";
-        step4.textContent = `4/4 — Mail stond al in ${PROCESSED_FOLDER_NAME} (geen move nodig)`;
-      } else {
-        await moveMessage(email._mailbox, email.id, folderId);
-        step4.className = "flow-step ok";
-        step4.textContent = "4/4 — Mail verplaatst naar " + PROCESSED_FOLDER_NAME;
-      }
+      const r = await archiveMail(email);
+      step4.className = "flow-step ok";
+      step4.textContent = r.moved ? "4/4 — Mail gearchiveerd in " + r.path : `4/4 — Mail stond al in ${r.path} (geen move nodig)`;
     } catch (e) {
       step4.className = "flow-step err";
       step4.textContent = "4/4 — Verplaatsen mislukt (factuur staat wel in Moneybird): " + e.message;
@@ -3341,11 +3379,7 @@ async function forwardSelectedToMoneybird() {
   try {
     await forwardToMoneybird(email._mailbox, email.id);
     let moved = false;
-    try {
-      const fid = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
-      if (!(email.parentFolderId && email.parentFolderId === fid)) await moveMessage(email._mailbox, email.id, fid);
-      moved = true;
-    } catch (e) {}
+    try { await archiveMail(email); moved = true; } catch (e) {}
     showToast("Doorgestuurd naar Moneybird" + (moved ? " · mail verplaatst" : ""), "ok");
     invoiceEmails = invoiceEmails.filter(e => e.id !== email.id);
     selectedEmailId = null; renderEmails();
@@ -4388,11 +4422,7 @@ function renderDuplicateDocs() {
 }
 
 // Mail naar de Verwerkt-map verplaatsen (best-effort, no-op als 'ie er al staat).
-async function recMoveMail(email) {
-  const fid = await findFolderId(email._mailbox, PROCESSED_FOLDER_NAME);
-  if (email.parentFolderId && email.parentFolderId === fid) return;
-  await moveMessage(email._mailbox, email.id, fid);
-}
+async function recMoveMail(email) { await archiveMail(email); }
 
 // Factuurmail (incl. PDF-bijlage) doorsturen naar een inkomend-adres. Vereist Mail.Send(.Shared).
 async function forwardMailTo(mbox, messageId, address, comment) {
@@ -4644,7 +4674,7 @@ function renderRec() {
     }).join("");
   } else html += '<p class="muted">Geen.</p>';
   const verplaatst = recRows.filter(r => r.status === "verplaatst").length;
-  if (verplaatst) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${verplaatst} mail(s) verplaatst naar ${escapeHtml(PROCESSED_FOLDER_NAME)}. ✓</p>`;
+  if (verplaatst) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${verplaatst} mail(s) gearchiveerd in ${escapeHtml(PROCESSED_FOLDER_NAME)}/… ✓</p>`;
   const doorgestuurd = recRows.filter(r => r.status === "doorgestuurd").length;
   if (doorgestuurd) html += `<p class="muted" style="font-size:12px;margin-top:6px;">${doorgestuurd} doorgestuurd naar Moneybird (verschijnt daar bij "Inkomende documenten" zodra scan & herken klaar is). ✓</p>`;
   const genegeerd = recRows.filter(r => r.status === "genegeerd").length;
@@ -4710,13 +4740,13 @@ function recClearIgnored() {
 }
 async function recMoveCompleet(emailId) {
   const r = recRows.find(x => x.email.id === emailId); if (!r) return;
-  try { await recMoveMail(r.email); r.status = "verplaatst"; showToast("Mail verplaatst naar " + PROCESSED_FOLDER_NAME, "ok"); renderRec(); }
+  try { await recMoveMail(r.email); r.status = "verplaatst"; showToast("Mail gearchiveerd in " + PROCESSED_FOLDER_NAME + "/…", "ok"); renderRec(); }
   catch (e) { showToast("Verplaatsen mislukt: " + (e.message || e), "err"); }
 }
 async function recMoveAllCompleet() {
   const todo = recRows.filter(r => r.status === "compleet");
   if (!todo.length) return;
-  if (!confirm(`${todo.length} verwerkte mail(s) verplaatsen naar de map "${PROCESSED_FOLDER_NAME}"?`)) return;
+  if (!confirm(`${todo.length} verwerkte mail(s) archiveren in "${PROCESSED_FOLDER_NAME}/<jaar>/<afzender>"?`)) return;
   let ok = 0, fail = 0;
   for (const r of todo) {
     try { await recMoveMail(r.email); r.status = "verplaatst"; ok++; } catch (e) { fail++; }
