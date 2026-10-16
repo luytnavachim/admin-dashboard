@@ -20,9 +20,10 @@
 	"vars": {
 		"INFORMER_AUTH_METHOD": "apikey",
 		"INFORMER_BASE_URL": "https://api.informer.eu/v1",
-		"ALLOWED_ORIGIN": "https://admin.triplet-it.nl,http://localhost:8000",
+		"ALLOWED_ORIGIN": "https://administratie.triplet-it.nl,https://admin.app1x.online,https://admin.triplet-it.nl,http://localhost:8000",
 		// Moneybird-administratie-ID (niet geheim) — staat hier zodat 'wrangler deploy'
 		// 'm niet meer wist. De token zet je als Secret: npx wrangler secret put MONEYBIRD_TOKEN
 		"MONEYBIRD_ADMIN_ID": "489478494017815934"
-	}
+	},
+	"assets__added": {}
 }
