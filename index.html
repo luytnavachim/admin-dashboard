@@ -1632,8 +1632,28 @@ function gmailUpdateUi() {
   b.onclick = gmailConnect;
 }
 
+// Gmail-quota: max 250 units/sec per gebruiker (15.000/min). We blijven ruim onder die grens
+// met een glijdend venster van 1 s, zodat de volledige scan (Opschonen) geen 403 "Quota exceeded" meer geeft.
+const GMAIL_UNITS_PER_SEC = 180;
+let _gmailSpent = [];   // [tijdstip, units]
+function gmailCost(method, path) {
+  if (/\/messages\/send/.test(path)) return 100;
+  if (/batchModify|batchDelete/.test(path)) return 50;
+  if (/\/labels/.test(path)) return 1;
+  return 5;   // messages.get/list/modify/trash, attachments.get
+}
+async function gmailPace(units) {
+  for (;;) {
+    const now = performance.now();
+    _gmailSpent = _gmailSpent.filter(x => now - x[0] < 1000);
+    const used = _gmailSpent.reduce((a, x) => a + x[1], 0);
+    if (used + units <= GMAIL_UNITS_PER_SEC) { _gmailSpent.push([now, units]); return; }
+    await new Promise(r => setTimeout(r, Math.max(20, 1000 - (now - _gmailSpent[0][0]))));
+  }
+}
 async function gmailFetch(method, path, body, retries) {
   const token = await gmailToken();
+  await gmailPace(gmailCost(method, path));
   const url = path.startsWith("http") ? path : GMAIL_API + path;
   const t0 = performance.now();
   devLog(`gmail ${method} ${path.replace(/\?.*$/, "").slice(0, 70)}`, "dim");
@@ -1645,9 +1665,12 @@ async function gmailFetch(method, path, body, retries) {
     if (res.status === 401) { _gmailTok = null; try { sessionStorage.removeItem(GMAIL_TOKEN_KEY); } catch (e) {} gmailUpdateUi(); }
     const txt = await res.text();
     let msg; try { msg = JSON.parse(txt).error.message; } catch (e) { msg = txt.slice(0, 120) || ("HTTP " + res.status); }
-    const left = (retries == null ? 3 : retries);
-    if ((res.status === 429 || res.status >= 500) && left > 0) {
-      const waitMs = 1500 * (4 - left);
+    const left = (retries == null ? 5 : retries);
+    // Gmail meldt rate-limits ook als 403 (rateLimitExceeded / userRateLimitExceeded / "Quota exceeded")
+    const rateLimited = res.status === 429 || (res.status === 403 && /rate ?limit|quota exceeded/i.test(txt));
+    if ((rateLimited || res.status >= 500) && left > 0) {
+      const ra = parseInt(res.headers.get("Retry-After") || "", 10);
+      const waitMs = ra > 0 ? ra * 1000 : Math.min(32000, 1000 * 2 ** (5 - left)) + Math.random() * 500;
       devLog(`  throttled · retry in ${waitMs}ms`, "warn");
       await new Promise(r => setTimeout(r, waitMs));
       return gmailFetch(method, path, body, left - 1);
@@ -1829,7 +1852,7 @@ async function gmailShim(method, path, body) {
     if (params.get("pageToken")) lp += `&pageToken=${encodeURIComponent(params.get("pageToken"))}`;
     const r = await gmailFetch("GET", lp);
     const ids = (r.messages || []).map(x => x.id);
-    const metas = await gmailMapLimit(ids, 6, id => gmailGetMeta(id).catch(e => { devLog("gmail: bericht overgeslagen: " + e.message, "warn"); return null; }));
+    const metas = await gmailMapLimit(ids, 4, id => gmailGetMeta(id).catch(e => { devLog("gmail: bericht overgeslagen: " + e.message, "warn"); return null; }));
     const out = { value: metas.filter(Boolean).map(gmailToGraphMessage) };
     if (r.nextPageToken) {
       const np = new URLSearchParams(); np.set("gmailq", q); np.set("pageToken", r.nextPageToken);
