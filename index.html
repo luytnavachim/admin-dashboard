@@ -705,6 +705,7 @@ details summary { color: var(--muted); }
         <button class="tab" data-tab="facturen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2h9l4 4v16H6z"/><path d="M9 9h6M9 13h6M9 17h4"/></svg>Facturen verwerken</button>
         <button class="tab" data-tab="afboeken"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19M6 14h4"/></svg>Afboeken</button>
         <button class="tab" data-tab="moneybird"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h13l-3-3M20 17H7l3 3"/><path d="M9 11h6M9 14h4"/></svg>Moneybird</button>
+        <button class="tab" data-tab="opschonen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/><path d="M10 11v6M14 11v6"/></svg>Opschonen</button>
         <div class="nav-label">Werk</div>
         <button class="tab" data-tab="projecten"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 8h6l2 2h10v8a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1z"/><path d="M7 8V6a1 1 0 0 1 1-1h4l2 2"/></svg>Projecten</button>
         <button class="tab" data-tab="migratie"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="20" r="1.3"/><circle cx="17" cy="20" r="1.3"/><path d="M3 4h2l2.4 11.5h9.6L19 7H6.5"/></svg>Verkoop migreren</button>
@@ -1059,6 +1060,23 @@ details summary { color: var(--muted); }
   </section>
 
   <!-- ====== TAB: Instellingen ====== -->
+  <!-- ====== TAB: Opschonen (mail-troep per afzender weggooien) ====== -->
+  <section id="tab-opschonen" class="tab-panel">
+    <div class="section">
+      <h2>Mail opschonen</h2>
+      <p class="muted">Alle gescande mails (laatste <span id="cl-days">60</span> dagen, alle mailboxen) gegroepeerd per afzender. <strong>Verwijder alles</strong> zet álle mails van die afzender — ook ouder dan 60 dagen — in <em>Verwijderde items</em> (Gmail: Prullenbak); daar zijn ze 30 dagen terug te halen. De archiefmap <code>Administratie</code> en verzonden mails worden nooit geraakt. Met <strong>+ regel</strong> onthoudt het dashboard de afzender en ruimt hem bij elke scan automatisch op (als de schakelaar aan staat).</p>
+      <div class="row-btns" style="align-items:center;">
+        <input id="cl-filter" type="text" placeholder="Zoek afzender of onderwerp…" style="max-width:280px;" oninput="renderCleaner()">
+        <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-only-inbox" onchange="renderCleaner()"> alleen Inbox</label>
+        <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-auto" onchange="clSetAuto(this.checked)"> regels automatisch toepassen bij elke scan</label>
+        <button class="btn" onclick="clApplyRules()">Regels nu toepassen</button>
+        <span class="muted" id="cl-status" style="align-self:center;"></span>
+      </div>
+      <div id="cl-rules" class="muted" style="margin-top:8px;font-size:12.5px;"></div>
+      <div id="cl-list" style="margin-top:12px;"><p class="muted">Laden…</p></div>
+    </div>
+  </section>
+
   <section id="tab-instellingen" class="tab-panel">
     <div class="section">
       <h2>Verbinding met Moneybird</h2>
@@ -1831,6 +1849,7 @@ async function gmailShim(method, path, body) {
   }
   if (method === "POST" && (m = /^\/messages\/([^/]+)\/move$/.exec(p))) {
     const dest = body && body.destinationId;
+    if (dest === "TRASH") return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/trash`);
     const mod = { removeLabelIds: ["INBOX"] };
     if (dest && dest !== "ARCHIVE" && dest !== "INBOX") mod.addLabelIds = [dest];
     if (dest === "INBOX") { mod.removeLabelIds = []; mod.addLabelIds = ["INBOX"]; }
@@ -2485,7 +2504,11 @@ async function loadAll() {
   setStatus("data ophalen…", true);
 
   try {
-    const all = await scanAllMailboxes(SCAN_DAYS);
+    let all = await scanAllMailboxes(SCAN_DAYS);
+    // Opschoon-regels (Opschonen-tab): bekende troep-afzenders direct weggooien
+    if (clAutoEnabled()) {
+      try { const removed = await clApplyRules(all, true); if (removed.size) all = all.filter(e => !removed.has(e.id)); } catch (e) { devLog("opschonen: " + e.message, "warn"); }
+    }
     const events = await listEvents(2).catch(e => { showError("Agenda: " + e.message); return []; });
     window.lastScanRows = all;
     const allInbox = all.filter(e => e._inInbox);
@@ -2547,7 +2570,7 @@ function showApp() {
 //  TAB SWITCHING
 // ============================================================
 let facturenLoaded = false;
-const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", afboeken: "Afboeken", moneybird: "Moneybird", instellingen: "Instellingen", uitleg: "Uitleg" };
+const TAB_TITLES = { overzicht: "Overzicht", facturen: "Facturen verwerken", migratie: "Verkoop migreren", projecten: "Projecten", afboeken: "Afboeken", moneybird: "Moneybird", opschonen: "Opschonen", instellingen: "Instellingen", uitleg: "Uitleg" };
 function switchTab(name) {
   document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach(p => p.classList.toggle("active", p.id === "tab-" + name));
@@ -2581,6 +2604,9 @@ function switchTab(name) {
   }
   if (name === "instellingen" && account) {
     renderCatSetup().catch(e => console.warn("cats:", e));
+  }
+  if (name === "opschonen" && account) {
+    renderCleaner(true).catch(e => console.warn("opschonen:", e));
   }
   if (name === "moneybird" && account) {
     recPopulateMonths();
@@ -5812,6 +5838,154 @@ async function invoiceProjectsForMonth() {
   btn.disabled = false; btn.textContent = t;
   st.textContent = `Klaar: ${ok} concept(en)${fail ? ", " + fail + " mislukt" : ""}${testMode ? " · TEST: uren open gebleven" : ""}`;
   showToast(`Maandfacturen klaar: ${ok} concept${fail ? ", " + fail + " mislukt" : ""}`, fail ? "err" : "ok");
+}
+
+// ============================================================
+//  OPSCHONEN — mail-troep per afzender weggooien
+//  Groepeert de scan (lastScan.all) per afzender. "Verwijder alles" zoekt
+//  per mailbox álle mails van die afzender (ook ouder dan SCAN_DAYS) en
+//  verplaatst ze naar Verwijderde items / Prullenbak (soft delete).
+//  Mappen uit info.skip (Verzonden, Verwijderd, Administratie, …) blijven
+//  altijd buiten schot. Regels (afzenders) staan in localStorage en kunnen
+//  bij elke scan automatisch toegepast worden.
+// ============================================================
+const CL_RULES_KEY = "opschoon_rules_v1";
+const CL_AUTO_KEY = "opschoon_auto_v1";
+function clRules() { try { const a = JSON.parse(localStorage.getItem(CL_RULES_KEY)); if (Array.isArray(a)) return a; } catch (e) {} return []; }
+function clSaveRules(a) { try { localStorage.setItem(CL_RULES_KEY, JSON.stringify(a)); } catch (e) {} }
+function clAutoEnabled() { return localStorage.getItem(CL_AUTO_KEY) === "1"; }
+function clSetAuto(on) { localStorage.setItem(CL_AUTO_KEY, on ? "1" : "0"); showToast(on ? "Regels worden bij elke scan toegepast" : "Automatisch opschonen uit", "ok"); }
+function clSenderKey(e) { return senderEmail(e).toLowerCase(); }
+
+async function renderCleaner(refresh) {
+  const list = $("cl-list"); if (!list) return;
+  $("cl-days").textContent = SCAN_DAYS;
+  $("cl-auto").checked = clAutoEnabled();
+  renderClRules();
+  let all = (lastScan && lastScan.all) || [];
+  if (refresh && (!lastScan || Date.now() - lastScan.at > 5 * 60000)) {
+    list.innerHTML = '<p class="muted">Mailboxen scannen…</p>';
+    try { all = await scanAllMailboxes(SCAN_DAYS); window.lastScanRows = all; } catch (e) { list.innerHTML = `<p class="err">Scan mislukt: ${escapeHtml(e.message)}</p>`; return; }
+  }
+  const q = ($("cl-filter").value || "").toLowerCase().trim();
+  const onlyInbox = $("cl-only-inbox").checked;
+  const rules = new Set(clRules());
+  const groups = new Map();
+  for (const e of all) {
+    if (onlyInbox && !e._inInbox) continue;
+    const key = clSenderKey(e); if (!key) continue;
+    if (SELF_EMAILS.includes(key)) continue;   // eigen adressen nooit aanbieden
+    if (!groups.has(key)) groups.set(key, { key, name: senderName(e), mails: [], boxes: new Set(), last: e });
+    const g = groups.get(key); g.mails.push(e); g.boxes.add(e._mailbox);
+    if (new Date(e.receivedDateTime) > new Date(g.last.receivedDateTime)) g.last = e;
+  }
+  let rows = [...groups.values()];
+  if (q) rows = rows.filter(g => g.key.includes(q) || g.name.toLowerCase().includes(q) || g.mails.some(m => (m.subject || "").toLowerCase().includes(q)));
+  rows.sort((a, b) => b.mails.length - a.mails.length || new Date(b.last.receivedDateTime) - new Date(a.last.receivedDateTime));
+  $("cl-status").textContent = `${rows.length} afzenders · ${rows.reduce((n, g) => n + g.mails.length, 0)} mails`;
+  if (!rows.length) { list.innerHTML = '<p class="muted">Niets gevonden.</p>'; return; }
+  list.innerHTML = rows.slice(0, 300).map(g => {
+    const subj = (g.last.subject || "(geen onderwerp)");
+    const hasRule = rules.has(g.key);
+    const invoiceish = g.mails.some(m => looksLikeInvoice(m));
+    return `<div class="row" data-sender="${escapeHtml(g.key)}">
+      ${avatarHtml(g.name)}
+      <div class="info">
+        <div class="top"><span class="from">${escapeHtml(g.name)}</span><span class="muted">${escapeHtml(g.key)}</span>${[...g.boxes].map(mboxBadge).join("")}${hasRule ? '<span class="badge warn">regel</span>' : ""}${invoiceish ? '<span class="badge">lijkt factuur</span>' : ""}</div>
+        <div class="subject">${escapeHtml(subj)}</div>
+        <div class="meta">${g.mails.length} mail${g.mails.length === 1 ? "" : "s"} in ${SCAN_DAYS} dagen · laatste ${fmtRelative(g.last.receivedDateTime)}</div>
+      </div>
+      <div class="actions row-btns" style="margin:0;">
+        <a class="btn" href="${escapeHtml(g.last.webLink || '#')}" target="_blank" rel="noopener">Open</a>
+        <button class="btn" onclick="clToggleRule(this, '${escapeHtml(g.key)}')">${hasRule ? "– regel" : "+ regel"}</button>
+        <button class="btn danger" onclick="clDeleteSender(this, '${escapeHtml(g.key)}')">Verwijder alles</button>
+      </div>
+    </div>`;
+  }).join("");
+}
+function renderClRules() {
+  const el = $("cl-rules"); if (!el) return;
+  const r = clRules();
+  el.innerHTML = r.length ? "Regels: " + r.map(k => `<span class="badge warn" style="margin:0 4px 4px 0;">${escapeHtml(k)} <a onclick="clToggleRule(null,'${escapeHtml(k)}')" style="cursor:pointer;" title="regel verwijderen">✕</a></span>`).join("") : "Nog geen regels.";
+}
+function clToggleRule(btn, key) {
+  let r = clRules();
+  if (r.includes(key)) { r = r.filter(x => x !== key); showToast(`Regel verwijderd: ${key}`, "ok"); }
+  else { r.push(key); showToast(`Regel toegevoegd: ${key}`, "ok"); }
+  clSaveRules(r); renderCleaner();
+}
+// Verwijderde-items-map per mailbox (Graph: echte id; Gmail: TRASH).
+async function clTrashFolderId(mbox) {
+  const ck = "folder_id_" + mbox.email + "_deleteditems";
+  const c = localStorage.getItem(ck); if (c) return c;
+  const f = await graph("GET", `${userPath(mbox)}/mailFolders/deleteditems?$select=id`);
+  if (f && f.id) localStorage.setItem(ck, f.id);
+  return f && f.id;
+}
+// Alle mails van een afzender in één mailbox (alle mappen, excl. skip-mappen).
+async function clFindAllFrom(mbox, addr, info) {
+  const sel = "id,internetMessageId,subject,from,receivedDateTime,parentFolderId";
+  let url = mbox.provider === "gmail"
+    ? `/gmail/messages?gmailq=${encodeURIComponent(`from:${addr} -in:sent -in:trash -in:drafts -in:spam -in:chats`)}`
+    : `${userPath(mbox)}/messages?$filter=${encodeURIComponent(`from/emailAddress/address eq '${addr.replace(/'/g, "''")}'`)}&$top=100&$select=${sel}`;
+  const out = []; let guard = 0;
+  while (url && guard++ < 50) {
+    const r = await graph("GET", url);
+    for (const m of (r.value || [])) { if (info && info.skip.has(m.parentFolderId)) continue; out.push(m); }
+    url = r["@odata.nextLink"] || null;
+  }
+  return out;
+}
+async function clDeleteFromSender(addr, mboxes) {
+  let total = 0; const ids = new Set();
+  for (const mbox of mboxes) {
+    let info = null; try { info = await mailboxFolderInfo(mbox); } catch (e) {}
+    let mails; try { mails = await clFindAllFrom(mbox, addr, info); } catch (e) { devLog(`opschonen ${mbox.label}: zoeken mislukt: ${e.message}`, "warn"); continue; }
+    if (!mails.length) continue;
+    const trash = await clTrashFolderId(mbox);
+    await gmailMapLimit(mails, 4, async (m) => {
+      try { await moveMessage(mbox, m.id, trash); total++; ids.add(m.id); }
+      catch (e) { devLog(`opschonen: ${(m.subject || "").slice(0, 40)} mislukt: ${e.message}`, "warn"); }
+    });
+    devLog(`opschonen ${mbox.label}: ${mails.length} van ${addr} → verwijderde items`, "info");
+  }
+  return { total, ids };
+}
+function clMailboxesForSender(addr, all) {
+  const set = new Set((all || (lastScan && lastScan.all) || []).filter(e => clSenderKey(e) === addr).map(e => e._mailbox));
+  // Alias-mailboxen (zelfde inbox) zijn al gededupliceerd in de scan; valt een afzender nergens in de scan, dan alle mailboxen
+  const boxes = set.size ? [...set] : MAILBOXES.filter(m => m.provider !== "gmail" || gmailIsConnected());
+  return boxes;
+}
+async function clDeleteSender(btn, addr) {
+  const g = (lastScan && lastScan.all || []).filter(e => clSenderKey(e) === addr);
+  if (!confirm(`Alle mails van ${addr} naar Verwijderde items? (${g.length} in de scan; ook oudere mails in dezelfde mailboxen worden meegenomen)`)) return;
+  const row = btn.closest(".row"); const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "Verwijderen…";
+  try {
+    const r = await clDeleteFromSender(addr, clMailboxesForSender(addr));
+    if (lastScan) lastScan.all = lastScan.all.filter(e => !r.ids.has(e.id));
+    window.lastScanRows = lastScan && lastScan.all;
+    showToast(`${r.total} mail(s) van ${addr} verwijderd`, "ok");
+    fadeOutRow(row, () => renderCleaner());
+  } catch (e) { btn.disabled = false; btn.textContent = orig; showToast("Verwijderen mislukt: " + e.message, "err"); }
+}
+// Regels toepassen op de huidige scan (of 'all' als meegegeven). Geeft verwijderde ids terug.
+async function clApplyRules(all, silent) {
+  const rules = clRules(); const removed = new Set();
+  if (!rules.length) { if (!silent) showToast("Geen regels", "err"); return removed; }
+  const rows = all || (lastScan && lastScan.all) || [];
+  let total = 0;
+  for (const addr of rules) {
+    const hits = rows.filter(e => clSenderKey(e) === addr);
+    if (!hits.length) continue;
+    const r = await clDeleteFromSender(addr, clMailboxesForSender(addr, rows));
+    total += r.total; r.ids.forEach(id => removed.add(id));
+  }
+  if (!all && lastScan) { lastScan.all = lastScan.all.filter(e => !removed.has(e.id)); window.lastScanRows = lastScan.all; }
+  if (!silent) { showToast(total ? `${total} mail(s) opgeruimd via regels` : "Niets te doen", "ok"); renderCleaner(); }
+  else if (total) devLog(`opschonen: ${total} mail(s) automatisch opgeruimd`, "ok");
+  return removed;
 }
 
 // ============================================================
