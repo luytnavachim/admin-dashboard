@@ -1064,11 +1064,12 @@ details summary { color: var(--muted); }
   <section id="tab-opschonen" class="tab-panel">
     <div class="section">
       <h2>Mail opschonen</h2>
-      <p class="muted">Alle gescande mails (laatste <span id="cl-days">60</span> dagen, alle mailboxen) gegroepeerd per afzender. <strong>Verwijder alles</strong> zet álle mails van die afzender — ook ouder dan 60 dagen — in <em>Verwijderde items</em> (Gmail: Prullenbak); daar zijn ze 30 dagen terug te halen. De archiefmap <code>Administratie</code> en verzonden mails worden nooit geraakt. Met <strong>+ regel</strong> onthoudt het dashboard de afzender en ruimt hem bij elke scan automatisch op (als de schakelaar aan staat).</p>
+      <p class="muted">Alle gescande mails (laatste <span id="cl-days">60</span> dagen, alle mailboxen) gegroepeerd per afzender. <strong>Verwijder alles</strong> zet álle mails van die afzender — ook ouder dan 60 dagen — in <em>Verwijderde items</em> (Gmail: Prullenbak); daar zijn ze 30 dagen terug te halen. Deze scan is volledig: ook Outlook-Archief en heel Gmail (zonder het factuurfilter van het Overzicht). De archiefmap <code>Administratie</code>, verzonden mails en concepten worden nooit geraakt. Met <strong>+ regel</strong> onthoudt het dashboard de afzender en ruimt hem bij elke scan automatisch op (als de schakelaar aan staat).</p>
       <div class="row-btns" style="align-items:center;">
         <input id="cl-filter" type="text" placeholder="Zoek afzender of onderwerp…" style="max-width:280px;" oninput="renderCleaner()">
         <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-only-inbox" onchange="renderCleaner()"> alleen Inbox</label>
         <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-auto" onchange="clSetAuto(this.checked)"> regels automatisch toepassen bij elke scan</label>
+        <button class="btn" onclick="clScan = null; renderCleaner(true)">Opnieuw scannen</button>
         <button class="btn" onclick="clApplyRules()">Regels nu toepassen</button>
         <span class="muted" id="cl-status" style="align-self:center;"></span>
       </div>
@@ -1725,7 +1726,7 @@ const GMAIL_META_FIELDS = "id,labelIds,snippet,internalDate,payload(mimeType,fil
 async function gmailGetMeta(id) { return gmailFetch("GET", `/messages/${encodeURIComponent(id)}?format=full&fields=${encodeURIComponent(GMAIL_META_FIELDS)}`); }
 
 // Graph-$filter → Gmail-zoekopdracht (alleen wat het dashboard gebruikt).
-function gmailQueryFromFilter(filter) {
+function gmailQueryFromFilter(filter, full) {
   const q = ["-in:sent", "-in:trash", "-in:drafts", "-in:spam", "-in:chats"];
   let m;
   const re = /receivedDateTime\s+(ge|gt|lt|le)\s+([0-9T:.\-]+Z?)/g;
@@ -1734,7 +1735,7 @@ function gmailQueryFromFilter(filter) {
     if (m[1] === "ge" || m[1] === "gt") q.push("after:" + ts); else q.push("before:" + ts);
   }
   if (/hasAttachments\s+eq\s+true/.test(filter || "")) q.push("has:attachment");
-  else if (GMAIL_SCAN_QUERY) q.push(GMAIL_SCAN_QUERY);
+  else if (GMAIL_SCAN_QUERY && !full) q.push(GMAIL_SCAN_QUERY);
   return q.join(" ");
 }
 function gmailFindBody(payload) {
@@ -1823,7 +1824,7 @@ async function gmailShim(method, path, body) {
   }
   // -- berichten --
   if (method === "GET" && p === "/messages") {
-    const q = params.get("gmailq") || gmailQueryFromFilter(params.get("$filter") || "");
+    const q = params.get("gmailq") || gmailQueryFromFilter(params.get("$filter") || "", params.get("gmailfull") === "1");
     let lp = `/messages?maxResults=100&q=${encodeURIComponent(q)}`;
     if (params.get("pageToken")) lp += `&pageToken=${encodeURIComponent(params.get("pageToken"))}`;
     const r = await gmailFetch("GET", lp);
@@ -2343,18 +2344,21 @@ async function mailboxFolderInfo(mbox) {
   try { processedRoot = await findFolderId(mbox, PROCESSED_FOLDER_NAME); } catch (e) {}
   const skipRoots = new Set([wk.sentitems, wk.deleteditems, wk.drafts, wk.junkemail, wk.outbox, wk.archive, processedRoot].filter(Boolean));
   const skip = new Set(skipRoots);
+  const archiveIds = new Set(wk.archive ? [wk.archive] : []);   // Archief + submappen: wél meenemen bij Opschonen
   const names = {};
-  async function walk(url, skipping, depth) {
+  async function walk(url, skipping, depth, inArchive) {
     let r; try { r = await graph("GET", url); } catch (e) { return; }
     for (const f of (r.value || [])) {
       names[f.id] = f.displayName;
       const sk = skipping || skipRoots.has(f.id);
+      const arch = inArchive || (wk.archive && f.id === wk.archive);
       if (sk) skip.add(f.id);
-      if (f.childFolderCount > 0 && depth < 6) await walk(`${base}/mailFolders/${f.id}/childFolders?$top=100&$select=id,displayName,childFolderCount`, sk, depth + 1);
+      if (arch) archiveIds.add(f.id);
+      if (f.childFolderCount > 0 && depth < 6) await walk(`${base}/mailFolders/${f.id}/childFolders?$top=100&$select=id,displayName,childFolderCount`, sk, depth + 1, arch);
     }
   }
-  await walk(`${base}/mailFolders?$top=100&$select=id,displayName,childFolderCount`, false, 0);
-  const info = { inboxId: wk.inbox || null, skip, names, processedRoot };
+  await walk(`${base}/mailFolders?$top=100&$select=id,displayName,childFolderCount`, false, 0, false);
+  const info = { inboxId: wk.inbox || null, skip, names, processedRoot, archiveIds };
   _folderInfoCache[mbox.email] = info;
   return info;
 }
@@ -2371,16 +2375,17 @@ function annotateAttachments(m) {
   return m;
 }
 
-async function scanMailbox(mbox, days, info) {
+async function scanMailbox(mbox, days, info, opts) {
+  const full = !!(opts && opts.full);   // Opschonen: alles (Gmail zonder trefwoordfilter, Outlook incl. Archief)
   const base = userPath(mbox);
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const sel = "id,internetMessageId,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId";
-  let url = `${base}/messages?$filter=${encodeURIComponent("receivedDateTime ge " + since)}&$orderby=receivedDateTime desc&$top=100&$select=${sel}&$expand=${encodeURIComponent("attachments($select=name,contentType,size,isInline)")}`;
+  let url = `${base}/messages?$filter=${encodeURIComponent("receivedDateTime ge " + since)}&$orderby=receivedDateTime desc&$top=100&$select=${sel}&$expand=${encodeURIComponent("attachments($select=name,contentType,size,isInline)")}${full ? "&gmailfull=1" : ""}`;
   const out = []; let guard = 0;
-  while (url && guard++ < 25) {
+  while (url && guard++ < (full ? 60 : 25)) {
     const r = await graph("GET", url);
     for (const m of (r.value || [])) {
-      if (info.skip.has(m.parentFolderId)) continue;
+      if (info.skip.has(m.parentFolderId) && !(full && info.archiveIds && info.archiveIds.has(m.parentFolderId))) continue;
       m._mailbox = mbox;
       m._folderName = info.names[m.parentFolderId] || "";
       m._inInbox = m.parentFolderId === info.inboxId;
@@ -2396,7 +2401,7 @@ async function scanMailbox(mbox, days, info) {
 // gescand; mails die in meerdere mailboxen staan (zelfde internetMessageId)
 // tellen één keer.
 let lastScan = null;
-async function scanAllMailboxes(days) {
+async function scanAllMailboxes(days, opts) {
   // Gmail alleen meenemen als er een token is; anders één hint (geen foutmelding).
   const boxes = MAILBOXES.filter(m => m.provider !== "gmail" || gmailReadyForScan());
   const infos = await Promise.all(boxes.map(m => mailboxFolderInfo(m).catch(e => { showError(`${m.email}: ${e.message}`); return null; })));
@@ -2407,7 +2412,7 @@ async function scanAllMailboxes(days) {
     if (info.inboxId) seenInbox.add(info.inboxId);
     targets.push([m, info]);
   });
-  const per = await Promise.all(targets.map(([m, info]) => scanMailbox(m, days, info).catch(e => { showError(`${m.email}: ${e.message}`); return []; })));
+  const per = await Promise.all(targets.map(([m, info]) => scanMailbox(m, days, info, opts).catch(e => { showError(`${m.email}: ${e.message}`); return []; })));
   const seen = new Set(); const all = [];
   for (const m of per.flat()) {
     const key = (m.internetMessageId || m.id);
@@ -2415,7 +2420,7 @@ async function scanAllMailboxes(days) {
     seen.add(key); all.push(m);
   }
   all.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
-  lastScan = { at: Date.now(), all };
+  if (!(opts && opts.full)) lastScan = { at: Date.now(), all };   // de volledige scan (Opschonen) heeft een eigen cache
   return all;
 }
 
@@ -5857,16 +5862,19 @@ function clAutoEnabled() { return localStorage.getItem(CL_AUTO_KEY) === "1"; }
 function clSetAuto(on) { localStorage.setItem(CL_AUTO_KEY, on ? "1" : "0"); showToast(on ? "Regels worden bij elke scan toegepast" : "Automatisch opschonen uit", "ok"); }
 function clSenderKey(e) { return senderEmail(e).toLowerCase(); }
 
+let clScan = null;   // eigen, volledige scan voor Opschonen (Gmail zonder filter, Outlook incl. Archief)
 async function renderCleaner(refresh) {
   const list = $("cl-list"); if (!list) return;
   $("cl-days").textContent = SCAN_DAYS;
   $("cl-auto").checked = clAutoEnabled();
   renderClRules();
-  let all = (lastScan && lastScan.all) || [];
-  if (refresh && (!lastScan || Date.now() - lastScan.at > 5 * 60000)) {
-    list.innerHTML = '<p class="muted">Mailboxen scannen…</p>';
-    try { all = await scanAllMailboxes(SCAN_DAYS); window.lastScanRows = all; } catch (e) { list.innerHTML = `<p class="err">Scan mislukt: ${escapeHtml(e.message)}</p>`; return; }
+  if (refresh && (!clScan || Date.now() - clScan.at > 5 * 60000)) {
+    list.innerHTML = '<p class="muted">Alle mailboxen volledig scannen (incl. Archief en heel Gmail)…</p>';
+    $("cl-status").textContent = "scannen…";
+    try { clScan = { at: Date.now(), all: await scanAllMailboxes(SCAN_DAYS, { full: true }) }; }
+    catch (e) { list.innerHTML = `<p class="err">Scan mislukt: ${escapeHtml(e.message)}</p>`; return; }
   }
+  const all = (clScan && clScan.all) || [];
   const q = ($("cl-filter").value || "").toLowerCase().trim();
   const onlyInbox = $("cl-only-inbox").checked;
   const rules = new Set(clRules());
@@ -5952,20 +5960,20 @@ async function clDeleteFromSender(addr, mboxes) {
   return { total, ids };
 }
 function clMailboxesForSender(addr, all) {
-  const set = new Set((all || (lastScan && lastScan.all) || []).filter(e => clSenderKey(e) === addr).map(e => e._mailbox));
+  const set = new Set((all || (clScan && clScan.all) || (lastScan && lastScan.all) || []).filter(e => clSenderKey(e) === addr).map(e => e._mailbox));
   // Alias-mailboxen (zelfde inbox) zijn al gededupliceerd in de scan; valt een afzender nergens in de scan, dan alle mailboxen
   const boxes = set.size ? [...set] : MAILBOXES.filter(m => m.provider !== "gmail" || gmailIsConnected());
   return boxes;
 }
 async function clDeleteSender(btn, addr) {
-  const g = (lastScan && lastScan.all || []).filter(e => clSenderKey(e) === addr);
+  const g = (clScan && clScan.all || []).filter(e => clSenderKey(e) === addr);
   if (!confirm(`Alle mails van ${addr} naar Verwijderde items? (${g.length} in de scan; ook oudere mails in dezelfde mailboxen worden meegenomen)`)) return;
   const row = btn.closest(".row"); const orig = btn.textContent;
   btn.disabled = true; btn.textContent = "Verwijderen…";
   try {
     const r = await clDeleteFromSender(addr, clMailboxesForSender(addr));
-    if (lastScan) lastScan.all = lastScan.all.filter(e => !r.ids.has(e.id));
-    window.lastScanRows = lastScan && lastScan.all;
+    if (clScan) clScan.all = clScan.all.filter(e => !r.ids.has(e.id));
+    if (lastScan) { lastScan.all = lastScan.all.filter(e => !r.ids.has(e.id)); window.lastScanRows = lastScan.all; }
     showToast(`${r.total} mail(s) van ${addr} verwijderd`, "ok");
     fadeOutRow(row, () => renderCleaner());
   } catch (e) { btn.disabled = false; btn.textContent = orig; showToast("Verwijderen mislukt: " + e.message, "err"); }
@@ -5974,7 +5982,7 @@ async function clDeleteSender(btn, addr) {
 async function clApplyRules(all, silent) {
   const rules = clRules(); const removed = new Set();
   if (!rules.length) { if (!silent) showToast("Geen regels", "err"); return removed; }
-  const rows = all || (lastScan && lastScan.all) || [];
+  const rows = all || (clScan && clScan.all) || (lastScan && lastScan.all) || [];
   let total = 0;
   for (const addr of rules) {
     const hits = rows.filter(e => clSenderKey(e) === addr);
@@ -5982,7 +5990,10 @@ async function clApplyRules(all, silent) {
     const r = await clDeleteFromSender(addr, clMailboxesForSender(addr, rows));
     total += r.total; r.ids.forEach(id => removed.add(id));
   }
-  if (!all && lastScan) { lastScan.all = lastScan.all.filter(e => !removed.has(e.id)); window.lastScanRows = lastScan.all; }
+  if (!all) {
+    if (clScan) clScan.all = clScan.all.filter(e => !removed.has(e.id));
+    if (lastScan) { lastScan.all = lastScan.all.filter(e => !removed.has(e.id)); window.lastScanRows = lastScan.all; }
+  }
   if (!silent) { showToast(total ? `${total} mail(s) opgeruimd via regels` : "Niets te doen", "ok"); renderCleaner(); }
   else if (total) devLog(`opschonen: ${total} mail(s) automatisch opgeruimd`, "ok");
   return removed;
