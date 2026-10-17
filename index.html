@@ -1064,9 +1064,16 @@ details summary { color: var(--muted); }
   <section id="tab-opschonen" class="tab-panel">
     <div class="section">
       <h2>Mail opschonen</h2>
-      <p class="muted">Alle gescande mails (laatste <span id="cl-days">60</span> dagen, alle mailboxen) gegroepeerd per afzender. <strong>Verwijder alles</strong> zet álle mails van die afzender — ook ouder dan 60 dagen — in <em>Verwijderde items</em> (Gmail: Prullenbak); daar zijn ze 30 dagen terug te halen. Deze scan is volledig: ook Outlook-Archief en heel Gmail (zonder het factuurfilter van het Overzicht). De archiefmap <code>Administratie</code>, verzonden mails en concepten worden nooit geraakt. Met <strong>+ regel</strong> onthoudt het dashboard de afzender en ruimt hem bij elke scan automatisch op (als de schakelaar aan staat).</p>
+      <p class="muted">Alle gescande mails (laatste <span id="cl-days">180</span> dagen, alle mailboxen) gegroepeerd per afzender. <strong>Verwijder alles</strong> zet álle mails van die afzender — ook ouder dan de gekozen periode — in <em>Verwijderde items</em> (Gmail: Prullenbak); daar zijn ze 30 dagen terug te halen. Deze scan is volledig: ook Outlook-Archief en heel Gmail (zonder het factuurfilter van het Overzicht). De archiefmap <code>Administratie</code>, verzonden mails en concepten worden nooit geraakt. Met <strong>+ regel</strong> onthoudt het dashboard de afzender en ruimt hem bij elke scan automatisch op (als de schakelaar aan staat).</p>
       <div class="row-btns" style="align-items:center;">
         <input id="cl-filter" type="text" placeholder="Zoek afzender of onderwerp…" style="max-width:280px;" oninput="renderCleaner()">
+        <label class="muted" style="display:flex;align-items:center;gap:6px;">periode
+          <select id="cl-period" onchange="clSetDays(this.value)">
+            <option value="60">60 dagen</option>
+            <option value="90">3 maanden</option>
+            <option value="180">6 maanden</option>
+            <option value="365">1 jaar</option>
+          </select></label>
         <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-only-inbox" onchange="renderCleaner()"> alleen Inbox</label>
         <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-auto" onchange="clSetAuto(this.checked)"> regels automatisch toepassen bij elke scan</label>
         <button class="btn" onclick="clScan = null; renderCleaner(true)">Opnieuw scannen</button>
@@ -2405,7 +2412,8 @@ async function scanMailbox(mbox, days, info, opts) {
   const sel = "id,internetMessageId,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId";
   let url = `${base}/messages?$filter=${encodeURIComponent("receivedDateTime ge " + since)}&$orderby=receivedDateTime desc&$top=100&$select=${sel}&$expand=${encodeURIComponent("attachments($select=name,contentType,size,isInline)")}${full ? "&gmailfull=1" : ""}`;
   const out = []; let guard = 0;
-  while (url && guard++ < (full ? 60 : 25)) {
+  // Paginalimiet schaalt mee met de periode: volledige scan ≈ 100 mails/pagina, 1 pagina per dag (min. 60).
+  while (url && guard++ < (full ? Math.max(60, days) : 25)) {
     const r = await graph("GET", url);
     for (const m of (r.value || [])) {
       if (info.skip.has(m.parentFolderId) && !(full && info.archiveIds && info.archiveIds.has(m.parentFolderId))) continue;
@@ -5884,17 +5892,28 @@ function clSaveRules(a) { try { localStorage.setItem(CL_RULES_KEY, JSON.stringif
 function clAutoEnabled() { return localStorage.getItem(CL_AUTO_KEY) === "1"; }
 function clSetAuto(on) { localStorage.setItem(CL_AUTO_KEY, on ? "1" : "0"); showToast(on ? "Regels worden bij elke scan toegepast" : "Automatisch opschonen uit", "ok"); }
 function clSenderKey(e) { return senderEmail(e).toLowerCase(); }
+// Eigen (langere) scanperiode voor Opschonen, los van SCAN_DAYS van het Overzicht. Default 6 maanden.
+const CL_DAYS_KEY = "opschoon_days_v1";
+const CL_DAYS_DEFAULT = 180;
+function clDays() { const n = parseInt(localStorage.getItem(CL_DAYS_KEY), 10); return [60, 90, 180, 365].includes(n) ? n : CL_DAYS_DEFAULT; }
+function clSetDays(v) {
+  try { localStorage.setItem(CL_DAYS_KEY, String(parseInt(v, 10))); } catch (e) {}
+  devLog(`opschonen: periode → ${clDays()} dagen`);
+  clScan = null; renderCleaner(true);
+}
 
 let clScan = null;   // eigen, volledige scan voor Opschonen (Gmail zonder filter, Outlook incl. Archief)
 async function renderCleaner(refresh) {
   const list = $("cl-list"); if (!list) return;
-  $("cl-days").textContent = SCAN_DAYS;
+  const days = clDays();
+  $("cl-days").textContent = days;
+  if ($("cl-period")) $("cl-period").value = String(days);
   $("cl-auto").checked = clAutoEnabled();
   renderClRules();
-  if (refresh && (!clScan || Date.now() - clScan.at > 5 * 60000)) {
-    list.innerHTML = '<p class="muted">Alle mailboxen volledig scannen (incl. Archief en heel Gmail)…</p>';
+  if (refresh && (!clScan || clScan.days !== days || Date.now() - clScan.at > 5 * 60000)) {
+    list.innerHTML = `<p class="muted">Alle mailboxen volledig scannen, laatste ${days} dagen (incl. Archief en heel Gmail) — dit kan even duren…</p>`;
     $("cl-status").textContent = "scannen…";
-    try { clScan = { at: Date.now(), all: await scanAllMailboxes(SCAN_DAYS, { full: true }) }; }
+    try { clScan = { at: Date.now(), days, all: await scanAllMailboxes(days, { full: true }) }; }
     catch (e) { list.innerHTML = `<p class="err">Scan mislukt: ${escapeHtml(e.message)}</p>`; return; }
   }
   const all = (clScan && clScan.all) || [];
@@ -5924,7 +5943,7 @@ async function renderCleaner(refresh) {
       <div class="info">
         <div class="top"><span class="from">${escapeHtml(g.name)}</span><span class="muted">${escapeHtml(g.key)}</span>${[...g.boxes].map(mboxBadge).join("")}${hasRule ? '<span class="badge warn">regel</span>' : ""}${invoiceish ? '<span class="badge">lijkt factuur</span>' : ""}</div>
         <div class="subject">${escapeHtml(subj)}</div>
-        <div class="meta">${g.mails.length} mail${g.mails.length === 1 ? "" : "s"} in ${SCAN_DAYS} dagen · laatste ${fmtRelative(g.last.receivedDateTime)}</div>
+        <div class="meta">${g.mails.length} mail${g.mails.length === 1 ? "" : "s"} in ${days} dagen · laatste ${fmtRelative(g.last.receivedDateTime)}</div>
       </div>
       <div class="actions row-btns" style="margin:0;">
         <a class="btn" href="${escapeHtml(g.last.webLink || '#')}" target="_blank" rel="noopener">Open</a>
