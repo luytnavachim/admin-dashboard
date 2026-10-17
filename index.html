@@ -571,6 +571,11 @@ h2 .count { background: var(--surface-2); color: var(--muted); font-size: 11px; 
 .badge.warn { background: var(--warn-bg); color: var(--warn-text); }
 .badge.danger { background: var(--danger-bg); color: var(--danger-text); }
 .badge.ok, .badge.ok-mb { background: var(--ok-bg); color: var(--ok-text); }
+.badge.err { background: var(--danger-bg); color: var(--danger-text); }
+.badge.dim { opacity: .6; }
+.tbl { border-collapse: collapse; font-size: 13px; }
+.tbl th, .tbl td { text-align: left; padding: 5px 8px; border-bottom: 1px solid var(--border, rgba(128,128,128,.25)); vertical-align: top; }
+.tbl th { font-weight: 600; font-size: 12px; opacity: .7; }
 .badge.mbox { background: transparent; border: 1px solid var(--border-strong); padding: 0 6px; }
 :root.dark .badge.mbox { filter: brightness(1.7) saturate(.85); } /* mailbox-kleuren zijn voor licht gekozen */
 
@@ -1080,6 +1085,7 @@ details summary { color: var(--muted); }
         <button class="btn" onclick="clApplyRules()">Regels nu toepassen</button>
         <span class="muted" id="cl-status" style="align-self:center;"></span>
       </div>
+      <div id="cl-report"></div>
       <div id="cl-rules" class="muted" style="margin-top:8px;font-size:12.5px;"></div>
       <div id="cl-list" style="margin-top:12px;"><p class="muted">Laden…</p></div>
     </div>
@@ -2411,12 +2417,16 @@ async function scanMailbox(mbox, days, info, opts) {
   const since = new Date(Date.now() - days * 86400000).toISOString();
   const sel = "id,internetMessageId,subject,from,toRecipients,receivedDateTime,hasAttachments,isRead,bodyPreview,webLink,parentFolderId";
   let url = `${base}/messages?$filter=${encodeURIComponent("receivedDateTime ge " + since)}&$orderby=receivedDateTime desc&$top=100&$select=${sel}&$expand=${encodeURIComponent("attachments($select=name,contentType,size,isInline)")}${full ? "&gmailfull=1" : ""}`;
-  const out = []; let guard = 0;
+  const out = []; let guard = 0, fetched = 0; const skippedFolders = {};
   // Paginalimiet schaalt mee met de periode: volledige scan ≈ 100 mails/pagina, 1 pagina per dag (min. 60).
-  while (url && guard++ < (full ? Math.max(60, days) : 25)) {
+  const maxPages = full ? Math.max(60, days) : 25;
+  while (url && guard++ < maxPages) {
     const r = await graph("GET", url);
     for (const m of (r.value || [])) {
-      if (info.skip.has(m.parentFolderId) && !(full && info.archiveIds && info.archiveIds.has(m.parentFolderId))) continue;
+      fetched++;
+      if (info.skip.has(m.parentFolderId) && !(full && info.archiveIds && info.archiveIds.has(m.parentFolderId))) {
+        const fn = info.names[m.parentFolderId] || "(onbekende map)"; skippedFolders[fn] = (skippedFolders[fn] || 0) + 1; continue;
+      }
       m._mailbox = mbox;
       m._folderName = info.names[m.parentFolderId] || "";
       m._inInbox = m.parentFolderId === info.inboxId;
@@ -2424,6 +2434,8 @@ async function scanMailbox(mbox, days, info, opts) {
     }
     url = r["@odata.nextLink"] || null;
   }
+  // Scanrapport per mailbox (zichtbaar op Opschonen): opgehaald, overgeslagen per map, afgekapt?
+  out._report = { fetched, kept: out.length, skippedFolders, truncated: !!url, pages: guard - 1 };
   return out;
 }
 
@@ -2432,27 +2444,57 @@ async function scanMailbox(mbox, days, info, opts) {
 // gescand; mails die in meerdere mailboxen staan (zelfde internetMessageId)
 // tellen één keer.
 let lastScan = null;
+let lastScanReport = null;   // per mailbox: wat is er gescand, overgeslagen of mislukt (zie renderScanReport)
 async function scanAllMailboxes(days, opts) {
+  const report = []; const rep = {};
+  for (const m of MAILBOXES) { rep[m.email] = { mbox: m, status: "wacht", count: 0, unique: 0 }; report.push(rep[m.email]); }
   // Gmail alleen meenemen als er een token is; anders één hint (geen foutmelding).
-  const boxes = MAILBOXES.filter(m => m.provider !== "gmail" || gmailReadyForScan());
-  const infos = await Promise.all(boxes.map(m => mailboxFolderInfo(m).catch(e => { showError(`${m.email}: ${e.message}`); return null; })));
-  const seenInbox = new Set(); const targets = [];
+  const boxes = MAILBOXES.filter(m => {
+    if (m.provider === "gmail" && !gmailReadyForScan()) { rep[m.email].status = "niet gekoppeld"; rep[m.email].note = "klik op 'Gmail koppelen' in de topbar"; return false; }
+    return true;
+  });
+  const infos = await Promise.all(boxes.map(m => mailboxFolderInfo(m).catch(e => { showError(`${m.email}: ${e.message}`); rep[m.email].status = "fout"; rep[m.email].note = "mappen ophalen mislukt: " + e.message; return null; })));
+  const seenInbox = new Map(); const targets = [];
   boxes.forEach((m, i) => {
     const info = infos[i]; if (!info) return;
-    if (info.inboxId && seenInbox.has(info.inboxId)) { devLog(`${m.email}: alias van een al gescande mailbox — overgeslagen`, "dim"); return; }
-    if (info.inboxId) seenInbox.add(info.inboxId);
+    if (info.inboxId && seenInbox.has(info.inboxId)) { devLog(`${m.email}: alias van een al gescande mailbox — overgeslagen`, "dim"); rep[m.email].status = "alias"; rep[m.email].note = "zelfde mailbox als " + seenInbox.get(info.inboxId); return; }
+    if (info.inboxId) seenInbox.set(info.inboxId, m.email);
     targets.push([m, info]);
   });
-  const per = await Promise.all(targets.map(([m, info]) => scanMailbox(m, days, info, opts).catch(e => { showError(`${m.email}: ${e.message}`); return []; })));
+  const per = await Promise.all(targets.map(([m, info]) => scanMailbox(m, days, info, opts)
+    .then(r => { const x = rep[m.email]; x.status = r._report && r._report.truncated ? "afgekapt" : "ok"; Object.assign(x, r._report || {}); x.count = r.length; return r; })
+    .catch(e => { showError(`${m.email}: ${e.message}`); rep[m.email].status = "fout"; rep[m.email].note = e.message; return []; })));
   const seen = new Set(); const all = [];
   for (const m of per.flat()) {
     const key = (m.internetMessageId || m.id);
     if (seen.has(key)) continue;
     seen.add(key); all.push(m);
+    if (rep[m._mailbox.email]) rep[m._mailbox.email].unique++;
   }
   all.sort((a, b) => new Date(b.receivedDateTime) - new Date(a.receivedDateTime));
+  lastScanReport = { at: Date.now(), days, full: !!(opts && opts.full), rows: report, total: all.length };
   if (!(opts && opts.full)) lastScan = { at: Date.now(), all };   // de volledige scan (Opschonen) heeft een eigen cache
   return all;
+}
+
+// Scanrapport-tabel: welke mailboxen zijn (niet) gescand, hoeveel mails, welke mappen overgeslagen.
+function renderScanReport(el, rp) {
+  if (!el) return;
+  if (!rp) { el.innerHTML = ""; return; }
+  const cls = { ok: "ok", afgekapt: "warn", alias: "dim", fout: "err", "niet gekoppeld": "warn", wacht: "dim" };
+  const rows = rp.rows.map(r => {
+    const skipped = Object.entries(r.skippedFolders || {}).sort((a, b) => b[1] - a[1]).map(([n, c]) => `${escapeHtml(n)} (${c})`).join(", ");
+    let detail = "";
+    if (r.status === "ok" || r.status === "afgekapt") {
+      detail = `${r.fetched} opgehaald · ${r.count} meegenomen · ${r.unique} uniek`;
+      if (r.count !== r.unique) detail += ` (${r.count - r.unique} dubbel met andere mailbox)`;
+      if (skipped) detail += `<br><span class="muted">overgeslagen mappen: ${skipped}</span>`;
+      if (r.status === "afgekapt") detail += `<br><span style="color:var(--danger-text);">paginalimiet bereikt (${r.pages} pagina's) — oudere mails niet opgehaald</span>`;
+    } else detail = escapeHtml(r.note || "");
+    return `<tr><td>${mboxBadge(r.mbox)} <span class="muted">${escapeHtml(r.mbox.email)}</span></td><td><span class="badge ${cls[r.status] || ""}">${escapeHtml(r.status)}</span></td><td style="font-size:12.5px;">${detail}</td></tr>`;
+  }).join("");
+  el.innerHTML = `<details open style="margin-top:8px;"><summary class="muted" style="cursor:pointer;">Scanrapport — ${rp.total} unieke mails in ${rp.days} dagen${rp.full ? " (volledige scan incl. Archief en heel Gmail)" : ""} · ${new Date(rp.at).toLocaleTimeString('nl-NL', { hour: '2-digit', minute: '2-digit' })}</summary>
+    <table class="tbl" style="width:100%;margin-top:6px;"><thead><tr><th>Mailbox</th><th>Status</th><th>Details</th></tr></thead><tbody>${rows}</tbody></table></details>`;
 }
 
 // Negeerlijst voor het Overzicht (per browser).
@@ -5913,9 +5955,10 @@ async function renderCleaner(refresh) {
   if (refresh && (!clScan || clScan.days !== days || Date.now() - clScan.at > 5 * 60000)) {
     list.innerHTML = `<p class="muted">Alle mailboxen volledig scannen, laatste ${days} dagen (incl. Archief en heel Gmail) — dit kan even duren…</p>`;
     $("cl-status").textContent = "scannen…";
-    try { clScan = { at: Date.now(), days, all: await scanAllMailboxes(days, { full: true }) }; }
-    catch (e) { list.innerHTML = `<p class="err">Scan mislukt: ${escapeHtml(e.message)}</p>`; return; }
+    try { clScan = { at: Date.now(), days, all: await scanAllMailboxes(days, { full: true }) }; clScan.report = lastScanReport; }
+    catch (e) { list.innerHTML = `<p class="err">Scan mislukt: ${escapeHtml(e.message)}</p>`; renderScanReport($("cl-report"), lastScanReport); return; }
   }
+  renderScanReport($("cl-report"), clScan && clScan.report);
   const all = (clScan && clScan.all) || [];
   const q = ($("cl-filter").value || "").toLowerCase().trim();
   const onlyInbox = $("cl-only-inbox").checked;
