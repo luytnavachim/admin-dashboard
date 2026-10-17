@@ -1079,6 +1079,12 @@ details summary { color: var(--muted); }
             <option value="180">6 maanden</option>
             <option value="365">1 jaar</option>
           </select></label>
+        <label class="muted" style="display:flex;align-items:center;gap:6px;">sorteer
+          <select id="cl-sort" onchange="renderCleaner()">
+            <option value="count">meeste mails</option>
+            <option value="recent">nieuwste eerst</option>
+            <option value="name">afzender A–Z</option>
+          </select></label>
         <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-only-inbox" onchange="renderCleaner()"> alleen Inbox</label>
         <label class="muted" style="display:flex;align-items:center;gap:6px;"><input type="checkbox" id="cl-auto" onchange="clSetAuto(this.checked)"> regels automatisch toepassen bij elke scan</label>
         <button class="btn" onclick="clScan = null; renderCleaner(true)">Opnieuw scannen</button>
@@ -5957,6 +5963,10 @@ async function renderCleaner(refresh) {
     $("cl-status").textContent = "scannen…";
     try { clScan = { at: Date.now(), days, all: await scanAllMailboxes(days, { full: true }) }; clScan.report = lastScanReport; }
     catch (e) { list.innerHTML = `<p class="err">Scan mislukt: ${escapeHtml(e.message)}</p>`; renderScanReport($("cl-report"), lastScanReport); return; }
+    // Regels ook na déze scan toepassen (niet alleen na de Overzicht-scan), anders blijven nieuwe mails van regel-afzenders staan.
+    if (clAutoEnabled()) {
+      try { const removed = await clApplyRules(clScan.all, true); if (removed.size) { clScan.all = clScan.all.filter(e => !removed.has(e.id)); clScan.autoRemoved = removed.size; } } catch (e) { devLog("opschonen: " + e.message, "warn"); }
+    }
   }
   renderScanReport($("cl-report"), clScan && clScan.report);
   const all = (clScan && clScan.all) || [];
@@ -5974,8 +5984,13 @@ async function renderCleaner(refresh) {
   }
   let rows = [...groups.values()];
   if (q) rows = rows.filter(g => g.key.includes(q) || g.name.toLowerCase().includes(q) || g.mails.some(m => (m.subject || "").toLowerCase().includes(q)));
-  rows.sort((a, b) => b.mails.length - a.mails.length || new Date(b.last.receivedDateTime) - new Date(a.last.receivedDateTime));
-  $("cl-status").textContent = `${rows.length} afzenders · ${rows.reduce((n, g) => n + g.mails.length, 0)} mails`;
+  const sort = ($("cl-sort") && $("cl-sort").value) || "count";
+  const byRecent = (a, b) => new Date(b.last.receivedDateTime) - new Date(a.last.receivedDateTime);
+  if (sort === "recent") rows.sort(byRecent);
+  else if (sort === "name") rows.sort((a, b) => a.name.localeCompare(b.name, "nl") || a.key.localeCompare(b.key));
+  else rows.sort((a, b) => b.mails.length - a.mails.length || byRecent(a, b));
+  const own = all.length - rows.reduce((n, g) => n + g.mails.length, 0);
+  $("cl-status").textContent = `${rows.length} afzenders · ${rows.reduce((n, g) => n + g.mails.length, 0)} mails` + (!q && !onlyInbox && own > 0 ? ` (+${own} van eigen adressen, niet getoond)` : "") + (clScan && clScan.autoRemoved ? ` · ${clScan.autoRemoved} via regels opgeruimd` : "");
   if (!rows.length) { list.innerHTML = '<p class="muted">Niets gevonden.</p>'; return; }
   list.innerHTML = rows.slice(0, 300).map(g => {
     const subj = (g.last.subject || "(geen onderwerp)");
