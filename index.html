@@ -731,6 +731,7 @@ details summary { color: var(--muted); }
           <button class="icon-pill" id="theme-toggle" onclick="toggleTheme()" title="Licht/donker"></button>
           <button class="btn refresh-btn" id="refresh-btn" onclick="loadAll()" title="Opnieuw ophalen"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg><span>Vernieuwen</span></button>
           <button class="btn" id="gmail-connect-btn" style="display:none"></button>
+          <span id="msa-connect-btns" style="display:contents"></span>
           <span id="user-label"></span>
           <a class="signout" onclick="signOut()">Uitloggen</a>
         </div>
@@ -1207,7 +1208,11 @@ const MAILBOXES = [
   { email: "micha@vantuyl.it",       label: "Van Tuyl",    color: "#5249c4" },
   // Gmail (privé-adres waar o.a. Rork/Stripe-facturen binnenkomen). Loopt niet
   // via Graph maar via de Gmail-API (zie sectie GMAIL); labels = mappen.
-  { email: "michavantuyl@gmail.com", label: "Gmail",       color: "#c5221f", provider: "gmail" }
+  { email: "michavantuyl@gmail.com", label: "Gmail",       color: "#c5221f", provider: "gmail" },
+  // Persoonlijke Microsoft-accounts (outlook.com). Staan buiten de Triplet-tenant,
+  // dus eigen login per account (sectie MSA); userPath() = "/msa/<email>".
+  { email: "michavantuyl@outlook.com", label: "Outlook.com", color: "#0f6cbd", provider: "msa" },
+  { email: "venebrugge16@outlook.com", label: "Venebrugge",  color: "#7a5af5", provider: "msa" }
 ];
 
 // Google OAuth client-id (type "Web application", origin https://admin.triplet-it.nl).
@@ -1347,10 +1352,74 @@ async function initAuth() {
   const resp = await msalInstance.handleRedirectPromise();
   if (resp && resp.account) account = resp.account;
   else {
-    const accounts = msalInstance.getAllAccounts();
+    const accounts = msalInstance.getAllAccounts().filter(a => !msaIsMsaAccount(a));   // outlook.com-accounts zijn geen werk-login
     if (accounts.length > 0) account = accounts[0];
   }
   return true;
+}
+
+// ============================================================
+//  MSA — persoonlijke Microsoft-accounts (outlook.com), provider "msa"
+//  Buiten de Triplet-tenant: het werk-token kan ze niet lezen. Per account een
+//  eigen login via dezelfde MSAL-instantie met authority "consumers"; de accounts
+//  delen de MSAL-cache (localStorage), dus na herladen blijven ze gekoppeld.
+//  Paden: userPath() geeft "/msa/<email>"; graph()/graphBinary() vertalen dat
+//  naar "/me/…" met het token van dát account (nextLinks worden teruggeschreven).
+//  Vereist in Azure (app-registratie → Authentication → Supported account types):
+//  "…any organizational directory … and personal Microsoft accounts".
+// ============================================================
+const MSA_AUTHORITY = "https://login.microsoftonline.com/consumers";
+const MSA_TENANT_ID = "9188040d-6c67-4c5b-b112-36a304b66dad";   // vaste tenant-id van alle persoonlijke accounts
+const MSA_SCOPES = ["Mail.ReadWrite", "User.Read"];
+function msaMailboxes() { return MAILBOXES.filter(m => m.provider === "msa"); }
+function msaIsMsaAccount(a) {
+  if (!a) return false;
+  if ((a.tenantId || "").toLowerCase() === MSA_TENANT_ID) return true;
+  return msaMailboxes().some(m => m.email.toLowerCase() === (a.username || "").toLowerCase());
+}
+function msaAccount(email) {
+  if (!msalInstance) return null;
+  return msalInstance.getAllAccounts().find(a => (a.username || "").toLowerCase() === email.toLowerCase()) || null;
+}
+function msaIsConnected(email) { return !!msaAccount(email); }
+async function msaConnect(email) {
+  try {
+    const resp = await msalInstance.loginPopup({ authority: MSA_AUTHORITY, scopes: MSA_SCOPES, prompt: "select_account", loginHint: email });
+    const got = ((resp.account && resp.account.username) || "").toLowerCase();
+    if (got !== email.toLowerCase()) { showToast(`Ingelogd als ${got}, maar ${email} werd verwacht — niet gekoppeld`, "err"); return; }
+    delete _folderInfoCache[email];
+    devLog(`msa: ${email} gekoppeld`, "ok"); showToast(`${email} gekoppeld`, "ok");
+    msaUpdateUi(); loadAll();
+  } catch (e) { showToast(`${email} koppelen mislukt: ${e.message || e}`, "err"); }
+}
+async function msaToken(email) {
+  const acc = msaAccount(email);
+  if (!acc) { const err = new Error(`${email} niet gekoppeld — klik bovenin op 'koppelen'`); err.msaNotConnected = true; throw err; }
+  const req = { authority: MSA_AUTHORITY, scopes: MSA_SCOPES, account: acc };
+  try { return (await msalInstance.acquireTokenSilent(req)).accessToken; }
+  catch (e) {
+    if (/consent_required|interaction_required|login_required/.test(e.errorCode || "")) return (await msalInstance.acquireTokenPopup(req)).accessToken;
+    throw e;
+  }
+}
+// "/msa/<email>/rest" → { email, token, path: "/me/rest" }; ander pad → null
+async function msaResolve(path) {
+  const m = /^\/msa\/([^/]+)(\/.*)?$/.exec(path); if (!m) return null;
+  const email = decodeURIComponent(m[1]);
+  return { email, token: await msaToken(email), path: "/me" + (m[2] || "") };
+}
+function msaRewriteNextLink(json, email) {
+  if (json && typeof json["@odata.nextLink"] === "string")
+    json["@odata.nextLink"] = json["@odata.nextLink"].replace(/^https:\/\/graph\.microsoft\.com\/v1\.0\/me/, "/msa/" + encodeURIComponent(email));
+  return json;
+}
+function msaUpdateUi() {
+  const host = $("msa-connect-btns"); if (!host) return;
+  host.innerHTML = msaMailboxes().map(m => {
+    const on = msaIsConnected(m.email);
+    const title = on ? `${m.email} gekoppeld — klik om opnieuw in te loggen` : `Koppel ${m.email} (persoonlijk Microsoft-account) zodat die mailbox meegescand wordt`;
+    return `<button class="btn" onclick="msaConnect('${escapeHtml(m.email)}')" title="${escapeHtml(title)}">${escapeHtml(m.label)} ${on ? "✓" : "koppelen"}</button>`;
+  }).join("");
 }
 async function signIn() {
   try {
@@ -1384,8 +1453,9 @@ async function getToken() {
 // `userPath` is empty string for /me, or `/users/{email}` for shared mailboxes.
 async function graph(method, path, body, retries) {
   if (path.startsWith("/gmail/")) return gmailShim(method, path, body);   // Gmail-mailbox (zie sectie GMAIL)
-  const token = await getToken();
-  const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + path;
+  const msa = await msaResolve(path);   // outlook.com-account: eigen token + /me (zie sectie MSA)
+  const token = msa ? msa.token : await getToken();
+  const url = path.startsWith("http") ? path : "https://graph.microsoft.com/v1.0" + (msa ? msa.path : path);
   const t0 = performance.now();
   devLog(`graph ${method} ${shortenPath(path)}`, "dim");
   const opts = {
@@ -1418,13 +1488,15 @@ async function graph(method, path, body, retries) {
   }
   devLog(`  ✓ ${res.status} ${ms}ms`, "ok");
   if (res.status === 204) return null;
-  return await res.json();
+  const json = await res.json();
+  return msa ? msaRewriteNextLink(json, msa.email) : json;
 }
 
 function userPath(mbox) {
   // Use /me for the signed-in user's own mailbox; /users/{email} for shared ones.
   // "/gmail" = Gmail-mailbox; graph()/graphBinary() sturen dat pad naar gmailShim().
   if (mbox.provider === "gmail") return "/gmail";
+  if (mbox.provider === "msa") return "/msa/" + encodeURIComponent(mbox.email);
   const signedIn = (account && account.username || "").toLowerCase();
   return mbox.email.toLowerCase() === signedIn ? "/me" : `/users/${encodeURIComponent(mbox.email)}`;
 }
@@ -1653,7 +1725,7 @@ function gmailUpdateUi() {
 
 // Gmail-quota: max 250 units/sec per gebruiker (15.000/min). We blijven ruim onder die grens
 // met een glijdend venster van 1 s, zodat de volledige scan (Opschonen) geen 403 "Quota exceeded" meer geeft.
-const GMAIL_UNITS_PER_SEC = 180;
+const GMAIL_UNITS_PER_SEC = 120;   // was 180; de per-minuut-quota (Total Query Cost) viel bij lange scans alsnog om
 let _gmailSpent = [];   // [tijdstip, units]
 function gmailCost(method, path) {
   if (/\/messages\/send/.test(path)) return 100;
@@ -1765,7 +1837,18 @@ function gmailToGraphMessage(m) {
   };
 }
 const GMAIL_META_FIELDS = "id,labelIds,snippet,internalDate,payload(mimeType,filename,headers,body(size,attachmentId),parts(partId,mimeType,filename,headers,body(size,attachmentId),parts(partId,mimeType,filename,headers,body(size,attachmentId),parts(partId,mimeType,filename,headers,body(size,attachmentId)))))";
-async function gmailGetMeta(id) { return gmailFetch("GET", `/messages/${encodeURIComponent(id)}?format=full&fields=${encodeURIComponent(GMAIL_META_FIELDS)}`); }
+// Metadata-cache per bericht-id (geheugen, hele pagina-sessie): een herscan haalt alleen
+// nieuwe berichten op i.p.v. honderden messages.get opnieuw → geen quota-403 meer.
+const _gmailMetaCache = new Map();
+async function gmailGetMeta(id) {
+  if (_gmailMetaCache.has(id)) return _gmailMetaCache.get(id);
+  const m = await gmailFetch("GET", `/messages/${encodeURIComponent(id)}?format=full&fields=${encodeURIComponent(GMAIL_META_FIELDS)}`);
+  _gmailMetaCache.set(id, m);
+  if (_gmailMetaCache.size > 20000) _gmailMetaCache.delete(_gmailMetaCache.keys().next().value);
+  return m;
+}
+// Na een move/trash/modify is de gecachte labelset verouderd → weggooien.
+function gmailMetaInvalidate(id) { _gmailMetaCache.delete(id); }
 
 // Graph-$filter → Gmail-zoekopdracht (alleen wat het dashboard gebruikt).
 function gmailQueryFromFilter(filter, full) {
@@ -1892,6 +1975,7 @@ async function gmailShim(method, path, body) {
   }
   if (method === "POST" && (m = /^\/messages\/([^/]+)\/move$/.exec(p))) {
     const dest = body && body.destinationId;
+    gmailMetaInvalidate(m[1]);
     if (dest === "TRASH") return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/trash`);
     const mod = { removeLabelIds: ["INBOX"] };
     if (dest && dest !== "ARCHIVE" && dest !== "INBOX") mod.addLabelIds = [dest];
@@ -1899,6 +1983,7 @@ async function gmailShim(method, path, body) {
     return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/modify`, mod);
   }
   if (method === "PATCH" && (m = /^\/messages\/([^/]+)$/.exec(p))) {
+    gmailMetaInvalidate(m[1]);
     if (body && body.isRead === true) return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/modify`, { removeLabelIds: ["UNREAD"] });
     if (body && body.isRead === false) return gmailFetch("POST", `/messages/${encodeURIComponent(m[1])}/modify`, { addLabelIds: ["UNREAD"] });
     return null;
@@ -2426,8 +2511,11 @@ async function scanMailbox(mbox, days, info, opts) {
   const out = []; let guard = 0, fetched = 0; const skippedFolders = {};
   // Paginalimiet schaalt mee met de periode: volledige scan ≈ 100 mails/pagina, 1 pagina per dag (min. 60).
   const maxPages = full ? Math.max(60, days) : 25;
+  let partialError = null;
   while (url && guard++ < maxPages) {
-    const r = await graph("GET", url);
+    let r;
+    try { r = await graph("GET", url); }
+    catch (e) { if (!out.length && fetched === 0) throw e; partialError = e.message; devLog(`${mbox.label}: scan afgebroken na ${fetched} mails: ${e.message}`, "warn"); break; }
     for (const m of (r.value || [])) {
       fetched++;
       if (info.skip.has(m.parentFolderId) && !(full && info.archiveIds && info.archiveIds.has(m.parentFolderId))) {
@@ -2441,7 +2529,7 @@ async function scanMailbox(mbox, days, info, opts) {
     url = r["@odata.nextLink"] || null;
   }
   // Scanrapport per mailbox (zichtbaar op Opschonen): opgehaald, overgeslagen per map, afgekapt?
-  out._report = { fetched, kept: out.length, skippedFolders, truncated: !!url, pages: guard - 1 };
+  out._report = { fetched, kept: out.length, skippedFolders, truncated: !!url, pages: guard - 1, partialError };
   return out;
 }
 
@@ -2457,6 +2545,7 @@ async function scanAllMailboxes(days, opts) {
   // Gmail alleen meenemen als er een token is; anders één hint (geen foutmelding).
   const boxes = MAILBOXES.filter(m => {
     if (m.provider === "gmail" && !gmailReadyForScan()) { rep[m.email].status = "niet gekoppeld"; rep[m.email].note = "klik op 'Gmail koppelen' in de topbar"; return false; }
+    if (m.provider === "msa" && !msaIsConnected(m.email)) { rep[m.email].status = "niet gekoppeld"; rep[m.email].note = `persoonlijk Microsoft-account — klik op '${m.label} koppelen' in de topbar`; return false; }
     return true;
   });
   const infos = await Promise.all(boxes.map(m => mailboxFolderInfo(m).catch(e => { showError(`${m.email}: ${e.message}`); rep[m.email].status = "fout"; rep[m.email].note = "mappen ophalen mislukt: " + e.message; return null; })));
@@ -2495,7 +2584,7 @@ function renderScanReport(el, rp) {
       detail = `${r.fetched} opgehaald · ${r.count} meegenomen · ${r.unique} uniek`;
       if (r.count !== r.unique) detail += ` (${r.count - r.unique} dubbel met andere mailbox)`;
       if (skipped) detail += `<br><span class="muted">overgeslagen mappen: ${skipped}</span>`;
-      if (r.status === "afgekapt") detail += `<br><span style="color:var(--danger-text);">paginalimiet bereikt (${r.pages} pagina's) — oudere mails niet opgehaald</span>`;
+      if (r.status === "afgekapt") detail += `<br><span style="color:var(--danger-text);">${r.partialError ? "afgebroken: " + escapeHtml(r.partialError) : `paginalimiet bereikt (${r.pages} pagina's)`} — oudere mails niet opgehaald</span>`;
     } else detail = escapeHtml(r.note || "");
     return `<tr><td>${mboxBadge(r.mbox)} <span class="muted">${escapeHtml(r.mbox.email)}</span></td><td><span class="badge ${cls[r.status] || ""}">${escapeHtml(r.status)}</span></td><td style="font-size:12.5px;">${detail}</td></tr>`;
   }).join("");
@@ -2647,6 +2736,7 @@ function showApp() {
   resetCreateBody();
   showDevConsoleIfEnabled();
   devLog(`signed in as ${(account && account.username) || '?'}`, "ok");
+  msaUpdateUi();
   loadAll();
 }
 
@@ -2966,8 +3056,9 @@ async function createPurchase() {
 // ============================================================
 async function graphBinary(path) {
   if (path.startsWith("/gmail/")) return gmailBinary(path);
-  const token = await getToken();
-  const res = await fetch("https://graph.microsoft.com/v1.0" + path, { headers: { Authorization: "Bearer " + token } });
+  const msa = await msaResolve(path);
+  const token = msa ? msa.token : await getToken();
+  const res = await fetch("https://graph.microsoft.com/v1.0" + (msa ? msa.path : path), { headers: { Authorization: "Bearer " + token } });
   if (!res.ok) throw new Error("Graph " + res.status + ": " + (await res.text()));
   return await res.arrayBuffer();
 }
@@ -6062,7 +6153,7 @@ async function clDeleteFromSender(addr, mboxes) {
 function clMailboxesForSender(addr, all) {
   const set = new Set((all || (clScan && clScan.all) || (lastScan && lastScan.all) || []).filter(e => clSenderKey(e) === addr).map(e => e._mailbox));
   // Alias-mailboxen (zelfde inbox) zijn al gededupliceerd in de scan; valt een afzender nergens in de scan, dan alle mailboxen
-  const boxes = set.size ? [...set] : MAILBOXES.filter(m => m.provider !== "gmail" || gmailIsConnected());
+  const boxes = set.size ? [...set] : MAILBOXES.filter(m => (m.provider !== "gmail" || gmailIsConnected()) && (m.provider !== "msa" || msaIsConnected(m.email)));
   return boxes;
 }
 async function clDeleteSender(btn, addr) {
