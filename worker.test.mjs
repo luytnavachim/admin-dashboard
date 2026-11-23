@@ -533,6 +533,448 @@ await run("guard: /extract zonder token → 401", async () => {
   } finally { restore(); }
 });
 
+// ---- /mcp (Jarvis-urenserver) ----
+function fakeKv(initial) {
+  const store = new Map(Object.entries(initial || {}));
+  return { store, async get(k) { return store.has(k) ? store.get(k) : null; }, async put(k, v) { store.set(k, v); } };
+}
+const seed = () => JSON.stringify({ updatedAt: "2026-11-01T00:00:00.000Z", projects: [
+  { id: "p1", name: "F5 beheer", projectNumber: "2026-001", relationName: "Klant BV", rates: [{ id: "r1", label: "Standaard", amount: 95 }, { id: "r2", label: "Avond", amount: 120 }],
+    entries: [{ id: "e_old", date: "2026-11-03", hours: 2, description: "Overleg", rateAmount: 95, invoiced: false }] },
+  { id: "p2", name: "F5 migratie", projectNumber: "2026-002", relationName: "Ander BV", hourlyRate: 100, entries: [] }
+] });
+const mcpCall = (env, body, key = "geheim") => worker.fetch(new Request("https://w.workers.dev/mcp/" + key, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }), env);
+const tool = async (env, name, args) => (await (await mcpCall(env, { jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: args } })).json()).result;
+
+await run("mcp: zonder Secret of met verkeerde sleutel → 404", async () => {
+  const r1 = await mcpCall({ PROJECTS_KV: fakeKv() }, { jsonrpc: "2.0", id: 1, method: "tools/list" });
+  assert(r1.status === 404, "404 zonder JARVIS_MCP_KEY", "got " + r1.status);
+  const r2 = await mcpCall({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, { jsonrpc: "2.0", id: 1, method: "tools/list" }, "fout!!");
+  assert(r2.status === 404, "404 met verkeerde sleutel", "got " + r2.status);
+});
+await run("mcp: initialize, notification en tools/list", async () => {
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+  const init = await (await mcpCall(env, { jsonrpc: "2.0", id: 0, method: "initialize", params: { protocolVersion: "2025-06-18" } })).json();
+  assert(init.result && init.result.serverInfo.name === "triplet-uren" && init.result.capabilities.tools, "initialize ok");
+  const n = await mcpCall(env, { jsonrpc: "2.0", method: "notifications/initialized" });
+  assert(n.status === 202, "notification → 202", "got " + n.status);
+  const list = await (await mcpCall(env, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
+  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,mappen_lijst,mappen_lezen", "vijfentwintig tools");
+});
+await run("mcp: projecten en overzicht lezen", async () => {
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: seed() }) };
+  const pr = (await tool(env, "uren_projecten", {})).structuredContent;
+  assert(pr.projecten.length === 2 && pr.projecten[0].open_uren === 2 && pr.projecten[1].tarieven[0].bedrag === 100, "projecten + tarieven + open uren");
+  const ov = (await tool(env, "uren_overzicht", { van: "2026-11-01", tot: "2026-11-30" })).structuredContent;
+  assert(ov.totaal_uren === 2 && ov.totaal_bedrag === 190 && ov.boekingen[0].in_moneybird === false, "overzicht telt");
+});
+await run("mcp: uren_boeken zonder bevestiging schrijft niets", async () => {
+  const kv = fakeKv({ projects_v1: seed() });
+  let called = false;
+  const restore = mockUpstream(() => { called = true; return new Response("[]", { status: 200 }); });
+  try {
+    const out = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" }, "uren_boeken", { project: "2026-001", datum: "2026-11-20", uren: 4, omschrijving: "Upgrade", tarief: "avond" })).structuredContent;
+    assert(out.status === "voorvertoning" && out.geboekt === false && out.boeking.bedrag === 480, "voorvertoning met juist tarief", JSON.stringify(out));
+    assert(kv.store.get("projects_v1") === seed(), "KV ongewijzigd");
+    assert(!called, "Moneybird niet aangeroepen");
+  } finally { restore(); }
+});
+await run("mcp: uren_boeken bevestigd → KV + Moneybird-tijdregistratie", async () => {
+  const kv = fakeKv({ projects_v1: seed() });
+  let posted = null;
+  const restore = mockUpstream((c) => {
+    const u = String(c.url);
+    if (u.includes("/contacts.json")) return new Response(JSON.stringify([{ id: "c9", company_name: "Klant BV" }]), { status: 200 });
+    if (u.includes("/projects.json")) return new Response(JSON.stringify([{ id: "mp1", name: "2026-001 F5 beheer", budget: 95 }, { id: "mp2", name: "2026-001 F5 beheer avond", budget: 120 }]), { status: 200 });
+    if (u.includes("/time_entries.json")) { posted = c; return new Response(JSON.stringify({ id: "te77" }), { status: 201 }); }
+    return new Response("{}", { status: 404 });
+  });
+  try {
+    const out = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" }, "uren_boeken", { project: "2026-001", datum: "2026-07-15", uren: 3.5, omschrijving: "Upgrade", bevestigd: true })).structuredContent;
+    assert(out.geboekt === true && out.moneybird === "ok", "geboekt", JSON.stringify(out));
+    const te = JSON.parse(posted.body).time_entry;
+    assert(te.started_at === "2026-07-15T07:00:00.000Z" && te.ended_at === "2026-07-15T10:30:00.000Z", "09:00 Amsterdam (zomertijd) + 3,5 uur", te.started_at + " " + te.ended_at);
+    assert(te.contact_id === "c9" && te.project_id === "mp1" && te.billable === true, "contact + project op tarief gematcht");
+    assert(posted.headers.authorization === "Bearer t" && posted.url === "https://moneybird.com/api/v2/1/time_entries.json", "naar Moneybird met server-side token");
+    const e = JSON.parse(kv.store.get("projects_v1")).projects[0].entries[1];
+    assert(e && e.hours === 3.5 && e.mbTimeEntryId === "te77" && e.via === "mcp" && e.rateAmount === 95 && e.invoiced === false, "entry in KV met Moneybird-id", JSON.stringify(e));
+  } finally { restore(); }
+});
+await run("mcp: wintertijd, Moneybird-fout, dubbel en dubbelzinnig project", async () => {
+  const kv = fakeKv({ projects_v1: seed() });
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" };
+  const restore = mockUpstream(() => new Response("kapot", { status: 500 }));
+  try {
+    const out = (await tool(env, "uren_boeken", { project: "p1", datum: "2026-11-20", uren: 1, bevestigd: true })).structuredContent;
+    assert(out.geboekt === true && out.moneybird === "mislukt" && /500/.test(out.moneybird_fout), "KV wel, Moneybird-fout gemeld", JSON.stringify(out));
+    const e = JSON.parse(kv.store.get("projects_v1")).projects[0].entries[1];
+    assert(e && !e.mbTimeEntryId, "entry zonder Moneybird-id (backfill pakt 'm op)");
+    const dup = await tool(env, "uren_boeken", { project: "p1", datum: "2026-11-20", uren: 1, bevestigd: true });
+    assert(dup.isError && /bestaat al/.test(dup.content[0].text), "dubbele boeking geweigerd");
+    const amb = await tool(env, "uren_boeken", { project: "F5", datum: "2026-11-21", uren: 1 });
+    assert(amb.isError && /meerdere projecten/.test(amb.content[0].text), "dubbelzinnig project geweigerd");
+    const bad = await tool(env, "uren_boeken", { project: "p1", datum: "21-11-2026", uren: 1 });
+    assert(bad.isError, "verkeerde datum geweigerd");
+  } finally { restore(); }
+});
+await run("projects PUT: open tabblad overschrijft Jarvis-uren niet, bewuste verwijdering wel", async () => {
+  const kv = fakeKv({ projects_v1: seed() });
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" };
+  const restore = mockUpstream(() => new Response("kapot", { status: 500 }));
+  try {
+    const stale = JSON.parse(seed());                       // tabblad laadde vóór de Jarvis-boeking
+    await tool(env, "uren_boeken", { project: "p1", datum: "2026-11-21", uren: 2, bevestigd: true });
+    const put1 = await (await worker.fetch(authed("https://w.workers.dev/projects", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(stale) }), env)).json();
+    assert(put1.keptMcpEntries === 1 && JSON.parse(kv.store.get("projects_v1")).projects[0].entries.length === 2, "Jarvis-boeking behouden", JSON.stringify(put1));
+    const fresh = JSON.parse(kv.store.get("projects_v1")); // tabblad herladen → ziet de boeking → verwijdert 'm
+    fresh.projects[0].entries = fresh.projects[0].entries.filter(e => e.via !== "mcp");
+    await worker.fetch(authed("https://w.workers.dev/projects", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(fresh) }), env);
+    assert(JSON.parse(kv.store.get("projects_v1")).projects[0].entries.length === 1, "bewuste verwijdering blijft verwijderd");
+  } finally { restore(); }
+});
+
+await run("mcp: administratie_overzicht leest Moneybird, fout per sectie", async () => {
+  const kv = fakeKv({ projects_v1: seed() });
+  const seen = [];
+  const restore = mockUpstream((c) => {
+    const u = String(c.url); seen.push(c.method + " " + u);
+    if (u.includes("/documents/purchase_invoices.json")) return new Response(JSON.stringify([
+      { id: "d1", state: "late", reference: "INK-1", due_date: "2020-01-01", total_price_incl_tax: "121.00", payments: [{ price_base: "21.00" }], contact: { company_name: "Leverancier A" } },
+      { id: "d2", state: "open", reference: "INK-2", due_date: "2999-01-01", total_price_incl_tax: "50.00", payments: [], contact: { company_name: "Leverancier B" } },
+      { id: "d3", state: "open", reference: "INK-3", due_date: "2999-01-01", total_price_incl_tax: "10.00", payments: [{ price_base: "10.00" }], contact: { company_name: "Al betaald" } }
+    ]), { status: 200 });
+    if (u.includes("/sales_invoices.json")) return new Response(JSON.stringify([
+      { id: "s1", state: "late", invoice_id: "2026-0042", due_date: "2020-02-01", total_price_incl_tax: "1000.00", total_unpaid: "400.00", contact: { company_name: "Klant BV" } }
+    ]), { status: 200 });
+    if (u.includes("/financial_mutations/synchronization.json")) return new Response("kapot", { status: 500 });
+    return new Response("{}", { status: 404 });
+  });
+  try {
+    const o = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" }, "administratie_overzicht", {})).structuredContent;
+    assert(o.te_betalen.aantal === 2 && o.te_betalen.totaal_open === 150 && o.te_betalen.te_laat === 1 && o.te_betalen.te_laat_bedrag === 100, "inkoop: open = totaal − betaald, betaalde weg", JSON.stringify(o.te_betalen));
+    assert(o.te_betalen.facturen[0].nummer === "INK-1" && o.te_betalen.facturen[0].url === "https://moneybird.com/1/documents/d1", "oudste vervaldatum eerst + link");
+    assert(o.te_ontvangen.aantal === 1 && o.te_ontvangen.totaal_open === 400 && o.te_ontvangen.facturen[0].relatie === "Klant BV", "verkoop via total_unpaid", JSON.stringify(o.te_ontvangen));
+    assert(o.bank.fout && /500/.test(o.bank.fout), "bank-fout blijft in eigen sectie");
+    assert(o.te_factureren.open_uren === 2 && o.te_factureren.open_bedrag_excl_btw === 190, "te factureren uit KV");
+    assert(seen.every(s => s.startsWith("GET ")), "alleen GET naar Moneybird", seen.join(" | "));
+  } finally { restore(); }
+});
+
+await run("mcp: uren_wijzigen met voorvertoning, PATCH naar Moneybird en bescherming tegen open tabblad", async () => {
+  const s0 = JSON.parse(seed()); s0.projects[0].entries[0].mbTimeEntryId = "te1";
+  const kv = fakeKv({ projects_v1: JSON.stringify(s0) });
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" };
+  let patched = null;
+  const restore = mockUpstream((c) => { patched = c; return new Response("{}", { status: 200 }); });
+  try {
+    const ov = (await tool(env, "uren_overzicht", {})).structuredContent;
+    assert(ov.boekingen[0].boeking_id === "e_old", "overzicht geeft boeking_id");
+    const pv = (await tool(env, "uren_wijzigen", { boeking_id: "e_old", uren: 9 })).structuredContent;
+    assert(pv.status === "voorvertoning" && pv.wijziging.oud.uren === 2 && pv.wijziging.nieuw.uren === 9 && pv.wijziging.nieuw.bedrag === 855, "voorvertoning oud/nieuw", JSON.stringify(pv));
+    assert(JSON.parse(kv.store.get("projects_v1")).projects[0].entries[0].hours === 2 && !patched, "niets geschreven zonder bevestiging");
+    const out = (await tool(env, "uren_wijzigen", { boeking_id: "e_old", uren: 9, bevestigd: true })).structuredContent;
+    assert(out.gewijzigd === true && out.moneybird === "ok", "gewijzigd", JSON.stringify(out));
+    assert(patched.method === "PATCH" && patched.url === "https://moneybird.com/api/v2/1/time_entries/te1.json", "PATCH op de bestaande tijdregistratie", patched.method + " " + patched.url);
+    const te = JSON.parse(patched.body).time_entry;
+    assert(te.started_at === "2026-11-03T08:00:00.000Z" && te.ended_at === "2026-11-03T17:00:00.000Z", "09:00 Amsterdam (wintertijd) + 9 uur", te.started_at + " " + te.ended_at);
+    const stale = JSON.parse(JSON.stringify(s0));          // open tabblad met de oude 2 uur
+    await worker.fetch(authed("https://w.workers.dev/projects", { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify(stale) }), env);
+    assert(JSON.parse(kv.store.get("projects_v1")).projects[0].entries[0].hours === 9, "open tabblad zet de wijziging niet terug");
+    const same = await tool(env, "uren_wijzigen", { boeking_id: "e_old", uren: 9 });
+    assert(same.isError && /verandert niets/.test(same.content[0].text), "geen wijziging geweigerd");
+    const none = await tool(env, "uren_wijzigen", { boeking_id: "bestaat-niet", uren: 1 });
+    assert(none.isError, "onbekende boeking geweigerd");
+  } finally { restore(); }
+});
+await run("mcp: uren_wijzigen weigert gefactureerde boeking", async () => {
+  const s0 = JSON.parse(seed()); s0.projects[0].entries[0].invoiced = true;
+  const out = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: JSON.stringify(s0) }) }, "uren_wijzigen", { boeking_id: "e_old", uren: 3, bevestigd: true });
+  assert(out.isError && /gefactureerd/.test(out.content[0].text), "gefactureerd geweigerd");
+});
+
+await run("mcp: project_activiteit leest GitHub (alleen GET, token server-side)", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => {
+    const u = String(c.url); seen.push(c);
+    const j = o => new Response(JSON.stringify(o), { status: 200 });
+    if (u.endsWith("/repos/luytnavachim/knvb-scouting-portal")) return j({ default_branch: "main", pushed_at: "2026-11-21T22:55:51Z" });
+    if (u.includes("/branches")) return j([{ name: "main" }, { name: "develop" }]);
+    if (u.includes("/commits") && u.includes("sha=develop")) return j([{ sha: "abcdef1234", commit: { message: "Fix teamlijst Wijhe\n\nlang verhaal", author: { name: "Claude", date: "2026-11-21T22:50:00Z" } } }]);
+    if (u.includes("/commits")) return j([{ sha: "1234567890", commit: { message: "Release 1.0.158", author: { name: "Micha", date: "2026-11-10T10:00:00Z" } } }]);
+    if (u.includes("/compare/main...develop")) return j({ ahead_by: 7, behind_by: 0 });
+    if (u.includes("/pulls")) return j([{ number: 12, title: "Trainers-overzicht", user: { login: "cursor" }, updated_at: "2026-11-20T09:00:00Z", head: { ref: "feat/x" } }]);
+    return new Response("{}", { status: 404 });
+  });
+  try {
+    const o = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), GITHUB_TOKEN: "ghp_x" }, "project_activiteit", { project: "scout" })).structuredContent;
+    assert(o.acceptatie.loopt_voor === 7 && o.acceptatie.commits[0].sha === "abcdef1" && o.acceptatie.commits[0].bericht === "Fix teamlijst Wijhe", "acceptatie: commits + voorsprong", JSON.stringify(o.acceptatie));
+    assert(o.productie.tak === "main" && o.productie.commits[0].bericht === "Release 1.0.158" && o.open_pull_requests[0].nummer === 12, "productie + pull requests");
+    assert(seen.every(c => c.method === "GET" && c.headers.authorization === "Bearer ghp_x" && String(c.url).startsWith("https://api.github.com/")), "alleen GET naar GitHub met token");
+    const bad = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "project_activiteit", { project: "onbekend" });
+    assert(bad.isError && /Kies uit/.test(bad.content[0].text), "onbekend project geweigerd");
+  } finally { restore(); }
+});
+await run("mcp: project_activiteit zonder token op privé-repo geeft een duidelijke fout", async () => {
+  const restore = mockUpstream(() => new Response("{}", { status: 404 }));
+  try {
+    const o = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "project_activiteit", { project: "scout" });
+    assert(o.isError && /GITHUB_TOKEN/.test(o.content[0].text), "meldt ontbrekend token", o.content[0].text);
+  } finally { restore(); }
+});
+
+await run("mcp: spreek stuurt tekst naar ElevenLabs en geeft base64-audio terug", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); return new Response(new Uint8Array([73, 68, 51, 4, 0, 255]), { status: 200 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), ELEVENLABS_KEY: "el_x" };
+    const res = await tool(env, "spreek", { tekst: "Goedemorgen, meneer." });
+    const o = JSON.parse(res.content[0].text);
+    assert(!res.isError && !res.structuredContent && o.mime === "audio/mpeg" && o.audio === "SUQzBAD/" && o.tekens === 20, "base64-audio zonder structuredContent", JSON.stringify(o));
+    const c = seen[0], b = JSON.parse(c.body);
+    assert(seen.length === 1 && c.method === "POST" && String(c.url).startsWith("https://api.elevenlabs.io/v1/text-to-speech/JBFqnCBsd6RMkjVDRZzb?") && c.headers["xi-api-key"] === "el_x", "POST naar ElevenLabs met sleutel server-side", String(c.url));
+    assert(b.text === "Goedemorgen, meneer." && b.model_id === "eleven_multilingual_v2" && !("language_code" in b) && String(c.url).endsWith("output_format=mp3_44100_64"), "beste Nederlandse model, 44,1 kHz", c.body);
+    await tool({ ...env, ELEVENLABS_MODEL: "eleven_flash_v2_5" }, "spreek", { tekst: "Hallo", stem: "onwK4e9ZLuTAKqWW03F9" });
+    const b2 = JSON.parse(seen[1].body);
+    assert(String(seen[1].url).includes("/onwK4e9ZLuTAKqWW03F9?") && b2.model_id === "eleven_flash_v2_5" && b2.language_code === "nl", "andere stem en model, language_code nl bij flash");
+    const st = (await tool(env, "spraak_stemmen", {})).structuredContent;
+    assert(st.stemmen.length >= 3 && st.stemmen[0].id === "JBFqnCBsd6RMkjVDRZzb", "stemmenlijst");
+  } finally { restore(); }
+});
+await run("mcp: spreek weigert zonder sleutel, lege of te lange tekst en meldt fouten van ElevenLabs", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); return new Response('{"detail":{"status":"quota_exceeded"}}', { status: 401 }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    const a = await tool(base, "spreek", { tekst: "Hallo" });
+    assert(a.isError && /ELEVENLABS_KEY/.test(a.content[0].text), "meldt ontbrekend Secret");
+    const env = { ...base, ELEVENLABS_KEY: "el_x" };
+    const b = await tool(env, "spreek", { tekst: "   " });
+    const c = await tool(env, "spreek", { tekst: "x".repeat(401) });
+    assert(b.isError && c.isError && /te lang/.test(c.content[0].text) && seen.length === 0, "leeg en te lang geweigerd zonder upstream-call");
+    const d = await tool(env, "spreek", { tekst: "Hallo", stem: "../../v1/user" });
+    assert(d.isError && /ElevenLabs gaf 401/.test(d.content[0].text) && /quota_exceeded/.test(d.content[0].text) && !d.content[0].text.includes("el_x"), "fout doorgegeven zonder sleutel", d.content[0].text);
+    assert(String(seen[0].url).includes("/text-to-speech/JBFqnCBsd6RMkjVDRZzb?"), "ongeldige stem-id valt terug op de standaardstem", String(seen[0].url));
+  } finally { restore(); }
+});
+
+await run("mcp: brug via tunnel-binding met sleutel; zonder binding een duidelijke fout", async () => {
+  const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+  const a = await tool(base, "lokaal_status", {});
+  assert(a.isError && /tunnel naar je Mac is nog niet ingericht/.test(a.content[0].text), "meldt ontbrekende binding");
+  const seen = [];
+  const BRUG = { fetch: async (url, init) => { seen.push({ url, init });
+    if (String(url).endsWith("/terminal/run")) { const b = JSON.parse(init.body); return new Response(JSON.stringify(b.bevestigd ? { gelukt: true, uitvoer: "ok" } : { voorvertoning: true }), { status: 200 }); }
+    if (String(url).endsWith("/mappen/lezen")) return new Response(JSON.stringify({ fout: "Dat pad ligt buiten de toegestane map." }), { status: 403 });
+    return new Response(JSON.stringify({ bereikbaar: true, model: "gemma4:12b" }), { status: 200 }); } };
+  const env = { ...base, BRUG, BRUG_KEY: "bk" };
+  const st = (await tool(env, "lokaal_status", {})).structuredContent;
+  assert(st.bereikbaar && seen[0].url === "http://127.0.0.1:8787/brein/status" && seen[0].init.headers["x-brug-key"] === "bk" && seen[0].init.method === "POST", "aanroep via binding met sleutel", seen[0].url);
+  const v1 = (await tool(env, "terminal_uitvoeren", { opdracht: "deploy", bevestigd: "ja" })).structuredContent;
+  const v2 = (await tool(env, "terminal_uitvoeren", { opdracht: "deploy", bevestigd: true })).structuredContent;
+  assert(v1.voorvertoning && v2.gelukt && JSON.parse(seen[1].init.body).bevestigd === false && JSON.parse(seen[2].init.body).bevestigd === true, "bevestigd alleen bij echte true");
+  const l = await tool(env, "mappen_lezen", { map: "docs", pad: "../x" });
+  assert(l.isError && /buiten de toegestane map/.test(l.content[0].text) && !l.content[0].text.includes("bk"), "fout van de brug doorgegeven");
+  const down = await tool({ ...base, BRUG_KEY: "bk", BRUG: { fetch: async () => { throw new Error("connect"); } } }, "lokaal_vraag", { vraag: "hoi" });
+  assert(down.isError && /niet bereikbaar via de tunnel/.test(down.content[0].text), "Mac uit → duidelijke melding");
+});
+await run("mcp: wachtrij_start start de geplande taak via zijn API-trigger", async () => {
+  const seen = []; let status = 200;
+  const restore = mockUpstream((c) => { seen.push(c); return new Response(JSON.stringify({ claude_code_session_url: "https://claude.ai/code/session_x" }), { status }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, U = "https://api.anthropic.com/v1/claude_code/routines/trig_01Abc/fire";
+    const geen = await tool(base, "wachtrij_start", {});
+    assert(geen.isError && /niet gekoppeld/.test(geen.content[0].text) && seen.length === 0, "zonder Secrets geen aanroep");
+    const fout = await tool({ ...base, WACHTRIJ_FIRE_URL: "https://evil.example/fire", WACHTRIJ_TOKEN: "tok" }, "wachtrij_start", {});
+    assert(fout.isError && /geen geldig adres/.test(fout.content[0].text) && seen.length === 0, "vreemd adres geweigerd");
+    const o = await tool({ ...base, WACHTRIJ_FIRE_URL: U, WACHTRIJ_TOKEN: "tok" }, "wachtrij_start", {});
+    assert(!o.isError && o.structuredContent.gestart === true && /session_x/.test(o.structuredContent.sessie) && seen.length === 1 && String(seen[0].url) === U, "taak gestart", JSON.stringify(o));
+    assert(!JSON.stringify(o).includes("tok\""), "token komt niet terug");
+    status = 401;
+    const nee = await tool({ ...base, WACHTRIJ_FIRE_URL: U, WACHTRIJ_TOKEN: "tok" }, "wachtrij_start", {});
+    assert(nee.isError && /token klopt niet/.test(nee.content[0].text) && !nee.content[0].text.includes("tok\""), "401 → duidelijke melding");
+  } finally { restore(); }
+});
+await run("mcp: site_status meet bereikbaarheid per site", async () => {
+  const restore = mockUpstream((c) => { const u = String(c.url);
+    if (u.includes("team.app1x")) throw Object.assign(new Error("t"), { name: "TimeoutError" });
+    return new Response("ok", { status: u.includes("o11-2") ? 503 : 200 }); });
+  try {
+    const o = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "site_status", {})).structuredContent;
+    const by = Object.fromEntries(o.sites.map(x => [x.naam, x]));
+    assert(o.sites.length === 4 && by["Scout-app"].bereikbaar && by["Scout-app"].status === 200 && typeof by["Scout-app"].ms === "number", "bereikbare site");
+    assert(!by["Team-app"].bereikbaar && /8 s/.test(by["Team-app"].fout) && !by["JO11-2"].bereikbaar && by["JO11-2"].status === 503, "time-out en 503 tellen als onbereikbaar", JSON.stringify(by));
+  } finally { restore(); }
+});
+
+await run("mcp: camera_beeld haalt één verkleind beeld uit Home Assistant", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c);
+    if (String(c.url).includes("g5_flex")) return new Response(new Uint8Array(600001), { status: 200 });
+    if (String(c.url).includes("ai_pro")) return new Response("nee", { status: 401 });
+    return new Response(new Uint8Array([255, 216, 255]), { status: 200, headers: { "content-type": "image/jpeg" } }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    const a = await tool(base, "camera_beeld", { camera: "g4_doorbell_pro_poe" });
+    assert(a.isError && /HA_URL en HA_TOKEN/.test(a.content[0].text), "meldt ontbrekende Secrets");
+    const env = { ...base, HA_URL: "https://ha.example.nl/", HA_TOKEN: "tok" };
+    const res = await tool(env, "camera_beeld", { camera: "g4_doorbell_pro_poe", breedte: 5000 });
+    const o = JSON.parse(res.content[0].text);
+    assert(!res.structuredContent && o.beeld === "/9j/" && o.mime === "image/jpeg" && o.bytes === 3, "base64-beeld zonder structuredContent", JSON.stringify(o));
+    assert(seen[0].url === "https://ha.example.nl/api/camera_proxy/camera.g4_doorbell_pro_poe_high_resolution_channel?width=960&height=540" && seen[0].headers.authorization === "Bearer tok" && seen[0].method === "GET", "juiste aanroep, breedte begrensd", String(seen[0].url));
+    const bad = await tool(env, "camera_beeld", { camera: "../../api/config" });
+    assert(bad.isError && /Onbekende camera/.test(bad.content[0].text) && seen.length === 1, "alleen de vier bekende camera's");
+    const loc = await tool({ ...base, HA_URL: "http://192.168.1.10:8123", HA_TOKEN: "tok" }, "camera_beeld", { camera: "g4_doorbell_pro_poe" });
+    const krom = await tool({ ...base, HA_URL: "mijnhuis nabu casa", HA_TOKEN: "tok" }, "camera_beeld", { camera: "g4_doorbell_pro_poe" });
+    assert(loc.isError && /lokaal adres/.test(loc.content[0].text) && krom.isError && /geen geldig adres/.test(krom.content[0].text) && seen.length === 1, "lokaal of ongeldig adres geweigerd zonder aanroep");
+    const big = await tool(env, "camera_beeld", { camera: "g5_flex" });
+    const no = await tool(env, "camera_beeld", { camera: "ai_pro" });
+    assert(big.isError && /te groot/.test(big.content[0].text) && no.isError && /gaf 401/.test(no.content[0].text) && !no.content[0].text.includes("tok"), "te groot en 401 gemeld zonder token");
+  } finally { restore(); }
+});
+
+await run("mcp: netwerk_dreigingen via de UniFi-cloud, alleen de eigen console", async () => {
+  const seen = []; let hosts = [{ id: "c1" }];
+  const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
+    if (u === "https://api.ui.com/v1/hosts") return new Response(JSON.stringify({ data: hosts }), { status: 200 });
+    if (u.endsWith("/traffic-flows")) { const body = JSON.parse(c.body); return new Response(JSON.stringify({ total_element_count: 812, data: [
+      ...(body.action ? [] : [{ action: "allowed", source: { ip: "192.168.18.5" } }]),
+      { action: "blocked", count: 3, time: 1795420000000, direction: "incoming", protocol: "TCP", policies: [{ name: "Region Blocking" }], source: { ip: "203.0.113.9", region: "CN" }, destination: { device_name: "Triplet IT BV - VE", port: 22 } }] }), { status: 200 }); }
+    if (u.endsWith("/system-log/all")) { const body = JSON.parse(c.body); return new Response(JSON.stringify({ data: body.categories ? [
+      { category: "SECURITY", title_raw: "Threat Detected", severity: "VERY_HIGH", subcategory: "SECURITY_INTRUSION_PREVENTION", timestamp: 1795416624211, message_raw: "A network intrusion attempt from {SRC_IP} to {DST_IP} has been detected.", parameters: { SRC_IP: { name: "192.168.18.61" }, DST_IP: { name: "198.51.100.7" } } }] : [{ category: "AUDIT" }] }), { status: 200 }); }
+    return new Response("<html>404</html>", { status: 404 }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    hosts = [{ id: "klant1" }, { id: "klant2" }];
+    const veel = await tool({ ...base, UNIFI_KEY: "uk" }, "netwerk_dreigingen", {});
+    assert(veel.isError && /ziet 2 consoles/.test(veel.content[0].text) && seen.length === 1, "meerdere consoles: geen enkel verzoek naar een console");
+    hosts = [{ id: "c1" }];
+    const o = (await tool({ ...base, UNIFI_KEY: "uk" }, "netwerk_dreigingen", { uren: 48 })).structuredContent;
+    const call = seen.find(c => String(c.url).endsWith("/traffic-flows")), b = JSON.parse(call.body);
+    assert(call.url === "https://api.ui.com/v1/connector/consoles/c1/proxy/network/v2/api/site/default/traffic-flows" && call.headers["x-api-key"] === "uk" && b.timestampTo - b.timestampFrom === 48 * 3600000 && b.action[0] === "blocked", "juiste console, periode en filter", String(call.url));
+    const g = o.geblokkeerd, t = o.dreigingen;
+    assert(g.aantal === 3 && g.meldingen.length === 1 && g.meldingen[0].land === "CN" && g.meldingen[0].poort === 22 && g.per_land[0].aantal === 3 && g.per_regel[0].naam === "Region Blocking" && g.totaal_regels === 812 && g.per_uur.length === 24 && g.per_protocol[0].naam === "TCP" && g.afgekapt === false, "geblokkeerd verkeer genormaliseerd", JSON.stringify(g));
+    assert(t.aantal === 1 && t.meldingen[0].ernst === "VERY_HIGH" && t.meldingen[0].bron === "192.168.18.61" && /from 192\.168\.18\.61 to 198\.51\.100\.7/.test(t.meldingen[0].bericht) && !JSON.stringify(o).includes("\"uk\""), "dreigingen uit het logboek, bericht ingevuld", JSON.stringify(t));
+    const d = (await tool({ ...base, UNIFI_KEY: "uk", UNIFI_CONSOLE_ID: "c9" }, "netwerk_dreigingen", { diagnose: true })).structuredContent;
+    assert(d.diagnose.length >= 10 && d.diagnose[0].status === 200 && d.diagnose[0].acties.blocked === 1 && d.diagnose.some(x => x.status === 404 || x.aantal === 0) && seen.every(c => String(c.url).includes("/hosts") || c.method === "POST"), "diagnose probeert de varianten");
+    assert(seen.filter(c => String(c.url).includes("/consoles/c9/")).length >= 10, "UNIFI_CONSOLE_ID wordt gebruikt");
+  } finally { restore(); }
+});
+
+await run("mcp: klant_aanmaken: voorvertoning, bestaande klant geweigerd, daarna één POST", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
+    if (u.includes("/contacts.json") && u.includes("query=Jansen")) return new Response(JSON.stringify([{ id: 1, company_name: "Jansen Bouw", city: "Zwolle", customer_id: "12" }]), { status: 200 });
+    if (u.includes("/contacts.json") && c.method === "GET") return new Response("[]", { status: 200 });
+    if (u.endsWith("/contacts.json") && c.method === "POST") return new Response(JSON.stringify({ id: 7001, company_name: "Maatman Installatietechniek", city: "Raalte", customer_id: "90" }), { status: 201 });
+    return new Response("{}", { status: 404 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "77" };
+    const nieuw = { bedrijf: "Maatman Installatietechniek", adres: "Venebrugge 7", postcode: "8103 JB", plaats: "Raalte", kvk: "72376279" };
+    const pv = (await tool(env, "klant_aanmaken", nieuw)).structuredContent;
+    assert(pv.voorvertoning && pv.klant.kvk === "72376279" && !seen.some(c => c.method === "POST"), "voorvertoning schrijft niets", JSON.stringify(pv));
+    const tekst = (await tool(env, "klant_aanmaken", { ...nieuw, bevestigd: "ja" })).structuredContent;
+    assert(tekst.voorvertoning && !seen.some(c => c.method === "POST"), "bevestigd als tekst telt niet");
+    const dubbel = await tool(env, "klant_aanmaken", { bedrijf: "Jansen Bouw", bevestigd: true });
+    assert(dubbel.isError && /staat al in Moneybird/.test(dubbel.content[0].text) && !seen.some(c => c.method === "POST"), "bestaande klant: niets aangemaakt");
+    const fout = await tool(env, "klant_aanmaken", { bedrijf: "X BV", kvk: "123", bevestigd: true });
+    assert(fout.isError && /acht cijfers/.test(fout.content[0].text) && !seen.some(c => c.method === "POST"), "ongeldig KvK-nummer geweigerd");
+    const ok = (await tool(env, "klant_aanmaken", { ...nieuw, bevestigd: true })).structuredContent;
+    const posts = seen.filter(c => c.method === "POST"), b = JSON.parse(posts[0].body);
+    assert(ok.aangemaakt && ok.klant.id === "7001" && ok.link === "https://moneybird.com/77/contacts/7001" && posts.length === 1, "klant aangemaakt met één POST", JSON.stringify(ok));
+    assert(b.contact.company_name === "Maatman Installatietechniek" && b.contact.address1 === "Venebrugge 7" && b.contact.zipcode === "8103 JB" && b.contact.chamber_of_commerce === "72376279" && b.contact.country === "NL", "juiste velden naar Moneybird");
+  } finally { restore(); }
+});
+await run("mcp: nieuws leest koppen uit RSS, om en om per bron", async () => {
+  const rss = (n) => `<rss><channel><title>Feed</title>` + [1, 2, 3].map(i => `<item><title><![CDATA[${n} kop ${i} &amp; zo]]></title><description>&lt;p&gt;Tekst ${i}&lt;/p&gt;</description><link>https://x.example/${n}/${i}</link><pubDate>Mon, 23 Nov 2026 1${i}:00:00 +0100</pubDate></item>`).join("") + `</channel></rss>`;
+  let nuKapot = false; const seen = [];
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(u);
+    if (u.includes("nu.nl")) return nuKapot ? new Response("x", { status: 503 }) : new Response(rss("NU"), { status: 200 });
+    return new Response(rss("NOS"), { status: 200 }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    const o = (await tool(base, "nieuws", { aantal: 4 })).structuredContent;
+    assert(o.onderwerp === "algemeen" && o.berichten.length === 4 && o.berichten[0].bron === "NOS" && o.berichten[1].bron === "NU.nl" && o.berichten[0].kop === "NOS kop 3 & zo" && o.berichten[0].samenvatting === "Tekst 3" && /^2026-11-23T12:00/.test(o.berichten[0].tijd), "nieuwste eerst, om en om, opgeschoond", JSON.stringify(o.berichten[0]));
+    const s = (await tool(base, "nieuws", { onderwerp: "sport" })).structuredContent;
+    assert(s.onderwerp === "sport" && seen.some(u => u.includes("nossportalgemeen")), "onderwerp kiest de feed");
+    nuKapot = true;
+    const half = (await tool(base, "nieuws", {})).structuredContent;
+    assert(half.berichten.length === 3 && half.niet_bereikbaar.join() === "NU.nl", "één bron weg: de andere blijft werken");
+  } finally { restore(); }
+});
+await run("mcp: winkelprijs leest de prijs met toeslag van de productpagina", async () => {
+  const geld = (a) => ({ amount: a, currency: "EUR" });
+  const pagina = (o) => `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({ props: { pageProps: o } })}</script></html>`;
+  const seen = [];
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(u);
+    if (u.endsWith("/products/unvr-instant")) return new Response(pagina({ collection: { products: [
+      { title: "NVR Instant Kit", slug: "unvr-instant-kit", variants: [{ sku: "KIT", title: "Default", displayPrice: geld(53900), displayPriceWithSurcharges: geld(59300), status: "Available" }] },
+      { title: "Network Video Recorder Instant", slug: "unvr-instant", variants: [{ sku: "UNVR-Instant-EU", title: "EU Version", displayPrice: geld(17900), displayPriceWithSurcharges: geld(19700), status: "Available" }, { sku: "X", title: "Verborgen", isVisibleInStore: false, displayPrice: geld(1), displayPriceWithSurcharges: geld(1), status: "Available" }] }] } }), { status: 200 });
+    if (u.endsWith("/products/uacc-hdd-e-8tb")) return new Response(pagina({ product: { title: "HDD 8 TB", slug: "uacc-hdd-e-8tb", variants: [{ sku: "UACC-HDD-E-8TB", title: "Default", displayPrice: geld(34000), displayPriceWithSurcharges: geld(34000), status: "SoldOut" }] } }), { status: 200 });
+    return new Response("nee", { status: 404 }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    const o = (await tool(base, "winkelprijs", { product: "UNVR-Instant" })).structuredContent, v = o.uitvoeringen[0];
+    assert(o.productcode === "unvr-instant" && o.uitvoeringen.length === 1 && v.inkoop_excl_btw === 197 && v.prijs_excl_btw_zonder_toeslag === 179 && v.prijs_incl_btw === 238.37 && v.leverbaar === true, "juiste product, toeslag meegerekend, verborgen uitvoering weg", JSON.stringify(o));
+    const h = (await tool(base, "winkelprijs", { product: "https://eu.store.ui.com/eu/en/category/accessories-storage/products/uacc-hdd-e-8tb" })).structuredContent;
+    assert(h.uitvoeringen[0].inkoop_excl_btw === 340 && h.uitvoeringen[0].leverbaar === false && h.uitvoeringen[0].prijs_incl_btw === 411.4, "webadres mag ook; niet leverbaar gemeld");
+    const weg = await tool(base, "winkelprijs", { product: "bestaat-niet" });
+    assert(weg.isError && /bestaat niet/.test(weg.content[0].text), "onbekend product: nette fout");
+    const n = seen.length, vreemd = await tool(base, "winkelprijs", { product: "https://example.com/products/unvr-instant" });
+    assert(vreemd.isError && seen.length === n, "andere site geweigerd zonder aanroep");
+  } finally { restore(); }
+});
+await run("mcp: web_zoeken en web_lezen: alleen lezen, alleen openbare adressen", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u === "https://api.tavily.com/search") return new Response(JSON.stringify({ results: [{ title: "Een", url: "https://a.example/1", content: "  tekst\n een " }, { title: "Fout", url: "javascript:alert(1)", content: "x" }] }), { status: 200 });
+    if (u === "https://site.example/a") return new Response("", { status: 302, headers: { location: "/b" } });
+    if (u === "https://site.example/b") return new Response("<html><head><title> Titel </title><style>p{}</style></head><body><script>weg()</script><h1>Kop</h1><p>Prijs &euro; 10 &amp; meer tekst om lang genoeg te zijn voor de lezer.</p></body></html>", { status: 200, headers: { "content-type": "text/html; charset=utf-8" } });
+    if (u === "https://site.example/naar-binnen") return new Response("", { status: 302, headers: { location: "https://192.168.1.1/" } });
+    return new Response("nee", { status: 404 }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    const zonder = await tool(base, "web_zoeken", { vraag: "iets" });
+    assert(zonder.isError && /ZOEK_KEY/.test(zonder.content[0].text) && !seen.length, "zonder sleutel: nette fout, geen aanroep");
+    const z = (await tool({ ...base, ZOEK_KEY: "tvly-x" }, "web_zoeken", { vraag: "iets", nieuws: true })).structuredContent, b = JSON.parse(seen[0].body);
+    assert(z.resultaten.length === 1 && z.resultaten[0].samenvatting === "tekst een" && b.query === "iets" && b.topic === "news" && seen[0].headers.authorization === "Bearer tvly-x", "resultaten opgeschoond, sleutel in de header", JSON.stringify(z) + JSON.stringify(seen[0].headers));
+    const l = (await tool(base, "web_lezen", { url: "https://site.example/a" })).structuredContent;
+    assert(l.url === "https://site.example/b" && l.titel === "Titel" && /^Kop\nPrijs € 10 & meer tekst/.test(l.tekst) && !/weg\(\)|p\{\}/.test(l.tekst), "omleiding gevolgd, opmaak en script weg", JSON.stringify(l));
+    const n = seen.length;
+    for (const u of ["http://site.example/b", "https://192.168.1.1/", "https://localhost/x", "https://router.lan/", "https://jarvis/", "https://a:b@site.example/", "file:///etc/passwd"]) {
+      const f = await tool(base, "web_lezen", { url: u }); assert(f.isError, "geweigerd: " + u); }
+    assert(seen.length === n, "geweigerde adressen worden niet opgevraagd");
+    const om = await tool(base, "web_lezen", { url: "https://site.example/naar-binnen" });
+    assert(om.isError && /leidt door/.test(om.content[0].text) && !seen.some(c => String(c.url).includes("192.168")), "omleiding naar binnen geweigerd");
+  } finally { restore(); }
+});
+await run("mcp: offerte_concept: voorvertoning, daarna concept in Moneybird, nooit versturen", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
+    if (u.includes("/contacts.json") && u.includes("query=maatman")) return new Response(JSON.stringify([{ id: 501, company_name: "Maatman Installatietechniek", city: "Raalte", address1: "Straat 1", zipcode: "8100 AA", email: "info@example.nl" }]), { status: 200 });
+    if (u.includes("/contacts.json") && u.includes("query=jansen")) return new Response(JSON.stringify([{ id: 1, company_name: "Jansen A", city: "Zwolle" }, { id: 2, company_name: "Jansen B", city: "Raalte" }]), { status: 200 });
+    if (u.includes("/contacts.json")) return new Response("[]", { status: 200 });
+    if (u.endsWith("/estimates.json") && c.method === "POST") return new Response(JSON.stringify({ id: 9001, estimate_id: "2026-0012" }), { status: 201 });
+    return new Response("{}", { status: 404 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "77" };
+    const regels = [{ omschrijving: "Camera", aantal: 2, prijs: 493.9 }, { omschrijving: "Configuratie", aantal: 4, prijs: 90 }];
+    const k = (await tool(env, "klant_zoeken", { naam: "maatman" })).structuredContent;
+    assert(k.aantal === 1 && k.klanten[0].bedrijf === "Maatman Installatietechniek" && k.klanten[0].plaats === "Raalte", "klant gevonden");
+    const pv = (await tool(env, "offerte_concept", { klant: "maatman", referentie: "Camera's carport en veranda", regels })).structuredContent;
+    assert(pv.voorvertoning && pv.subtotaal === 1347.8 && pv.btw === 283.04 && pv.totaal === 1630.84 && !seen.some(c => c.method === "POST"), "voorvertoning rekent en schrijft niets", JSON.stringify(pv));
+    const nee = (await tool(env, "offerte_concept", { klant: "maatman", regels, bevestigd: "ja" })).structuredContent;
+    assert(nee.voorvertoning && !seen.some(c => c.method === "POST"), "bevestigd als tekst telt niet");
+    const ok = (await tool(env, "offerte_concept", { klant: "maatman", referentie: "Camera's", regels, bevestigd: true })).structuredContent;
+    const post = seen.find(c => c.method === "POST"), b = JSON.parse(post.body);
+    assert(ok.aangemaakt && ok.nummer === "2026-0012" && ok.link === "https://moneybird.com/77/estimates/9001" && /niet verstuurd/.test(ok.status), "concept aangemaakt", JSON.stringify(ok).slice(0, 200));
+    assert(String(post.url).endsWith("/77/estimates.json") && b.estimate.contact_id === "501" && b.estimate.details_attributes.length === 2 && b.estimate.details_attributes[0].amount === "2" && b.estimate.details_attributes[0].tax_rate_id === "489478495131403774" && seen.filter(c => c.method !== "GET").length === 1, "één POST, juiste klant en btw, geen verzendverzoek", post.body);
+    const meer = await tool(env, "offerte_concept", { klant: "jansen", regels, bevestigd: true });
+    const geen = await tool(env, "offerte_concept", { klant: "bestaatniet", regels, bevestigd: true });
+    const leeg = await tool(env, "offerte_concept", { klant: "maatman", regels: [{ omschrijving: "", prijs: 5 }], bevestigd: true });
+    assert(meer.isError && /meerdere klanten/.test(meer.content[0].text) && geen.isError && /Geen klant gevonden/.test(geen.content[0].text) && leeg.isError && seen.filter(c => c.method === "POST").length === 1, "dubbelzinnig, onbekend of ongeldig: niets aangemaakt");
+  } finally { restore(); }
+});
+
 console.log(`\n${"=".repeat(60)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log("=".repeat(60));

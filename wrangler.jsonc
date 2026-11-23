@@ -9,6 +9,10 @@
 	"assets": {
 		"directory": "./"
 	},
+	"vpc_services": [
+		// Tunnel naar de Jarvis-brug op de Mac (binding BRUG in worker.js).
+		{ "binding": "BRUG", "service_id": "01a20829-a87b-7c33-afd8-360c9f77ce18", "remote": true }
+	],
 	"kv_namespaces": [
 		// Projecten + uren (cross-device opslag voor de Projecten-tab).
 		// Binding-naam moet PROJECTS_KV zijn (zo gebruikt worker.js het).
@@ -24,6 +28,5 @@
 		// Moneybird-administratie-ID (niet geheim) — staat hier zodat 'wrangler deploy'
 		// 'm niet meer wist. De token zet je als Secret: npx wrangler secret put MONEYBIRD_TOKEN
 		"MONEYBIRD_ADMIN_ID": "489478494017815934"
-	},
-	"assets__added": {}
+	}
 }
