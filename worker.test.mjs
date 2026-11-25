@@ -1058,6 +1058,30 @@ await run("mcp: klaargezette opdracht via het Durable Object: direct leesbaar, �
   await tool(env, "terminal_uitvoeren", { opdracht: "open-webadres https://een.example/" }); await tool(env, "terminal_uitvoeren", { opdracht: "open-webadres https://twee.example/" });
   assert((await haal()).url === "https://twee.example/" && (await haal()).fout, "de laatste opdracht wint");
 });
+await run("mcp: schermafbeelding van de Mac (chrome-actie scherm): afleveren met brugsleutel, één keer ophalen, geen structuredContent", async () => {
+  const { JarvisJobs } = await import("./worker.js");
+  const bk = "s".repeat(32), beeld = btoa("jpegdata".repeat(50));
+  for (const metObject of [true, false]) {
+    const opslag = new Map(), obj = new JarvisJobs({ storage: { async get(k) { return opslag.get(k); }, async put(k, v) { opslag.set(k, v); }, async delete(k) { opslag.delete(k); } } });
+    const JOBS = metObject ? { idFromName: (n) => n, get: () => ({ fetch: (u, init) => obj.fetch(new Request(u, init)) }) } : undefined;
+    const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, BRUG_KEY: bk, ...(JOBS ? { JOBS } : {}) };
+    const lever = (body, key) => worker.fetch(new Request("https://w.workers.dev/brug/scherm", { method: "POST", headers: { "x-brug-key": key || bk, "Content-Type": "application/json" }, body: JSON.stringify(body) }), env);
+    let gezien = null;
+    env.BRUG = { fetch: async () => { // de Mac: haalt de opdracht op en levert het beeld af
+      gezien = (await (await worker.fetch(new Request("https://w.workers.dev/brug/open-url", { method: "POST", headers: { "x-brug-key": bk } }), env)).json()).job;
+      const r = await lever({ id: "abc123xyz", mime: "image/jpeg", beeld });
+      return new Response(JSON.stringify({ gelukt: true, uitvoer: "x\n" + JSON.stringify(r.ok ? { afgeleverd: "abc123xyz", breedte: 1440 } : { fout: "nee" }) }), { status: 200 }); } };
+    const f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm","breed":99999}' }), o = JSON.parse(f.content[0].text);
+    assert(gezien && gezien.actie === "scherm" && gezien.breed === 2000, "breedte begrensd", JSON.stringify(gezien));
+    assert(!f.isError && !f.structuredContent && o.beeld === beeld && o.mime === "image/jpeg" && o.breedte === 1440 && /geen opdracht/.test(o.let_op), "beeld komt terug, niet dubbel", f.content[0].text.slice(0, 200));
+    assert((await lever({ id: "abc123xyz", mime: "image/jpeg", beeld }, "x".repeat(32))).status === 404, "verkeerde sleutel geweigerd");
+    assert((await lever({ id: "abc123xyz", mime: "image/png", beeld })).status === 400 && (await lever({ id: "../x", mime: "image/jpeg", beeld })).status === 400, "alleen geldige jpeg en id");
+    assert((await lever({ id: "abc123xyz", mime: "image/jpeg", beeld: "A".repeat(1500004) })).status === 413, "te groot geweigerd");
+    env.BRUG = { fetch: async () => new Response(JSON.stringify({ gelukt: true, uitvoer: JSON.stringify({ afgeleverd: "anderid99" }) }), { status: 200 }) };
+    const g = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm"}' });
+    assert(g.isError && /niet bij de Worker aangekomen/.test(g.content[0].text), "zonder afgeleverd beeld een nette fout (" + (metObject ? "object" : "KV") + ")");
+  }
+});
 await run("mcp: web_foto: afbeelding of voorvertoning van een pagina, alleen openbare adressen", async () => {
   const seen = [], png = new Uint8Array(300).fill(7);
   const restore = mockUpstream((c) => { const u = String(c.url); seen.push(u);
