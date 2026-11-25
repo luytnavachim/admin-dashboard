@@ -559,7 +559,7 @@ await run("mcp: initialize, notification en tools/list", async () => {
   const n = await mcpCall(env, { jsonrpc: "2.0", method: "notifications/initialized" });
   assert(n.status === 202, "notification → 202", "got " + n.status);
   const list = await (await mcpCall(env, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,mappen_lijst,mappen_lezen", "vijfentwintig tools");
+  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,rijplan", "zevenendertig tools");
 });
 await run("mcp: projecten en overzicht lezen", async () => {
   const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: seed() }) };
@@ -806,6 +806,57 @@ await run("mcp: site_status meet bereikbaarheid per site", async () => {
   } finally { restore(); }
 });
 
+await run("mcp: rijplan haalt het rijplan uit de JO11-2-app met de eigen sleutel", async () => {
+  const seen = [], base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+  const dag = { datum: "2026-11-28", weekdag: "zaterdag", wedstrijden: [{ team: "JO11-2", tijd: "09:00", thuis: true }], beide_teams: false, status: "", oordeel: "", keuze: "" };
+  const restore = mockUpstream((c) => { seen.push(c); const k = c.headers["x-jarvis-key"];
+    if (String(c.url).includes("nietlive")) return new Response("{}", { status: 404 });
+    if (k !== "sleutel") return new Response(JSON.stringify({ ok: false }), { status: 401 });
+    return new Response(JSON.stringify({ ok: true, van: "2026-11-28", tot: "2026-11-28", teams: { "11-2": { label: "JO11-2" } }, dagen: [dag], bijgewerkt: 1795000000000, knvb_bijgewerkt: 0 }), { status: 200 }); });
+  try {
+    const zonder = await tool(base, "rijplan", {});
+    assert(zonder.isError && /JO11_KEY/.test(zonder.content[0].text) && seen.length === 0, "zonder Secret geen verzoek");
+    const o = (await tool({ ...base, JO11_KEY: "sleutel" }, "rijplan", { van: "2026-11-28" })).structuredContent, u = new URL(String(seen[0].url));
+    assert(u.origin === "https://o11-2.app1x.online" && u.pathname === "/api.php" && u.searchParams.get("view") === "rijplan" && u.searchParams.get("from") === "2026-11-28" && u.searchParams.get("to") === "2026-11-28", "één dag: from en to gelijk", String(seen[0].url));
+    assert(o.dagen.length === 1 && o.dagen[0].weekdag === "zaterdag" && o.stand_van === new Date(1795000000000).toISOString() && o.knvb_bijgewerkt === null, "dagen en stand doorgegeven", JSON.stringify(o));
+    await tool({ ...base, JO11_KEY: "sleutel" }, "rijplan", {});
+    assert(!new URL(String(seen[1].url)).searchParams.has("from"), "zonder datums bepaalt de app het venster");
+    const fout = await tool({ ...base, JO11_KEY: "anders" }, "rijplan", {});
+    assert(fout.isError && /weigert de sleutel/.test(fout.content[0].text), "foute sleutel geeft duidelijke melding");
+    const weg = await tool({ ...base, JO11_KEY: "sleutel", JO11_URL: "https://nietlive.example" }, "rijplan", {});
+    assert(weg.isError && /nog niet aan/.test(weg.content[0].text), "404 = nog niet live");
+    const n = seen.length, raar = await tool({ ...base, JO11_KEY: "sleutel" }, "rijplan", { van: "zaterdag" });
+    assert(raar.isError && seen.length === n, "ongeldige datum gaat de deur niet uit");
+    const http = await tool({ ...base, JO11_KEY: "sleutel", JO11_URL: "http://o11-2.app1x.online" }, "rijplan", {});
+    assert(http.isError && seen.length === n, "sleutel gaat nooit over http");
+  } finally { restore(); }
+});
+
+await run("mcp: huis_automatisering: voorvertoning, daarna aanmaken, alleen eigen id's", async () => {
+  const seen = []; let bestaat = false;
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u.endsWith("/api/states/light.woonkamer_woonkamer")) return new Response(JSON.stringify({ state: "on", attributes: { friendly_name: "Woonkamer" } }), { status: 200 });
+    if (u.endsWith("/api/states/switch.energy_socket_5")) return new Response(JSON.stringify({ state: "off", attributes: { friendly_name: "Energy Socket" } }), { status: 200 });
+    if (u.includes("/api/states/")) return new Response("x", { status: 404 });
+    if (u.includes("/api/config/automation/config/")) { if (c.method === "POST") { bestaat = true; return new Response(JSON.stringify({ result: "ok" }), { status: 200 }); } return new Response(bestaat ? "{}" : "x", { status: bestaat ? 200 : 404 }); }
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), HA_URL: "https://ha.example", HA_TOKEN: "tok" };
+    const a = { naam: "Stekker woonkamer volgt lampen", bron: "light.woonkamer_woonkamer", doel: "switch.energy_socket_5" };
+    const v = (await tool(env, "huis_automatisering", a)).structuredContent;
+    assert(v.voorvertoning && v.id === "jarvis_stekker_woonkamer_volgt_lampen" && v.vervangt_bestaande === false && v.config.trigger.length === 2 && v.config.action[0].choose[1].sequence[0].service === "homeassistant.turn_off" && !seen.some(c => c.method === "POST"), "voorvertoning zonder wijziging", JSON.stringify(v));
+    const ok = (await tool(env, "huis_automatisering", { ...a, bevestigd: true })).structuredContent, post = seen.filter(c => c.method === "POST");
+    assert(ok.aangemaakt && post.length === 1 && String(post[0].url).endsWith("/api/config/automation/config/jarvis_stekker_woonkamer_volgt_lampen") && JSON.parse(post[0].body).alias === a.naam && post[0].headers.authorization === "Bearer tok", "één POST naar de eigen id");
+    const weg = await tool(env, "huis_automatisering", { ...a, doel: "switch.bestaat_niet" });
+    assert(weg.isError && /bestaat niet/.test(weg.content[0].text), "onbekend doel geweigerd");
+    const slot = await tool(env, "huis_automatisering", { ...a, doel: "lock.voordeur" });
+    assert(slot.isError && /schakelaar/.test(slot.content[0].text), "slot als doel geweigerd");
+    const eng = await tool(env, "huis_automatisering", { naam: "Gevaarlijk ding", config: { trigger: [{ platform: "time", at: "03:00" }], action: [{ service: "shell_command.x" }] }, bevestigd: true });
+    assert(eng.isError && /mag niet/.test(eng.content[0].text) && seen.filter(c => c.method === "POST").length === 1, "systeemopdracht geweigerd");
+    const zonder = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "huis_automatisering", a);
+    assert(zonder.isError && /HA_URL/.test(zonder.content[0].text), "zonder Secrets: nette fout");
+  } finally { restore(); }
+});
 await run("mcp: camera_beeld haalt één verkleind beeld uit Home Assistant", async () => {
   const seen = [];
   const restore = mockUpstream((c) => { seen.push(c);
@@ -947,6 +998,29 @@ await run("mcp: web_zoeken en web_lezen: alleen lezen, alleen openbare adressen"
     assert(om.isError && /leidt door/.test(om.content[0].text) && !seen.some(c => String(c.url).includes("192.168")), "omleiding naar binnen geweigerd");
   } finally { restore(); }
 });
+await run("mcp: web_foto: afbeelding of voorvertoning van een pagina, alleen openbare adressen", async () => {
+  const seen = [], png = new Uint8Array(300).fill(7);
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(u);
+    if (u === "https://site.example/foto.png") return new Response(png, { status: 200, headers: { "content-type": "image/png" } });
+    if (u === "https://site.example/pagina") return new Response('<html><head><meta property="og:image" content="/foto.png"></head><body>x</body></html>', { status: 200, headers: { "content-type": "text/html" } });
+    if (u === "https://site.example/binnen") return new Response('<meta property="og:image" content="https://192.168.1.1/a.png">', { status: 200, headers: { "content-type": "text/html" } });
+    if (u === "https://site.example/kaal") return new Response("<html><body>niets</body></html>", { status: 200, headers: { "content-type": "text/html" } });
+    if (u === "https://site.example/groot.jpg") return new Response(new Uint8Array(1600000), { status: 200, headers: { "content-type": "image/jpeg" } });
+    if (u === "https://site.example/doc.pdf") return new Response("%PDF", { status: 200, headers: { "content-type": "application/pdf" } });
+    return new Response("nee", { status: 404 }); });
+  try {
+    const base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    const f = await tool(base, "web_foto", { url: "https://site.example/foto.png" }), o = JSON.parse(f.content[0].text);
+    assert(!f.isError && !f.structuredContent && o.mime === "image/png" && o.bytes === 300 && atob(o.beeld).length === 300 && o.bron === "https://site.example/foto.png", "afbeelding als base64, niet dubbel meegestuurd", JSON.stringify(o).slice(0, 200));
+    const p = JSON.parse((await tool(base, "web_foto", { url: "https://site.example/pagina" })).content[0].text);
+    assert(p.bron === "https://site.example/foto.png" && p.pagina === "https://site.example/pagina", "voorvertoning van de pagina gevolgd", JSON.stringify(p).slice(0, 200));
+    for (const [u, re] of [["https://site.example/binnen", /niet gelezen mag/], ["https://site.example/kaal", /geen afbeelding op/], ["https://site.example/groot.jpg", /te groot/], ["https://site.example/doc.pdf", /geen afbeelding/], ["https://site.example/weg", /fout 404/]]) {
+      const x = await tool(base, "web_foto", { url: u }); assert(x.isError && re.test(x.content[0].text), "nette fout: " + u, x.content[0].text); }
+    const n = seen.length;
+    for (const u of ["http://site.example/foto.png", "https://192.168.1.1/a.png", "https://localhost/a.png", "file:///a.png"]) { const x = await tool(base, "web_foto", { url: u }); assert(x.isError, "geweigerd: " + u); }
+    assert(seen.length === n && !seen.some(u => u.includes("192.168")), "adressen binnen het netwerk worden niet opgevraagd");
+  } finally { restore(); }
+});
 await run("mcp: offerte_concept: voorvertoning, daarna concept in Moneybird, nooit versturen", async () => {
   const seen = [];
   const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
@@ -972,6 +1046,105 @@ await run("mcp: offerte_concept: voorvertoning, daarna concept in Moneybird, noo
     const geen = await tool(env, "offerte_concept", { klant: "bestaatniet", regels, bevestigd: true });
     const leeg = await tool(env, "offerte_concept", { klant: "maatman", regels: [{ omschrijving: "", prijs: 5 }], bevestigd: true });
     assert(meer.isError && /meerdere klanten/.test(meer.content[0].text) && geen.isError && /Geen klant gevonden/.test(geen.content[0].text) && leeg.isError && seen.filter(c => c.method === "POST").length === 1, "dubbelzinnig, onbekend of ongeldig: niets aangemaakt");
+  } finally { restore(); }
+});
+
+await run("mcp: huis_register: zoeken, voorvertoning en wijzigen via de websocket", async () => {
+  const stuur = [];
+  const HA_WS_TEST = async (b) => { stuur.push(...b); return b.map(m => {
+    if (m.type === "config/entity_registry/list") return { ok: true, result: [{ entity_id: "switch.energy_socket_5", name: null, original_name: "Energy Socket", area_id: null, device_id: "dev1" }] };
+    if (m.type === "config/device_registry/list") return { ok: true, result: [{ id: "dev1", name: "Energy Socket", name_by_user: null, manufacturer: "HomeWizard", model: "HWE-SKT", area_id: null }] };
+    if (m.type === "config/area_registry/list") return { ok: true, result: [{ area_id: "woonkamer", name: "Woonkamer" }] };
+    if (m.type === "config/area_registry/create") return { ok: true, result: { area_id: "zolder_2", name: m.name } };
+    return { ok: true, result: {} }; }); };
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), HA_URL: "https://ha.example", HA_TOKEN: "tok", HA_WS_TEST };
+  const z = (await tool(env, "huis_register", { zoek: "socket" })).structuredContent;
+  assert(z.apparaten.length === 1 && z.entiteiten[0].entity_id === "switch.energy_socket_5" && z.ruimtes[0] === "Woonkamer", "zoeken geeft apparaat, entiteit en ruimtes", JSON.stringify(z));
+  const a = { entity_id: "switch.energy_socket_5", naam: "Stekker woonkamer", ruimte: "woonkamer" };
+  const v = (await tool(env, "huis_register", a)).structuredContent;
+  assert(v.voorvertoning && v.straks.naam === "Stekker woonkamer" && v.straks.ruimte === "Woonkamer" && !stuur.some(m => /update|create/.test(m.type)), "voorvertoning zonder wijziging", JSON.stringify(v));
+  const ok = (await tool(env, "huis_register", { ...a, bevestigd: true })).structuredContent, upd = stuur.filter(m => m.type === "config/entity_registry/update");
+  assert(ok.gewijzigd && upd.length === 1 && upd[0].name === "Stekker woonkamer" && upd[0].area_id === "woonkamer", "één update met naam en ruimte", JSON.stringify(upd));
+  const nieuw = (await tool(env, "huis_register", { device_id: "dev1", ruimte: "Zolder", bevestigd: true })).structuredContent;
+  assert(nieuw.gewijzigd && stuur.some(m => m.type === "config/area_registry/create" && m.name === "Zolder") && stuur.some(m => m.type === "config/device_registry/update" && m.area_id === "zolder_2"), "onbekende ruimte wordt aangemaakt");
+  const fout = await tool(env, "huis_register", { entity_id: "switch.energy_socket_5", nieuw_entity_id: "light.iets" });
+  assert(fout.isError && /hetzelfde domein/.test(fout.content[0].text), "ander domein geweigerd");
+});
+
+await run("mcp: huis_dashboard: kaart toevoegen met voorvertoning; automatisch dashboard geweigerd", async () => {
+  const stuur = []; let cfg = { views: [{ title: "Thuis", cards: [{ type: "entities", title: "Lampen" }] }, { title: "School", sections: [{ cards: [] }] }] };
+  const HA_WS_TEST = async (b) => { stuur.push(...b); return b.map(m => m.type === "lovelace/config" ? { ok: true, result: m.url_path === "auto" ? { strategy: { type: "original-states" } } : cfg } : m.type === "lovelace/config/save" ? ((cfg = m.config), { ok: true, result: null }) : { ok: true, result: [{ url_path: "school", title: "School", mode: "storage" }] }); };
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), HA_URL: "https://ha.example", HA_TOKEN: "tok", HA_WS_TEST };
+  const l = (await tool(env, "huis_dashboard", { actie: "lees" })).structuredContent;
+  assert(l.views.length === 2 && l.views[0].kaarten === 1, "lees geeft de views");
+  const k = { actie: "kaart_toevoegen", view: "school", kaart: { type: "markdown", title: "Laatste bericht", content: "hoi" } };
+  const v = (await tool(env, "huis_dashboard", k)).structuredContent;
+  assert(v.voorvertoning && v.view === 1 && v.sectie === 0 && !stuur.some(m => m.type === "lovelace/config/save"), "voorvertoning zonder opslaan", JSON.stringify(v));
+  const ok = (await tool(env, "huis_dashboard", { ...k, bevestigd: true })).structuredContent;
+  assert(ok.gewijzigd && cfg.views[1].sections[0].cards.length === 1 && cfg.views[0].cards.length === 1, "kaart staat in de sectie, de rest ongemoeid");
+  const auto = await tool(env, "huis_dashboard", { actie: "kaart_toevoegen", dashboard: "auto", view: 0, kaart: { type: "markdown" }, bevestigd: true });
+  assert(auto.isError && /Beheer overnemen/.test(auto.content[0].text), "automatisch dashboard geweigerd");
+});
+
+await run("mcp: huis_config en huis_systeem: voorvertoning, verboden opdrachten, herstart alleen bij geldige configuratie", async () => {
+  const seen = []; let geldig = true;
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u.includes("/api/config/script/config/")) return c.method === "POST" ? new Response("{}", { status: 200 }) : new Response("x", { status: 404 });
+    if (u.endsWith("/api/config/core/check_config")) return new Response(JSON.stringify(geldig ? { result: "valid", errors: null } : { result: "invalid", errors: "fout in regel 3" }), { status: 200 });
+    if (u.endsWith("/api/services/homeassistant/restart")) return new Response("[]", { status: 200 });
+    if (u.endsWith("/api/states")) return new Response(JSON.stringify([{ entity_id: "update.home_assistant_core_update", state: "on", attributes: { title: "Home Assistant Core", installed_version: "2026.11.1", latest_version: "2026.11.2" } }]), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), HA_URL: "https://ha.example", HA_TOKEN: "tok" };
+    const s = { soort: "script", actie: "opslaan", naam: "Alles uit beneden", config: { sequence: [{ service: "light.turn_off", target: { area_id: "woonkamer" } }] } };
+    const v = (await tool(env, "huis_config", s)).structuredContent;
+    assert(v.voorvertoning && v.id === "jarvis_alles_uit_beneden" && v.config.alias === "Alles uit beneden" && !seen.some(c => c.method === "POST"), "script: voorvertoning", JSON.stringify(v));
+    const ok = (await tool(env, "huis_config", { ...s, bevestigd: true })).structuredContent;
+    assert(ok.opgeslagen && seen.filter(c => c.method === "POST" && String(c.url).endsWith("/api/config/script/config/jarvis_alles_uit_beneden")).length === 1, "script: één POST");
+    const eng = await tool(env, "huis_config", { ...s, config: { sequence: [{ service: "shell_command.wis" }] }, bevestigd: true });
+    assert(eng.isError && /mogen niet/.test(eng.content[0].text), "shell-opdracht geweigerd");
+    const up = (await tool(env, "huis_systeem", { actie: "updates" })).structuredContent;
+    assert(up.updates.length === 1 && up.updates[0].nieuw === "2026.11.2", "updates gelezen");
+    const hv = (await tool(env, "huis_systeem", { actie: "herstart" })).structuredContent;
+    assert(hv.voorvertoning && !seen.some(c => String(c.url).endsWith("/restart")), "herstart: eerst voorvertoning");
+    geldig = false; const hn = (await tool(env, "huis_systeem", { actie: "herstart", bevestigd: true })).structuredContent;
+    assert(hn.geweigerd && !seen.some(c => String(c.url).endsWith("/restart")), "herstart geweigerd bij ongeldige configuratie");
+    geldig = true; const hj = (await tool(env, "huis_systeem", { actie: "herstart", bevestigd: true })).structuredContent;
+    assert(hj.herstart_gestart && seen.filter(c => String(c.url).endsWith("/restart")).length === 1, "herstart na bevestiging");
+  } finally { restore(); }
+});
+
+await run("mcp: netwerk: overzicht, blokkeren, PoE en doorsturen met voorvertoning; alleen de eigen console", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u === "https://api.ui.com/v1/hosts") return new Response(JSON.stringify({ data: [{ id: "console1" }] }), { status: 200 });
+    if (!u.startsWith("https://api.ui.com/v1/connector/consoles/console1/proxy/network/")) return new Response("nee", { status: 500 });
+    const p = u.split("/proxy/network/")[1];
+    if (p === "api/s/default/stat/device") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [{ name: "Switch garage", mac: "aa:bb:cc:00:00:01", type: "usw", model: "USW-Lite-8", state: 1, num_sta: 3, port_table: [{ port_idx: 2, name: "Camera", up: true, poe_enable: true, poe_power: "4.2" }, { port_idx: 3, up: false, poe_enable: false }] }, { name: "Gateway", mac: "aa:bb:cc:00:00:02", type: "udm", model: "UDM-Pro", state: 1 }] }), { status: 200 });
+    if (p === "api/s/default/rest/user" || p === "api/s/default/stat/sta") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [{ name: "Tablet Duke", mac: "11:22:33:44:55:66", ip: "192.168.1.50" }, { hostname: "tablet-moos", mac: "11:22:33:44:55:77" }] }), { status: 200 });
+    if (p === "api/s/default/rest/portforward") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: c.method === "POST" ? [{ ...JSON.parse(c.body), _id: "pf9" }] : [{ _id: "pf1", name: "Camera", enabled: true, dst_port: "8443", fwd: "192.168.1.20", fwd_port: "443", proto: "tcp" }] }), { status: 200 });
+    if (p.startsWith("api/s/default/cmd/")) return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [] }), { status: 200 });
+    return new Response("nee", { status: 404 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), UNIFI_KEY: "sleutel", UNIFI_CONSOLE_ID: "console1" }, post = () => seen.filter(c => c.method === "POST" && String(c.url).includes("/proxy/network/"));
+    const o = (await tool(env, "netwerk_overzicht", { wat: "poorten", zoek: "garage" })).structuredContent;
+    assert(o.poorten.length === 2 && o.poorten[0].poe === 4.2 && o.poorten[1].poe === false, "poorten met PoE", JSON.stringify(o));
+    const dubbel = await tool(env, "netwerk_client", { client: "tablet", actie: "blokkeer", bevestigd: true });
+    assert(dubbel.isError && /Meer dan één/.test(dubbel.content[0].text) && post().length === 0, "dubbelzinnige naam: niets geblokkeerd");
+    const bv = (await tool(env, "netwerk_client", { client: "Tablet Duke", actie: "blokkeer" })).structuredContent;
+    assert(bv.voorvertoning && bv.client.mac === "11:22:33:44:55:66" && post().length === 0, "blokkeren: eerst voorvertoning");
+    await tool(env, "netwerk_client", { client: "11-22-33-44-55-66", actie: "blokkeer", bevestigd: true });
+    assert(post().length === 1 && post()[0].url.endsWith("api/s/default/cmd/stamgr") && JSON.parse(post()[0].body).cmd === "block-sta" && JSON.parse(post()[0].body).mac === "11:22:33:44:55:66" && post()[0].headers["x-api-key"] === "sleutel", "één blokkeeropdracht voor het juiste MAC-adres");
+    const geenPoe = await tool(env, "netwerk_apparaat", { apparaat: "garage", actie: "poe_herstart", poort: 3, bevestigd: true });
+    assert(geenPoe.isError && /geen PoE/.test(geenPoe.content[0].text), "poort zonder PoE geweigerd");
+    const gw = (await tool(env, "netwerk_apparaat", { apparaat: "Gateway", actie: "herstart" })).structuredContent;
+    assert(gw.voorvertoning && /hele netwerk/.test(gw.uitleg), "gateway herstarten: waarschuwing in de voorvertoning");
+    const buiten = await tool(env, "netwerk_firewall", { soort: "doorsturen", actie: "toevoegen", naam: "Test", poort: "8080", naar_ip: "8.8.8.8", bevestigd: true });
+    assert(buiten.isError && /eigen netwerk/.test(buiten.content[0].text), "doorsturen naar een adres buiten het eigen netwerk geweigerd");
+    const pv = (await tool(env, "netwerk_firewall", { soort: "doorsturen", actie: "toevoegen", naam: "Webserver", poort: "8080", naar_ip: "192.168.1.30", naar_poort: "80" })).structuredContent, voor = post().length;
+    assert(pv.voorvertoning && pv.regel.naar_ip === "192.168.1.30" && voor === 1, "doorsturen: eerst voorvertoning");
+    const zonder = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "netwerk_overzicht", { wat: "apparaten" });
+    assert(zonder.isError && /UNIFI_KEY/.test(zonder.content[0].text), "zonder sleutel: nette fout");
   } finally { restore(); }
 });
 
