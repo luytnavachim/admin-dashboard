@@ -561,14 +561,14 @@ const MCP_TOOLS = [
   { name: "huis_config", description: "Home Assistant: scènes, scripts en helpers. soort scene of script: actie lijst, lees, opslaan (config; nieuwe krijgen een id met jarvis_), verwijder. soort helper: actie lijst, opslaan (helper_type, naam, optioneel config of id), verwijder (helper_type en id). Shell- en Python-opdrachten zijn niet toegestaan. Wijzigen geeft zonder bevestigd:true alleen een voorvertoning.",
     inputSchema: { type: "object", properties: { soort: { type: "string", enum: ["scene", "script", "helper"] }, actie: { type: "string", enum: ["lijst", "lees", "opslaan", "verwijder"] }, id: { type: "string" }, naam: { type: "string" }, helper_type: { type: "string" }, config: { type: ["object", "string"] }, bevestigd: { type: "boolean" } }, required: ["soort", "actie"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false } },
-  { name: "huis_systeem", description: "Home Assistant beheren: actie controle (configuratie controleren), herlaad (alles, of doel = onderdeel zoals automation), herstart, updates (beschikbare updates), update_installeren (doel = entity_id van de update), logboek (laatste 60 regels van het foutenlog, doel = zoekwoord). Herstarten en bijwerken geven zonder bevestigd:true alleen een voorvertoning.",
-    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["controle", "herlaad", "herstart", "updates", "update_installeren", "logboek"] }, doel: { type: "string" }, bevestigd: { type: "boolean" } }, required: ["actie"], additionalProperties: false },
+  { name: "huis_systeem", description: "Home Assistant beheren: actie controle (configuratie controleren), herlaad (alles, of doel = onderdeel zoals automation), herstart, updates (beschikbare updates), update_installeren (doel = entity_id van de update), logboek (laatste 60 regels van het foutenlog, doel = zoekwoord), integraties (wat er is ingesteld, doel = zoekwoord), integratie_toevoegen (doel = domein zoals zeversolar, gegevens = object met de velden, bijvoorbeeld host). Herstarten, bijwerken en toevoegen geven zonder bevestigd:true alleen een voorvertoning.",
+    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["controle", "herlaad", "herstart", "updates", "update_installeren", "logboek", "integraties", "integratie_toevoegen"] }, doel: { type: "string" }, gegevens: { type: ["object", "string"] }, bevestigd: { type: "boolean" } }, required: ["actie"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false } },
   { name: "netwerk_overzicht", description: "UniFi, alleen lezen, alleen de eigen console. wat: apparaten (gateway, switches, accesspoints, wat is offline), poorten (zoek = apparaat), clients (wie zit er op het netwerk), geblokkeerd, wifi, doorsturen (poorten doorsturen), firewall. zoek filtert op naam, MAC of IP.",
     inputSchema: { type: "object", properties: { wat: { type: "string", enum: ["apparaten", "poorten", "clients", "geblokkeerd", "wifi", "doorsturen", "firewall"] }, zoek: { type: "string" } }, additionalProperties: false },
     annotations: { readOnlyHint: true } },
-  { name: "netwerk_client", description: "UniFi: een client (naam of MAC-adres) blokkeren, deblokkeren of opnieuw laten verbinden (herverbind). Geeft zonder bevestigd:true alleen een voorvertoning.",
-    inputSchema: { type: "object", properties: { client: { type: "string" }, actie: { type: "string", enum: ["blokkeer", "deblokkeer", "herverbind"] }, bevestigd: { type: "boolean" } }, required: ["client", "actie"], additionalProperties: false },
+  { name: "netwerk_client", description: "UniFi: een client (naam of MAC-adres) blokkeren, deblokkeren, opnieuw laten verbinden (herverbind) of een vast IP-adres geven (vast_ip met ip). Geeft zonder bevestigd:true alleen een voorvertoning.",
+    inputSchema: { type: "object", properties: { client: { type: "string" }, actie: { type: "string", enum: ["blokkeer", "deblokkeer", "herverbind", "vast_ip"] }, ip: { type: "string" }, bevestigd: { type: "boolean" } }, required: ["client", "actie"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: true } },
   { name: "netwerk_apparaat", description: "UniFi: een eigen netwerkapparaat (naam of MAC) herstarten, een PoE-poort uit en aan zetten (poe_herstart met poort), of het zoeklampje aan of uit zetten. Herstarten geeft zonder bevestigd:true alleen een voorvertoning.",
     inputSchema: { type: "object", properties: { apparaat: { type: "string" }, actie: { type: "string", enum: ["herstart", "poe_herstart", "zoeklampje_aan", "zoeklampje_uit"] }, poort: { type: "number" }, bevestigd: { type: "boolean" } }, required: ["apparaat", "actie"], additionalProperties: false },
@@ -1004,7 +1004,42 @@ async function mcpHuisSysteem(args, env) {
     const regels = (await r.text()).split("\n").filter(x => x.trim()), q = doel, keuze = (q ? regels.filter(x => x.toLowerCase().includes(q)) : regels).slice(-60);
     return { regels: keuze.map(x => x.slice(0, 400)), totaal: regels.length, filter: q || null };
   }
-  throw new Error("Onbekende actie. Kies uit: controle, herlaad, herstart, updates, update_installeren, logboek.");
+  if (actie === "integraties" || actie === "integratie_toevoegen") {
+    // Integraties lopen via de installatiestroom (config flow) van Home Assistant. Jarvis vult alleen gewone velden in (zoals host); inloggegevens nooit.
+    const recht = r => { if (r.status === 401 || r.status === 403) throw new Error("Het token van Home Assistant mag geen integraties beheren (de gebruiker van het token moet beheerder zijn)."); return r; };
+    const le = recht(await haApi(env, "/api/config/config_entries/entry")); if (!le.ok) throw new Error("Home Assistant gaf " + le.status + " op de lijst met integraties.");
+    const lijst = ((await le.json().catch(() => [])) || []).map(x => ({ domein: String(x.domain || ""), titel: x.title || null, status: x.state || null, entry_id: x.entry_id || null }));
+    if (actie === "integraties") { const l = doel ? lijst.filter(x => (x.domein + " " + (x.titel || "")).toLowerCase().includes(doel)) : lijst; return { aantal: l.length, integraties: l.slice(0, 150) }; }
+    if (!/^[a-z0-9_]{2,40}$/.test(doel) || HA_VERBODEN.test(doel)) throw new Error("Geef als doel het domein van de integratie, bijvoorbeeld zeversolar.");
+    let g = args.gegevens; if (typeof g === "string") { try { g = JSON.parse(g); } catch { throw new Error("gegevens is geen geldige JSON."); } }
+    if (g == null) g = {};
+    if (typeof g !== "object" || Array.isArray(g) || JSON.stringify(g).length > 2000) throw new Error("gegevens moet een klein object zijn, bijvoorbeeld {\"host\":\"192.168.1.10\"}.");
+    const al = lijst.filter(x => x.domein === doel), F = "/api/config/config_entries/flow";
+    const stop = async f => { if (f && f.flow_id && f.type !== "create_entry" && f.type !== "abort") { try { await haApi(env, F + "/" + f.flow_id, { method: "DELETE" }); } catch { /* verloopt vanzelf */ } } };
+    const r0 = recht(await haApi(env, F, { method: "POST", body: JSON.stringify({ handler: doel, show_advanced_options: false }) }));
+    if (r0.status === 404) throw new Error("Home Assistant kent geen integratie met het domein " + doel + ".");
+    if (!r0.ok) throw new Error("Home Assistant gaf " + r0.status + " bij het starten van de installatie: " + (await r0.text().catch(() => "")).slice(0, 160));
+    const f = (await r0.json().catch(() => ({}))) || {};
+    if (f.type === "abort") return { afgebroken: true, integratie: doel, reden: f.reason || null, al_aanwezig: al };
+    if (f.type !== "form") { await stop(f); throw new Error("Deze integratie vraagt een stap die Jarvis niet kan doen (" + String(f.type || "onbekend") + "), bijvoorbeeld inloggen bij een dienst of een keuzemenu. Voeg hem toe in Home Assistant zelf."); }
+    const velden = (Array.isArray(f.data_schema) ? f.data_schema : []).map(v => ({ veld: String(v.name), verplicht: !!v.required, soort: v.type || null }));
+    const geheim = velden.filter(v => /pass|token|secret|api_?key|sleutel|pin\b|code/i.test(v.veld)).map(v => v.veld);
+    if (geheim.length) { await stop(f); throw new Error("Deze integratie vraagt inloggegevens (" + geheim.join(", ") + "). Die vult Jarvis nooit in; voeg hem toe in Home Assistant zelf."); }
+    const mist = velden.filter(v => v.verplicht && (g[v.veld] == null || g[v.veld] === "")).map(v => v.veld), vreemd = Object.keys(g).filter(k => !velden.some(v => v.veld === k));
+    if (mist.length || vreemd.length) { await stop(f); throw new Error("De gegevens kloppen niet met wat de integratie vraagt." + (mist.length ? " Ontbreekt: " + mist.join(", ") + "." : "") + (vreemd.length ? " Onbekend: " + vreemd.join(", ") + "." : "") + " Velden: " + (velden.map(v => v.veld + (v.verplicht ? " (verplicht)" : "")).join(", ") || "geen") + "."); }
+    if (args.bevestigd !== true) { await stop(f); return { voorvertoning: true, actie, integratie: doel, gegevens: g, velden, al_aanwezig: al, uitleg: "Home Assistant maakt de integratie " + doel + " aan met deze gegevens en voegt de bijbehorende apparaten en entiteiten toe." + (al.length ? " Let op: deze integratie staat er al " + al.length + " keer." : ""), let_op: LET_OP }; }
+    let r1; try { r1 = recht(await haApi(env, F + "/" + f.flow_id, { method: "POST", body: JSON.stringify(g) })); }
+    catch (e) { await stop(f); if (/niet bereikbaar/.test(String(e && e.message))) throw new Error("Home Assistant kreeg binnen 10 seconden geen verbinding met het apparaat, dus de integratie " + doel + " is niet aangemaakt. Staat het apparaat aan en zit het op het netwerk? Een omvormer van zonnepanelen staat uit als het donker is; probeer het dan overdag."); throw e; }
+    const d = (await r1.json().catch(() => ({}))) || {};
+    if (r1.ok && d.type === "create_entry") return { toegevoegd: true, integratie: doel, titel: d.title || null, entry_id: (d.result && d.result.entry_id) || null };
+    if (r1.ok && d.type === "abort") return { afgebroken: true, integratie: doel, reden: d.reason || null, al_aanwezig: al };
+    await stop(d.flow_id ? d : f);
+    const fout = d.errors && Object.keys(d.errors).length ? Object.entries(d.errors).map(([k, v]) => k + ": " + v).join(", ") : null;
+    if (fout) throw new Error("Home Assistant kon de integratie niet aanmaken (" + fout + "). Controleer het adres en of het apparaat bereikbaar is.");
+    if (r1.ok && d.type === "form") throw new Error("Deze integratie vraagt na de eerste stap nog meer (" + String(d.step_id || "volgende stap") + "). Dat kan Jarvis niet afmaken; voeg hem toe in Home Assistant zelf.");
+    throw new Error("Home Assistant gaf " + r1.status + " bij het aanmaken van de integratie: " + String(d.message || "").slice(0, 160));
+  }
+  throw new Error("Onbekende actie. Kies uit: controle, herlaad, herstart, updates, update_installeren, logboek, integraties, integratie_toevoegen.");
 }
 
 // ---- UniFi beheren via de cloud (Secret UNIFI_KEY). Alleen de eigen console (zie unifiId). Alles wat iets verandert vraagt eerst een voorvertoning. ----
@@ -1046,7 +1081,21 @@ async function mcpNetwerkOverzicht(args, env) {
 }
 async function mcpNetwerkClient(args, env) {
   const actie = String(args.actie || "").toLowerCase(), cmd = { blokkeer: "block-sta", deblokkeer: "unblock-sta", herverbind: "kick-sta" }[actie];
-  if (!cmd) throw new Error("Kies een actie: blokkeer, deblokkeer of herverbind.");
+  if (actie === "vast_ip") {
+    const ip = String(args.ip || "").trim(), m = ip.match(/^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/);
+    if (!m || m.slice(1).some(x => Number(x) > 255) || !/^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(ip) || Number(m[4]) === 0 || Number(m[4]) === 255) throw new Error("Geef bij ip een adres op je eigen netwerk, bijvoorbeeld 192.168.18.53.");
+    const bekend = uRows(await unifi(env, "GET", U + "rest/user")), c = uKiesEen(bekend, args.client, ["name", "hostname", "mac"], "client"), mac = String(c.mac).toLowerCase();
+    if (!c._id) throw new Error("UniFi gaf geen id voor deze client; een vast IP zetten kan dan niet.");
+    const bezet = bekend.find(x => x.use_fixedip && x.fixed_ip === ip && String(x.mac).toLowerCase() !== mac);
+    if (bezet) throw new Error("Het adres " + ip + " is al vast toegewezen aan " + (bezet.name || bezet.hostname || bezet.mac) + ".");
+    const live = uRows(await unifi(env, "GET", U + "stat/sta")).find(x => String(x.mac).toLowerCase() === mac) || null, k = uClient({ ...c, ...(live || {}) }), nu = c.use_fixedip ? (c.fixed_ip || null) : null;
+    if (nu === ip) return { ongewijzigd: true, client: k, vast_ip: ip };
+    const net = c.network_id || (live && live.network_id) || null;
+    if (args.bevestigd !== true) return { voorvertoning: true, actie, client: k, vast_ip: ip, huidig_vast_ip: nu, uitleg: "Dit apparaat krijgt voortaan altijd " + ip + " van de router." + (k.ip && k.ip !== ip ? " Het heeft nu " + k.ip + "; het nieuwe adres gaat in zodra het apparaat opnieuw verbindt." : ""), let_op: LET_OP };
+    const body = { use_fixedip: true, fixed_ip: ip }; if (net) body.network_id = net;
+    await unifi(env, "PUT", U + "rest/user/" + c._id, body); return { uitgevoerd: true, actie, client: k, vast_ip: ip };
+  }
+  if (!cmd) throw new Error("Kies een actie: blokkeer, deblokkeer, herverbind of vast_ip.");
   const bron = actie === "herverbind" ? uRows(await unifi(env, "GET", U + "stat/sta")) : uRows(await unifi(env, "GET", U + "rest/user"));
   const c = uKiesEen(bron, args.client, ["name", "hostname", "mac"], "client"), k = uClient(c);
   if (actie === "blokkeer" && k.geblokkeerd) return { al_geblokkeerd: true, client: k };

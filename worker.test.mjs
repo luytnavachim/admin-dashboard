@@ -1208,6 +1208,68 @@ await run("mcp: netwerk: overzicht, blokkeren, PoE en doorsturen met voorvertoni
   } finally { restore(); }
 });
 
+await run("mcp: huis_systeem integratie_toevoegen: voorvertoning, één aanmaak, geen inloggegevens, nette fout", async () => {
+  const seen = []; let n = 0;
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u.endsWith("/api/config/config_entries/entry")) return new Response(JSON.stringify([{ domain: "hue", title: "Hue", state: "loaded", entry_id: "e1" }]), { status: 200 });
+    if (u.endsWith("/api/config/config_entries/flow") && c.method === "POST") { const h = JSON.parse(c.body).handler; n++;
+      if (h === "bestaatniet") return new Response("{}", { status: 404 });
+      if (h === "clouddienst") return new Response(JSON.stringify({ type: "form", flow_id: "f" + n, step_id: "user", data_schema: [{ name: "username", required: true, type: "string" }, { name: "password", required: true, type: "string" }] }), { status: 200 });
+      return new Response(JSON.stringify({ type: "form", flow_id: "f" + n, step_id: "user", data_schema: [{ name: "host", required: true, type: "string" }] }), { status: 200 }); }
+    if (/\/api\/config\/config_entries\/flow\/f\d+$/.test(u) && c.method === "DELETE") return new Response("{}", { status: 200 });
+    if (/\/api\/config\/config_entries\/flow\/f\d+$/.test(u) && c.method === "POST") { const b = JSON.parse(c.body);
+      if (b.host === "192.168.18.99") return new Response(JSON.stringify({ type: "form", flow_id: u.split("/").pop(), step_id: "user", errors: { base: "cannot_connect" } }), { status: 200 });
+      if (b.host === "192.168.18.98") { const e = new Error("timeout"); e.name = "TimeoutError"; throw e; }
+      return new Response(JSON.stringify({ type: "create_entry", title: "Zeversolar", result: { entry_id: "nieuw1" } }), { status: 200 }); }
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), HA_URL: "https://ha.example", HA_TOKEN: "tok" };
+    const inzend = () => seen.filter(c => c.method === "POST" && /\/flow\/f\d+$/.test(String(c.url))), weg = () => seen.filter(c => c.method === "DELETE").length;
+    const l = (await tool(env, "huis_systeem", { actie: "integraties", doel: "hue" })).structuredContent;
+    assert(l.aantal === 1 && l.integraties[0].domein === "hue", "integraties: lijst met filter", JSON.stringify(l));
+    const v = (await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "zeversolar", gegevens: { host: "192.168.18.53" } })).structuredContent;
+    assert(v.voorvertoning && v.velden[0].veld === "host" && inzend().length === 0 && weg() === 1, "toevoegen: eerst voorvertoning, proefstroom opgeruimd", JSON.stringify(v));
+    const mist = await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "zeversolar", gegevens: {}, bevestigd: true });
+    assert(mist.isError && /Ontbreekt: host/.test(mist.content[0].text) && inzend().length === 0, "ontbrekend veld: niets ingestuurd");
+    const ok = (await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "zeversolar", gegevens: "{\"host\":\"192.168.18.53\"}", bevestigd: true })).structuredContent;
+    assert(ok.toegevoegd && ok.entry_id === "nieuw1" && inzend().length === 1 && JSON.parse(inzend()[0].body).host === "192.168.18.53" && inzend()[0].headers.authorization === "Bearer tok", "na bevestiging: één keer ingestuurd met de host", JSON.stringify(ok));
+    const fout = await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "zeversolar", gegevens: { host: "192.168.18.99" }, bevestigd: true });
+    assert(fout.isError && /cannot_connect/.test(fout.content[0].text), "onbereikbaar apparaat: fout van Home Assistant doorgegeven");
+    const uit = await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "zeversolar", gegevens: { host: "192.168.18.98" }, bevestigd: true }), wegVoor = weg();
+    assert(uit.isError && /geen verbinding met het apparaat/.test(uit.content[0].text) && wegVoor >= 3, "apparaat uit: duidelijke melding en stroom opgeruimd", uit.content[0].text);
+    const login = await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "clouddienst", gegevens: { username: "a", password: "b" }, bevestigd: true });
+    assert(login.isError && /inloggegevens/.test(login.content[0].text) && inzend().length === 3, "integratie met wachtwoord geweigerd, niets ingestuurd");
+    const geen = await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "bestaatniet", bevestigd: true });
+    assert(geen.isError && /kent geen integratie/.test(geen.content[0].text), "onbekend domein: nette fout");
+    const gek = await tool(env, "huis_systeem", { actie: "integratie_toevoegen", doel: "../x", bevestigd: true });
+    assert(gek.isError && /domein/.test(gek.content[0].text), "ongeldig domein geweigerd");
+  } finally { restore(); }
+});
+
+await run("mcp: netwerk_client vast_ip: voorvertoning, één wijziging, bezet adres en adres buiten het netwerk geweigerd", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u === "https://api.ui.com/v1/hosts") return new Response(JSON.stringify({ data: [{ id: "console1" }] }), { status: 200 });
+    const p = u.split("/proxy/network/")[1] || "";
+    if (p === "api/s/default/rest/user") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [{ _id: "u1", name: "Zeversolar", mac: "c8:93:46:75:c6:71" }, { _id: "u2", name: "Printer", mac: "aa:aa:aa:aa:aa:01", use_fixedip: true, fixed_ip: "192.168.18.60" }, { _id: "u3", name: "NAS", mac: "aa:aa:aa:aa:aa:02", use_fixedip: true, fixed_ip: "192.168.18.70", network_id: "n1" }] }), { status: 200 });
+    if (p === "api/s/default/stat/sta") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [{ mac: "C8:93:46:75:C6:71", ip: "192.168.18.53", essid: "Iot-16", network_id: "net18" }] }), { status: 200 });
+    if (p === "api/s/default/rest/user/u1" && c.method === "PUT") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [] }), { status: 200 });
+    return new Response("nee", { status: 404 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), UNIFI_KEY: "sleutel", UNIFI_CONSOLE_ID: "console1" }, put = () => seen.filter(c => c.method === "PUT");
+    const v = (await tool(env, "netwerk_client", { client: "c8:93:46:75:c6:71", actie: "vast_ip", ip: "192.168.18.53" })).structuredContent;
+    assert(v.voorvertoning && v.vast_ip === "192.168.18.53" && v.client.ip === "192.168.18.53" && v.client.wifi === "Iot-16" && put().length === 0, "vast IP: eerst voorvertoning", JSON.stringify(v));
+    const ok = (await tool(env, "netwerk_client", { client: "Zeversolar", actie: "vast_ip", ip: "192.168.18.53", bevestigd: true })).structuredContent, b = put().length === 1 ? JSON.parse(put()[0].body) : {};
+    assert(ok.uitgevoerd && put().length === 1 && String(put()[0].url).endsWith("api/s/default/rest/user/u1") && b.use_fixedip === true && b.fixed_ip === "192.168.18.53" && b.network_id === "net18", "na bevestiging: één wijziging op de juiste client, met netwerk", JSON.stringify(b));
+    const bezet = await tool(env, "netwerk_client", { client: "Zeversolar", actie: "vast_ip", ip: "192.168.18.60", bevestigd: true });
+    assert(bezet.isError && /al vast toegewezen aan Printer/.test(bezet.content[0].text) && put().length === 1, "bezet adres geweigerd");
+    const buiten = await tool(env, "netwerk_client", { client: "Zeversolar", actie: "vast_ip", ip: "8.8.8.8", bevestigd: true });
+    assert(buiten.isError && /eigen netwerk/.test(buiten.content[0].text) && put().length === 1, "adres buiten het eigen netwerk geweigerd");
+    const zelfde = (await tool(env, "netwerk_client", { client: "NAS", actie: "vast_ip", ip: "192.168.18.70", bevestigd: true })).structuredContent;
+    assert(zelfde.ongewijzigd && put().length === 1, "al ingesteld: niets gewijzigd");
+  } finally { restore(); }
+});
+
 console.log(`\n${"=".repeat(60)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log("=".repeat(60));
