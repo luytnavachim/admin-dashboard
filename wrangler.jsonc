@@ -21,6 +21,11 @@
 			"id": "dd70a8ae9c3340e49d7d1c0c7f13fc5d"
 		}
 	],
+	"durable_objects": {
+		// Bewaart de opdracht die Jarvis klaarzet tot de Mac hem ophaalt (klasse JarvisJobs in worker.js).
+		"bindings": [{ "name": "JOBS", "class_name": "JarvisJobs" }]
+	},
+	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["JarvisJobs"] }],
 	"vars": {
 		"INFORMER_AUTH_METHOD": "apikey",
 		"INFORMER_BASE_URL": "https://api.informer.eu/v1",
