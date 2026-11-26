@@ -590,8 +590,8 @@ const MCP_TOOLS = [
   { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis.",
     inputSchema: { type: "object", properties: { actie: { type: "string" }, naam: { type: "string" }, bron: { type: "string" }, doel: { type: "string" }, config: { type: "object" }, bevestigd: { type: "boolean" } }, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
-  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. Geen scores, notities of contactgegevens. Persoonsgegevens van kinderen: alleen gebruiken voor wat Micha vraagt.",
-    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers"] }, club: { type: "string" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" } }, required: ["actie"], additionalProperties: false },
+  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. actie speler = volledig dossier van één speler (id of naam), met metingen en scores, voor advies en rapporten. actie onderdeel = één onderdeel van de app ruw (naam, bv. knvb_periodes; zonder naam de lijst). actie controle = datacontrole: dubbele spelers en id's, verwijzingen naar onbekende spelers, spelers zonder team of geboortejaar. Gegevens van kinderen: alleen voor wat Micha vraagt.",
+    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers", "speler", "onderdeel", "controle"] }, club: { type: "string" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" }, id: { type: "string" }, naam: { type: "string" } }, required: ["actie"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
   { name: "rijplan", description: "Het rijplan uit de JO11-2-app: per dag de wedstrijden van JO11-2 en JO14-2 (tijd, tegenstander, thuis of uit, locatie), of ze overlappen, de gemaakte rijkeuze en wat er aan het andere team doorgegeven moet worden. Zonder datums: vandaag tot en met veertien dagen verder. Datums als JJJJ-MM-DD, hooguit 62 dagen. Alleen lezen.",
     inputSchema: { type: "object", properties: { van: { type: "string" }, tot: { type: "string" } }, additionalProperties: false },
@@ -1612,11 +1612,68 @@ async function scoutGet(env, query) {
   if (d == null) throw new Error("De scout-app gaf geen leesbaar antwoord.");
   return d;
 }
+// Diepere leesacties voor advies, rapporten en datacontrole (besluit Micha 26 november: Jarvis mag alles lezen, ook namen en scores).
+const SCOUT_JSON_MAX = 60000;
+function scoutLees(v) { if (typeof v !== "string") return v; try { return JSON.parse(v); } catch { return v; } }
+function scoutKort(v, max = SCOUT_JSON_MAX) {
+  const t = JSON.stringify(v); if (t.length <= max) return { inhoud: v };
+  return { inhoud_ingekort: t.slice(0, max), let_op: "Ingekort: het onderdeel is " + t.length + " tekens. Vraag een kleiner deel (bijvoorbeeld één speler)." };
+}
+function scoutClub(args) { const club = String(args.club || "").replace(/\s+/g, " ").trim(); if (club.length < 2 || club.length > 60) throw new Error("Geef de naam van de club zoals die in de scout-app staat."); return club; }
+async function scoutDiep(actie, args, env) {
+  const club = scoutClub(args), d = await scoutGet(env, new URLSearchParams({ club }).toString());
+  const team = (x => Array.isArray(x) ? x.filter(y => y && typeof y === "object") : [])(scoutLees(d.knvb_team));
+  if (actie === "onderdeel") {
+    const naam = String(args.naam || "").trim();
+    if (!naam) return { club, onderdelen: Object.keys(d).sort() };
+    if (!(naam in d)) throw new Error("Onbekend onderdeel. Kies uit: " + Object.keys(d).sort().slice(0, 80).join(", "));
+    return { club, onderdeel: naam, ...scoutKort(scoutLees(d[naam])) };
+  }
+  if (actie === "speler") {
+    const id = String(args.id || "").trim(), zoek = String(args.naam || args.zoek || "").toLowerCase().trim();
+    let hits = id ? team.filter(x => String(x.id) === id) : team.filter(x => String(x.naam || "").toLowerCase() === zoek);
+    if (!id && !hits.length && zoek) hits = team.filter(x => String(x.naam || "").toLowerCase().includes(zoek));
+    if (!hits.length) throw new Error("Geen speler gevonden. Zoek eerst met actie spelers.");
+    if (hits.length > 1) return { club, meerdere: hits.slice(0, 20).map(x => ({ id: String(x.id), naam: x.naam, team: x.huidig || x.team || null })), let_op: "Meerdere spelers; kies er één met id." };
+    const sp = { ...hits[0] }; delete sp.foto; delete sp.wijzigingslog;
+    return { club, ...scoutKort(sp) };
+  }
+  // controle
+  const norm = v => String(v || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+  const jaar = x => { const m = String(x.jaar || x.geboortedatum || x.geboortejaar || "").match(/(19|20)\d{2}/); return m ? m[0] : ""; };
+  const kort = x => ({ id: x.id != null ? String(x.id) : null, naam: x.naam || null, team: x.huidig || x.team || null, geboortejaar: jaar(x) || null });
+  const groep = f => { const m = {}; team.forEach(x => { const k = f(x); if (k) (m[k] = m[k] || []).push(x); }); return Object.values(m).filter(g => g.length > 1).map(g => g.map(kort)); };
+  const ids = new Set(team.map(x => String(x.id)));
+  // verwijzingen: elk veld met "speler" in de naam (spelerId, spelerIds, speler_id) of "id" binnen een lijst met spelers, buiten knvb_team
+  const los = [], gezien = new Set();
+  const loop = (v, pad, diepte) => {
+    if (diepte > 8 || los.length >= 200) return;
+    if (Array.isArray(v)) { v.forEach((x, i) => loop(x, pad + "[" + i + "]", diepte + 1)); return; }
+    if (!v || typeof v !== "object") return;
+    for (const [k, w] of Object.entries(v)) {
+      if (/^speler_?ids?$/i.test(k) || /^spelerId$/i.test(k)) {
+        for (const r of (Array.isArray(w) ? w : [w])) if ((typeof r === "string" || typeof r === "number") && String(r) && !ids.has(String(r))) {
+          const sleutel = pad.split(/[.[]/)[0] + ":" + r; if (!gezien.has(sleutel)) { gezien.add(sleutel); los.push({ waar: (pad + "." + k).slice(0, 160), speler_id: String(r) }); } }
+      } else loop(scoutLees(w), pad + "." + k, diepte + 1);
+    }
+  };
+  for (const [k, v] of Object.entries(d)) if (k !== "knvb_team" && k !== "knvb_users") loop(scoutLees(v), k, 0);
+  return { club, spelers: team.length,
+    dubbele_ids: groep(x => x.id != null ? String(x.id) : ""),
+    dubbele_spelers: groep(x => norm(x.naam) ? norm(x.naam) + "|" + jaar(x) : ""),
+    zelfde_naam_ander_jaar: groep(x => norm(x.naam)).filter(g => new Set(g.map(y => y.geboortejaar)).size > 1),
+    zonder_id: team.filter(x => x.id == null || x.id === "").map(kort).slice(0, 50),
+    zonder_team: team.filter(x => !(x.huidig || x.team)).map(kort).slice(0, 50),
+    zonder_geboortejaar: team.filter(x => !jaar(x)).map(kort).slice(0, 50),
+    verwijzingen_naar_onbekende_spelers: los,
+    let_op: "Dubbel op naam + geboortejaar kan ook een echte naamgenoot zijn: noem het als 'mogelijk dubbel'. De app heeft ook een eigen bron-controle (ops-actie)." };
+}
 async function mcpScoutLezen(args, env) {
   const actie = String(args.actie || "").toLowerCase();
   if (actie === "wie") { const d = await scoutGet(env, "action=sleutel-wie");
     if (!d.sleutel) throw new Error("De scout-app herkent dit verzoek niet als een sleutel.");
     return { werkt: true, naam: d.naam || null, niveau: d.niveau || null, geldig_tot: d.verlooptOp || null }; }
+  if (["speler", "onderdeel", "controle"].includes(actie)) return scoutDiep(actie, args, env);
   if (actie === "spelers") {
     const club = String(args.club || "").replace(/\s+/g, " ").trim(); if (club.length < 2 || club.length > 60) throw new Error("Geef de naam van de club zoals die in de scout-app staat.");
     const d = await scoutGet(env, new URLSearchParams({ club }).toString());
