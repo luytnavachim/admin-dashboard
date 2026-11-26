@@ -1021,6 +1021,25 @@ await run("mcp: open-webadres: adres klaarzetten, vaste opdracht starten, één 
   const n = (await tool(env, "terminal_uitvoeren", { opdracht: "deploy" })).structuredContent;
   assert(n.gelukt && seen[seen.length - 1].opdracht === "deploy" && seen[seen.length - 1].bevestigd === false, "andere opdrachten ongewijzigd");
 });
+await run("mcp: pc <PowerShell>: voorvertoning zonder bevestiging, daarna klaarzetten voor de Mac, log en pc-gebruik", async () => {
+  const seen = [], kv = fakeKv(), bk = "b".repeat(32);
+  const BRUG = { fetch: async (url, init) => { seen.push(JSON.parse(init.body)); return new Response(JSON.stringify({ opdracht: "pc-opdracht", gelukt: true, exitcode: 0, uitvoer: "Running  Spooler" }), { status: 200 }); } };
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, BRUG, BRUG_KEY: bk };
+  const haal = () => worker.fetch(new Request("https://w.workers.dev/brug/open-url", { method: "POST", headers: { "x-brug-key": bk } }), env);
+  const v = (await tool(env, "terminal_uitvoeren", { opdracht: "pc Get-Service Spooler" })).structuredContent;
+  assert(v.voorvertoning && v.powershell === "Get-Service Spooler" && !seen.length && (await haal()).status === 404, "zonder bevestigd: alleen voorvertoning, niets op de Mac", JSON.stringify(v));
+  for (const bad of ["pc ", "pc " + "x".repeat(2001), "pc a\u0000b"]) { const f = await tool(env, "terminal_uitvoeren", { opdracht: bad, bevestigd: true }); assert(f.isError, "geweigerd: " + bad.slice(0, 12)); }
+  assert(!seen.length, "geweigerde opdrachten bereiken de Mac niet");
+  const o = (await tool(env, "terminal_uitvoeren", { opdracht: "pc Restart-Service Spooler", bevestigd: true })).structuredContent;
+  assert(o.gelukt && seen.length === 1 && seen[0].opdracht === "pc-opdracht" && seen[0].bevestigd === true, "met bevestigd: vaste opdracht pc-opdracht op de brug", JSON.stringify(seen));
+  const d = await (await haal()).json();
+  assert(d.pc && d.pc.ps === "Restart-Service Spooler" && (await haal()).status === 404, "de Mac haalt de opdracht één keer op", JSON.stringify(d));
+  await tool(env, "terminal_uitvoeren", { opdracht: "pc Get-Service Spooler", bevestigd: true }); await haal();
+  const g = (await tool(env, "terminal_uitvoeren", { opdracht: "pc-gebruik" })).structuredContent;
+  assert(g.aantal === 2 && g.meest.length === 2 && g.laatste[0].ps === "Get-Service Spooler" && seen.length === 2, "pc-gebruik telt per cmdlet en draait niets", JSON.stringify(g));
+  const s = (await tool(env, "terminal_uitvoeren", { opdracht: "pc-status" })).structuredContent;
+  assert(s.gelukt && seen[seen.length - 1].opdracht === "pc-status" && seen[seen.length - 1].bevestigd === false, "vaste opdracht pc-status gaat ongewijzigd naar de brug");
+});
 await run("mcp: chrome op de Mac: opdracht klaarzetten, antwoord van het script doorgeven, vorm gecontroleerd", async () => {
   const kv = fakeKv(), bk = "b".repeat(32); let uitvoer = "";
   const BRUG = { fetch: async () => new Response(JSON.stringify({ opdracht: "open-webadres", gelukt: true, uitvoer }), { status: 200 }) };
