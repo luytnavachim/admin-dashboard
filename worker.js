@@ -588,6 +588,9 @@ const MCP_TOOLS = [
   { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis.",
     inputSchema: { type: "object", properties: { actie: { type: "string" }, naam: { type: "string" }, bron: { type: "string" }, doel: { type: "string" }, config: { type: "object" }, bevestigd: { type: "boolean" } }, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
+  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. Geeft geen namen of dossiers terug, alleen aantallen.",
+    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht"] }, club: { type: "string" } }, required: ["actie"], additionalProperties: false },
+    annotations: { readOnlyHint: true } },
   { name: "rijplan", description: "Het rijplan uit de JO11-2-app: per dag de wedstrijden van JO11-2 en JO14-2 (tijd, tegenstander, thuis of uit, locatie), of ze overlappen, de gemaakte rijkeuze en wat er aan het andere team doorgegeven moet worden. Zonder datums: vandaag tot en met veertien dagen verder. Datums als JJJJ-MM-DD, hooguit 62 dagen. Alleen lezen.",
     inputSchema: { type: "object", properties: { van: { type: "string" }, tot: { type: "string" } }, additionalProperties: false },
     annotations: { readOnlyHint: true } }
@@ -628,7 +631,7 @@ async function handleMcp(request, env, url) {
           wachtrij_start: mcpWachtrijStart,
           netwerk_dreigingen: (a, e) => e.UNIFI_KEY ? mcpDreigingen(a, e) : brug(e, "/unifi/dreigingen", { uren: a.uren }),
           huis_register: mcpHuisRegister, huis_dashboard: mcpHuisDashboard, huis_config: mcpHuisConfig, huis_systeem: mcpHuisSysteem, netwerk_overzicht: mcpNetwerkOverzicht, netwerk_client: mcpNetwerkClient, netwerk_apparaat: mcpNetwerkApparaat, netwerk_wifi: mcpNetwerkWifi, netwerk_firewall: mcpNetwerkFirewall,
-          mappen_lijst: (a, e) => brug(e, "/mappen/lijst", a), mappen_lezen: (a, e) => brug(e, "/mappen/lezen", a), rijplan: mcpRijplan }[name];
+          mappen_lijst: (a, e) => brug(e, "/mappen/lijst", a), mappen_lezen: (a, e) => brug(e, "/mappen/lezen", a), rijplan: mcpRijplan, scout_lezen: mcpScoutLezen }[name];
         if (!fn) return rpc({ jsonrpc: "2.0", id, error: { code: -32602, message: "Onbekende tool: " + name } });
         const out = await fn(args, env);
         // Audio is groot: niet ook nog eens als structuredContent meesturen.
@@ -1511,6 +1514,42 @@ async function mcpWachtrijStart(args, env) {
 // ---- Sitebewaking: bereikbaarheid en antwoordtijd, gemeten vanaf Cloudflare. ----
 // Rijplan uit de JO11-2-app (alleen lezen). De app rekent zelf overlap en rijkeuze uit; hier alleen ophalen.
 // Secret JO11_KEY = de sleutel waarvan de sha256 op de server in .data/jarvis.hash staat. JO11_URL is optioneel.
+// ---- Scout-app lezen met een toegangssleutel (Secret SCOUT_SLEUTEL, optioneel SCOUT_URL). Alleen GET; er gaan geen namen of dossiers terug, alleen aantallen. ----
+async function scoutGet(env, query) {
+  if (!env.SCOUT_SLEUTEL) throw new Error("De scout-app is nog niet gekoppeld: de Secret SCOUT_SLEUTEL ontbreekt in de Worker.");
+  const basis = String(env.SCOUT_URL || "https://scout.app1x.online").replace(/\/+$/, "");
+  if (!/^https:\/\//.test(basis)) throw new Error("SCOUT_URL moet met https:// beginnen.");
+  let r;
+  try { r = await fetch(basis + "/api.php?" + query, { signal: AbortSignal.timeout(20000), redirect: "manual", headers: { Authorization: "Bearer " + String(env.SCOUT_SLEUTEL).trim(), Accept: "application/json", "User-Agent": "Jarvis-scout" } }); }
+  catch { throw new Error("De scout-app is nu niet bereikbaar."); }
+  // Een doorverwijzing volgen we niet, zodat de sleutel nergens anders terechtkomt.
+  if (r.status >= 300 && r.status < 400) throw new Error("De scout-app verwijst door naar een ander adres; controleer SCOUT_URL.");
+  const tekst = await r.text(); let d = null; try { d = JSON.parse(tekst); } catch { d = null; }
+  if (r.status === 401) throw new Error("De scout-app weigert de sleutel (" + String((d && d.sleutel) || "onbekend") + "). Maak in de scout-app een nieuwe sleutel en zet die als SCOUT_SLEUTEL in de Worker.");
+  if (r.status === 403) throw new Error("Dit mag niet met deze sleutel: " + String((d && (d.reden || d.error)) || "geen toegang") + ".");
+  if (r.status === 429) throw new Error("De scout-app blokkeert tijdelijk verzoeken vanaf dit adres (te veel foute sleutels). Probeer het later opnieuw.");
+  if (!r.ok) throw new Error("De scout-app gaf " + r.status + ".");
+  if (d == null) throw new Error("De scout-app gaf geen leesbaar antwoord.");
+  return d;
+}
+async function mcpScoutLezen(args, env) {
+  const actie = String(args.actie || "").toLowerCase();
+  if (actie === "wie") { const d = await scoutGet(env, "action=sleutel-wie");
+    if (!d.sleutel) throw new Error("De scout-app herkent dit verzoek niet als een sleutel.");
+    return { werkt: true, naam: d.naam || null, niveau: d.niveau || null, geldig_tot: d.verlooptOp || null }; }
+  if (actie === "overzicht") {
+    const club = String(args.club || "").replace(/\s+/g, " ").trim(); if (club.length < 2 || club.length > 60) throw new Error("Geef de naam van de club zoals die in de scout-app staat.");
+    const d = await scoutGet(env, new URLSearchParams({ club }).toString());
+    const lees = v => { if (typeof v !== "string") return v; try { return JSON.parse(v); } catch { return v; } };
+    const tel = (rij, f) => { const uit = {}; rij.forEach(x => { const k = String(f(x) ?? "onbekend") || "onbekend"; uit[k] = (uit[k] || 0) + 1; }); return Object.fromEntries(Object.entries(uit).sort((a, b) => a[0].localeCompare(b[0], "nl", { numeric: true })).slice(0, 80)); };
+    const team = lees(d.knvb_team), spelers = Array.isArray(team) ? team.filter(x => x && typeof x === "object") : [];
+    const jaar = x => { const m = String(x.jaar || x.geboortedatum || x.geboortejaar || "").match(/(19|20)\d{2}/); return m ? m[0] : "onbekend"; };
+    const metM = spelers.filter(x => Array.isArray(x.metingen) && x.metingen.length), nM = metM.reduce((t, x) => t + x.metingen.length, 0);
+    const onderdelen = Object.keys(d).sort().slice(0, 120).map(k => { const v = lees(d[k]); return { onderdeel: k, soort: Array.isArray(v) ? "lijst" : (v && typeof v === "object" ? "object" : typeof v), aantal: Array.isArray(v) ? v.length : (v && typeof v === "object" ? Object.keys(v).length : null) }; });
+    return { club, spelers: spelers.length, per_team: tel(spelers, x => x.huidig || x.team), per_geboortejaar: tel(spelers, jaar), per_lichting: tel(spelers, x => x.lichting), per_club: tel(spelers, x => x.club), spelers_met_meting: metM.length, metingen_totaal: nM, spelers_zonder_team: spelers.filter(x => !(x.huidig || x.team)).length, spelers_zonder_geboortejaar: spelers.filter(x => jaar(x) === "onbekend").length, velden_van_een_speler: spelers[0] ? Object.keys(spelers[0]).sort().slice(0, 80) : [], onderdelen, stand: d.knvb_sync_rev != null ? String(d.knvb_sync_rev) : null };
+  }
+  throw new Error("Kies een actie: wie of overzicht.");
+}
 async function mcpRijplan(args, env) {
   if (!env.JO11_KEY) throw new Error("Het rijplan is nog niet gekoppeld: de Secret JO11_KEY ontbreekt in de Worker.");
   const datum = (v, naam) => { const s = String(v || "").trim(); if (!s) return "";
