@@ -560,7 +560,7 @@ await run("mcp: initialize, notification en tools/list", async () => {
   const n = await mcpCall(env, { jsonrpc: "2.0", method: "notifications/initialized" });
   assert(n.status === 202, "notification → 202", "got " + n.status);
   const list = await (await mcpCall(env, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,rijplan", "zevenendertig tools");
+  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,rijplan", "achtendertig tools");
 });
 await run("mcp: projecten en overzicht lezen", async () => {
   const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: seed() }) };
@@ -1310,6 +1310,29 @@ await run("mcp: netwerk_client vast_ip: voorvertoning, één wijziging, bezet ad
     assert(buiten.isError && /eigen netwerk/.test(buiten.content[0].text) && put().length === 1, "adres buiten het eigen netwerk geweigerd");
     const zelfde = (await tool(env, "netwerk_client", { client: "NAS", actie: "vast_ip", ip: "192.168.18.70", bevestigd: true })).structuredContent;
     assert(zelfde.ongewijzigd && put().length === 1, "al ingesteld: niets gewijzigd");
+  } finally { restore(); }
+});
+
+await run("mcp: scout_lezen: sleutel in de header, alleen aantallen terug, nette fouten", async () => {
+  const seen = []; let status = 200;
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (status !== 200) return new Response(JSON.stringify({ sleutel: "verlopen" }), { status });
+    if (u === "https://scout.example/api.php?action=sleutel-wie") return new Response(JSON.stringify({ ok: true, sleutel: true, naam: "Jarvis", niveau: "lezen", verlooptOp: "2027-11-24" }), { status: 200 });
+    if (u === "https://scout.example/api.php?club=Testclub+92") return new Response(JSON.stringify({ knvb_sync_rev: 41, knvb_team: JSON.stringify([{ naam: "Jan Geheim", huidig: "O12-1", club: "Testclub 92", jaar: 2015, metingen: [{}, {}] }, { naam: "Piet Geheim", team: "O12-1", club: "Testclub 92", geboortedatum: "2015-11-20" }, { naam: "Klaas Geheim", team: "O11-2", club: "Testclub 92", geboortedatum: "2016-01-05" }]), knvb_periodes: { p1: {}, p2: {} } }), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), SCOUT_SLEUTEL: "ksp_test", SCOUT_URL: "https://scout.example/" };
+    const zonder = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "scout_lezen", { actie: "wie" });
+    assert(zonder.isError && /SCOUT_SLEUTEL/.test(zonder.content[0].text) && seen.length === 0, "zonder Secret geen verzoek");
+    const w = (await tool(env, "scout_lezen", { actie: "wie" })).structuredContent;
+    assert(w.werkt && w.niveau === "lezen" && seen[0].headers.authorization === "Bearer ksp_test" && seen[0].method === "GET", "wie: sleutel in de header, alleen GET", JSON.stringify(w));
+    const o = await tool(env, "scout_lezen", { actie: "overzicht", club: "Testclub 92" }), d = o.structuredContent;
+    assert(d.spelers === 3 && d.per_team["O12-1"] === 2 && d.per_geboortejaar["2015"] === 2 && d.metingen_totaal === 2 && d.spelers_met_meting === 1 && d.stand === "41", "overzicht telt per team en geboortejaar", JSON.stringify(d));
+    assert(!/Geheim|ksp_test/.test(o.content[0].text), "geen namen en geen sleutel in het antwoord");
+    status = 401; const f = await tool(env, "scout_lezen", { actie: "wie" });
+    assert(f.isError && /verlopen/.test(f.content[0].text) && !/ksp_test/.test(f.content[0].text), "verlopen sleutel: duidelijke melding zonder de sleutel");
+    status = 200; const http = await tool({ ...env, SCOUT_URL: "http://scout.example" }, "scout_lezen", { actie: "wie" });
+    assert(http.isError && /https/.test(http.content[0].text), "sleutel gaat nooit over http");
   } finally { restore(); }
 });
 
