@@ -94,6 +94,6 @@ if (cmd === "start") {
   zeg({ gestopt: true, map: s.map, momenten: sam.momenten, beelden: sam.beelden, per_programma: sam.per_programma.slice(0, 8), wissels: sam.wissels.slice(0, 5) });
 } else if (cmd === "status") {
   if (!loopt) { if (s) try { fs.unlinkSync(STAAT); } catch {} zeg({ bezig: false }); process.exit(0); }
-  let n = 0; try { n = fs.readFileSync(path.join(s.map, "log.jsonl"), "utf8").trim().split("\n").filter(Boolean).length; } catch {}
+  let n = 0; try { n = fs.readFileSync(path.join(s.map, "tijdlijn.txt"), "utf8").trim().split("\n").filter(Boolean).length; } catch {}
   zeg({ bezig: true, sinds: s.sinds, momenten: n, map: s.map });
 } else { zeg({ fout: "Gebruik: start, stop of status." }); process.exit(1); }
