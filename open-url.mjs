@@ -232,6 +232,19 @@ async function tabVoor(id) {
   const r = await run("osascript", [...DOEL, "-e", "on run a", "-e", "set w to doel()", "-e", CHROME, "-e", "repeat with i from 1 to count of tabs of w", "-e", "if ((id of tab i of w) as text) is (item 1 of a) then", "-e", "set active tab index of w to i", "-e", "return \"ok\"", "-e", "end if", "-e", "end repeat", "-e", "end tell", "-e", "return \"nee\"", "-e", "end run", String(id)], 5000);
   return r.code === 0 && r.out === "ok";
 }
+// Nieuw tabblad na een klik (bijv. een PDF of loonstrook) naar een eigen, nieuw Chrome-venster verplaatsen (wens Micha, 26 november).
+// Lukt het verplaatsen niet, dan wordt het lege venster weer gesloten en blijft het tabblad waar het was. Uit met JARVIS_TAB_VENSTER=0.
+async function tabNaarVenster(id) {
+  if (process.env.JARVIS_TAB_VENSTER === "0") return false;
+  const r = await run("osascript", [...DOEL, "-e", "on run a", "-e", "set w to doel()", "-e", CHROME,
+    "-e", "repeat with i from 1 to count of tabs of w", "-e", "if ((id of tab i of w) as text) is (item 1 of a) then",
+    "-e", "if (count of tabs of w) < 2 then return \"nee\"",
+    "-e", "set t to tab i of w", "-e", "set nw to make new window", "-e", "set leeg to id of active tab of nw",
+    "-e", "try", "-e", "move t to end of tabs of nw", "-e", "on error", "-e", "close nw", "-e", "return \"nee\"", "-e", "end try",
+    "-e", "repeat with x in (tabs of nw)", "-e", "if (id of x) is leeg then close x", "-e", "end repeat",
+    "-e", "set index of nw to 1", "-e", "return \"ok\"", "-e", "end if", "-e", "end repeat", "-e", "end tell", "-e", "return \"nee\"", "-e", "end run", String(id)], 8000);
+  return r.code === 0 && r.out === "ok";
+}
 async function tabMetAdres(href) {   // staat dit adres al open? dan dat tabblad naar voren in plaats van opnieuw laden
   const r = await run("osascript", ["-e", "on run a", "-e", CHROME, "-e", "repeat with w in windows", "-e", "repeat with i from 1 to count of tabs of w", "-e", "if (URL of tab i of w) starts with (item 1 of a) then", "-e", "set active tab index of w to i", "-e", "set index of w to 1", "-e", "return \"ok\"", "-e", "end if", "-e", "end repeat", "-e", "end repeat", "-e", "end tell", "-e", "return \"nee\"", "-e", "end run", href], 6000);
   return r.code === 0 && r.out === "ok";
@@ -286,12 +299,13 @@ async function chrome(job, key) {
   const r = await js(SCRIPTS[job.actie](job));
   if (r.fout || r.voorvertoning || job.actie === "lees" || job.actie === "scroll") return r;
   await wacht(job.actie === "typ" && !job.enter ? 300 : 2200);   // de pagina laten reageren en melden waar we nu staan
-  let nieuwTab = false;
-  if (voor) {   // opende de klik een nieuw tabblad? dan dat tabblad naar voren, anders leest Jarvis daarna de oude pagina
-    const na = await tabIds(), bij = na ? na.filter(x => !voor.includes(x)) : [];
-    if (bij.length && await tabVoor(bij[bij.length - 1])) { nieuwTab = true; await wacht(900); }
+  let nieuwTab = false, eigenVenster = false;
+  if (voor) {   // opende de klik een nieuw tabblad? dan naar een eigen venster (of anders naar voren), anders leest Jarvis daarna de oude pagina
+    const na = await tabIds(), bij = na ? na.filter(x => !voor.includes(x)) : [], id = bij[bij.length - 1];
+    if (id && await tabNaarVenster(id)) { nieuwTab = eigenVenster = true; await wacht(900); }
+    else if (id && await tabVoor(id)) { nieuwTab = true; await wacht(900); }
   }
-  const w = await js(SCRIPTS.waar()); return { ...r, ...(nieuwTab ? { nieuw_tabblad: true } : {}), nu: w.fout ? undefined : w };
+  const w = await js(SCRIPTS.waar()); return { ...r, ...(nieuwTab ? { nieuw_tabblad: true } : {}), ...(eigenVenster ? { eigen_venster: true } : {}), nu: w.fout ? undefined : w };
 }
 
 async function main() {

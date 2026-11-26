@@ -661,6 +661,39 @@ await run("mcp: administratie_overzicht leest Moneybird, fout per sectie", async
   } finally { restore(); }
 });
 
+await run("mcp: administratie_overzicht met jaarfilter", async () => {
+  const kv = fakeKv({ projects_v1: seed() });
+  const seen = [];
+  const restore = mockUpstream((c) => {
+    const u = String(c.url); seen.push(u);
+    if (u.includes("/documents/purchase_invoices.json")) return new Response(JSON.stringify([
+      { id: "d1", state: "open", reference: "INK-25", date: "2025-06-01", due_date: "2025-07-01", total_price_incl_tax: "100.00", payments: [] },
+      { id: "d2", state: "open", reference: "INK-26", date: "2026-02-01", due_date: "2999-01-01", total_price_incl_tax: "50.00", payments: [] }
+    ]), { status: 200 });
+    if (u.includes("/sales_invoices.json")) return new Response(JSON.stringify([
+      { id: "s1", state: "open", invoice_id: "2025-0100", invoice_date: "2025-12-30", total_unpaid: "300.00" },
+      { id: "s2", state: "open", invoice_id: "2026-0001", invoice_date: "2026-01-05", total_unpaid: "70.00" }
+    ]), { status: 200 });
+    if (u.includes("/financial_mutations/synchronization.json")) return new Response(JSON.stringify([{ id: "m1" }, { id: "m2" }]), { status: 200 });
+    return new Response("{}", { status: 404 });
+  });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" };
+    const o = (await tool(env, "administratie_overzicht", { jaar: 2025 })).structuredContent;
+    assert(o.jaar === 2025 && o.te_betalen.aantal === 1 && o.te_betalen.facturen[0].nummer === "INK-25", "inkoop alleen 2025", JSON.stringify(o.te_betalen));
+    assert(o.te_ontvangen.aantal === 1 && o.te_ontvangen.totaal_open === 300, "verkoop alleen 2025", JSON.stringify(o.te_ontvangen));
+    assert(o.te_factureren.open_uren === 0, "uren van 2026 tellen niet mee in 2025");
+    const sync = seen.find(u => u.includes("synchronization"));
+    assert(decodeURIComponent(sync).includes("state:unprocessed,period:20250101..20251231"), "bankfilter met periode", sync);
+    const o26 = (await tool(env, "administratie_overzicht", { jaar: 2026 })).structuredContent;
+    assert(o26.te_betalen.aantal === 1 && o26.te_ontvangen.facturen[0].nummer === "2026-0001" && o26.te_factureren.open_uren === 2, "2026 werkt ook", JSON.stringify(o26));
+    const alles = (await tool(env, "administratie_overzicht", {})).structuredContent;
+    assert(alles.jaar === undefined && alles.te_betalen.aantal === 2 && alles.te_ontvangen.aantal === 2, "zonder jaar alles");
+    const fout = await tool(env, "administratie_overzicht", { jaar: 25 });
+    assert(fout.isError || /jaar/.test(JSON.stringify(fout)), "ongeldig jaar geweigerd", JSON.stringify(fout));
+  } finally { restore(); }
+});
+
 await run("mcp: uren_wijzigen met voorvertoning, PATCH naar Moneybird en bescherming tegen open tabblad", async () => {
   const s0 = JSON.parse(seed()); s0.projects[0].entries[0].mbTimeEntryId = "te1";
   const kv = fakeKv({ projects_v1: JSON.stringify(s0) });
@@ -1251,6 +1284,37 @@ await run("mcp: netwerk: overzicht, blokkeren, PoE en doorsturen met voorvertoni
     const zonder = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "netwerk_overzicht", { wat: "apparaten" });
     assert(zonder.isError && /UNIFI_KEY/.test(zonder.content[0].text), "zonder sleutel: nette fout");
   } finally { restore(); }
+});
+
+await run("mcp: netwerk_firewall regel: overzicht met zonenamen en apparaatnaam in voorvertoning en na doorvoeren", async () => {
+  const seen = [];
+  const regel = { _id: "fw1", name: "NAS1 geen internet", action: "BLOCK", enabled: true, protocol: "all", source: { zone_id: "zInt", matching_target: "IP", ips: ["192.168.18.61"] }, destination: { zone_id: "zExt", matching_target: "ANY" } };
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (!u.startsWith("https://api.ui.com/v1/connector/consoles/console1/proxy/network/")) return new Response("nee", { status: 500 });
+    const p = u.split("/proxy/network/")[1];
+    if (p === "v2/api/site/default/firewall-policies") return new Response(JSON.stringify(c.method === "POST" ? { ...JSON.parse(c.body), _id: "fw2" } : [regel]), { status: 200 });
+    if (p === "v2/api/site/default/firewall-policies/fw1") return new Response("{}", { status: 200 });
+    if (p === "v2/api/site/default/firewall/zone") return new Response(JSON.stringify([{ _id: "zInt", name: "Intern" }, { _id: "zExt", name: "Extern" }]), { status: 200 });
+    if (p === "api/s/default/rest/user") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [{ name: "NAS1", mac: "aa:aa:aa:aa:aa:01", fixed_ip: "192.168.18.61" }] }), { status: 200 });
+    if (p === "api/s/default/stat/sta" || p === "api/s/default/rest/networkconf") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [] }), { status: 200 });
+    return new Response("nee", { status: 404 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), UNIFI_KEY: "sleutel", UNIFI_CONSOLE_ID: "console1" };
+    const pv = (await tool(env, "netwerk_firewall", { soort: "regel", actie: "toevoegen", config: { ...regel, _id: undefined, name: "NAS2 geen internet" } })).structuredContent;
+    assert(pv.voorvertoning && pv.overzicht.van_zone === "Intern" && pv.overzicht.naar_zone === "Extern" && pv.overzicht.bron === "NAS1 (192.168.18.61)" && pv.overzicht.actie === "blokkeren" && pv.overzicht.bestemming === "alles" && pv.overzicht.poort === "alle", "voorvertoning: leesbaar overzicht", JSON.stringify(pv.overzicht));
+    assert(!seen.some(c => c.method === "POST"), "voorvertoning: niets aangemaakt");
+    const ok = (await tool(env, "netwerk_firewall", { soort: "regel", actie: "toevoegen", config: { ...regel, _id: undefined, name: "NAS2 geen internet" }, bevestigd: true })).structuredContent;
+    assert(ok.toegevoegd && ok.overzicht.naam === "NAS2 geen internet" && ok.overzicht.naar_zone === "Extern" && ok.overzicht.aan === true, "na toevoegen: overzicht met bron, zones en aan", JSON.stringify(ok));
+    const uit = (await tool(env, "netwerk_firewall", { soort: "regel", actie: "uit", regel: "NAS1 geen internet", bevestigd: true })).structuredContent;
+    assert(uit.uitgevoerd && uit.overzicht.aan === false && uit.overzicht.van_zone === "Intern", "na uitzetten: overzicht", JSON.stringify(uit));
+  } finally { restore(); }
+  const restore2 = mockUpstream((c) => { const p = String(c.url).split("/proxy/network/")[1] || "";
+    if (p === "v2/api/site/default/firewall-policies") return new Response(JSON.stringify([regel]), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const l = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), UNIFI_KEY: "sleutel", UNIFI_CONSOLE_ID: "console1" }, "netwerk_firewall", { soort: "regel", actie: "lees", regel: "fw1" })).structuredContent;
+    assert(l.overzicht.van_zone === "zInt" && l.overzicht.bron === "192.168.18.61", "opzoeken mislukt: id's blijven staan", JSON.stringify(l));
+  } finally { restore2(); }
 });
 
 await run("mcp: huis_systeem integratie_toevoegen: voorvertoning, één aanmaak, geen inloggegevens, nette fout", async () => {
