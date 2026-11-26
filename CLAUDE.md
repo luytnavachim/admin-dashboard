@@ -185,3 +185,8 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - **`gmail_lezen`** (Worker, alleen lezen, scope `gmail.readonly`): actie `zoek` (Gmail-zoekopdracht `q`, hooguit 20: afzender, onderwerp, datum, stukje, ongelezen) en `lees` (`id`: platte tekst tot 20.000 tekens + namen van bijlagen). Secrets `GOOGLE_CLIENT_ID` en `GOOGLE_CLIENT_SECRET` (Web application-client, omleiding `<worker>/gmail/terug`).
 - Koppelen: Micha opent `<worker>/gmail/start/<JARVIS_MCP_KEY>` (404 zonder juiste sleutel), logt in bij Google; `/gmail/terug` controleert een eenmalige state (KV `gmail_state:*`, 10 min), weigert meer rechten dan alleen lezen en zet het vernieuwtoken in KV `gmail_refresh` (een Worker kan zelf geen Secret schrijven). Toegangstoken in geheugen.
 - Los van de Gmail-koppeling in `index.html` (die draait in de browser met `gmail.modify`).
+
+## Jarvis: code van de apps lezen (26 november 2026)
+
+- `project_activiteit` kan naast de stand (commits, voorsprong develop, pull requests) ook lezen: `bestand` (inhoud, max. 60.000 tekens), `map` (inhoud van een map, `""` = hoofdmap) en `zoek` (bestanden op naam of pad over de hele boom via git trees, zonder `node_modules/` en `min/`, max. 200). Steeds van `tak`, standaard develop. Zoeken in de inhoud van de code zit er niet in (GitHub code search is onzeker met een fine-grained token).
+- In de Jarvis-pagina zit dit in de bundel `opzoeken`, actie `project`. Die bundel voegt de velden van alle acties samen: `scout_lezen` heeft ook `zoek`, dus geef het zoekveld van `project` in de pagina een eigen naam (bijv. `pad_zoek`) en zet het om naar `zoek`. De omschrijving van `opzoeken` zit tegen de 1 KB; eerst inkorten.
