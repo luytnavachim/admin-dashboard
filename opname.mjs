@@ -31,24 +31,32 @@ function voorgrond() {
 }
 function beeld(map, nr) {
   const ruw = path.join(map, `.ruw-${nr}.jpg`), uit = path.join(map, `${String(nr).padStart(5, "0")}.jpg`);
-  const c = spawnSync("/usr/sbin/screencapture", ["-x", "-t", "jpg", ruw], { timeout: 10000 });
-  if (c.status !== 0 || !fs.existsSync(ruw)) return null;
+  const c = spawnSync("/usr/sbin/screencapture", ["-x", "-t", "jpg", ruw], { timeout: 10000, encoding: "utf8" });
+  if (c.status !== 0 || !fs.existsSync(ruw)) return { fout: String(c.stderr || (c.error && c.error.message) || ("code " + c.status)).trim().slice(0, 160) };
   spawnSync("/usr/bin/sips", ["-Z", "1600", "-s", "format", "jpeg", "-s", "formatOptions", "45", ruw, "--out", uit], { timeout: 10000 });
   try { fs.unlinkSync(ruw); } catch {}
-  return fs.existsSync(uit) ? path.basename(uit) : null;
+  return fs.existsSync(uit) ? { naam: path.basename(uit) } : { fout: "verkleinen mislukt" };
 }
 
+// De opname draait als eigen launchd-taak (launchctl submit), net als de brug: alleen dan rekent macOS de schermopname
+// toe aan node, dat de toestemming heeft. Een los (detached) proces kreeg geen beelden. submit herstart een taak die stopt,
+// daarom stopt een lus die zijn map al afgerond ziet direct, en haalt hij zichzelf aan het eind weg.
+const LABEL = "nl.triplet-it.jarvis-opname";
+const launchctl = (...a) => spawnSync("/bin/launchctl", a, { encoding: "utf8", timeout: 5000 });
+function taakLoopt() { return launchctl("list", LABEL).status === 0; }
 async function lus(map) {
+  if (!map || fs.existsSync(path.join(map, "stop")) || fs.existsSync(path.join(map, "samenvatting.json"))) { launchctl("remove", LABEL); return; }
   const eind = Date.now() + MAX_UUR * 3600000, log = path.join(map, "tijdlijn.txt");
   let nr = 0;
   while (Date.now() < eind && !fs.existsSync(path.join(map, "stop"))) {
     nr++;
     const v = voorgrond(), b = beeld(map, nr);
-    fs.appendFileSync(log, JSON.stringify({ t: new Date().toISOString(), ...v, beeld: b }) + "\n");
+    fs.appendFileSync(log, JSON.stringify({ t: new Date().toISOString(), ...v, beeld: b.naam || null, ...(b.fout ? { beeld_fout: b.fout } : {}) }) + "\n");
     for (let i = 0; i < INTERVAL * 2 && !fs.existsSync(path.join(map, "stop")); i++) await wacht(500);
   }
   samenvatting(map);
   try { const s = leesStaat(); if (s && s.map === map) fs.unlinkSync(STAAT); } catch {}
+  launchctl("remove", LABEL);
 }
 
 function samenvatting(map) {
@@ -66,7 +74,7 @@ function samenvatting(map) {
   const wissels = {};
   for (let i = 1; i < regels.length; i++) if (regels[i].app !== regels[i - 1].app) { const k = regels[i - 1].app + " → " + regels[i].app; wissels[k] = (wissels[k] || 0) + 1; }
   const s = { van: regels[0] && regels[0].t, tot: regels.length ? regels[regels.length - 1].t : null, momenten: regels.length, interval_sec: INTERVAL,
-    beelden: regels.filter(r => r.beeld).length,
+    beelden: regels.filter(r => r.beeld).length, ...(regels.some(r => r.beeld_fout) ? { beeld_fout: regels.find(r => r.beeld_fout).beeld_fout } : {}),
     per_programma: top(perApp, 15), per_venster: top(perVenster, 25),
     wissels: Object.entries(wissels).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([van_naar, keer]) => ({ van_naar, keer })) };
   fs.writeFileSync(path.join(map, "samenvatting.json"), JSON.stringify(s, null, 2));
@@ -76,22 +84,27 @@ function samenvatting(map) {
 const [, , cmd, arg] = process.argv;
 fs.mkdirSync(MAP, { recursive: true });
 if (cmd === "lus") { await lus(arg); process.exit(0); }
-const s = leesStaat(), loopt = !!(s && leeft(s.pid));
+const s = leesStaat(), loopt = !!(s && (s.label ? taakLoopt() : leeft(s.pid)));
 if (cmd === "start") {
   if (loopt) { zeg({ al_bezig: true, sinds: s.sinds, map: s.map }); process.exit(0); }
   const map = path.join(MAP, stempel()); fs.mkdirSync(map, { recursive: true });
-  const k = spawn(process.execPath, [fileURLToPath(import.meta.url), "lus", map], { detached: true, stdio: "ignore" });
-  k.unref();
-  fs.writeFileSync(STAAT, JSON.stringify({ pid: k.pid, sinds: new Date().toISOString(), map }));
+  launchctl("remove", LABEL);   // restje van een vorige opname
+  const sub = launchctl("submit", "-l", LABEL, "--", process.execPath, fileURLToPath(import.meta.url), "lus", map);
+  if (sub.status === 0) fs.writeFileSync(STAAT, JSON.stringify({ label: LABEL, sinds: new Date().toISOString(), map }));
+  else {   // geen launchd (of submit geweigerd): los proces, dan wel zonder zekerheid over beelden
+    const k = spawn(process.execPath, [fileURLToPath(import.meta.url), "lus", map], { detached: true, stdio: "ignore" });
+    k.unref();
+    fs.writeFileSync(STAAT, JSON.stringify({ pid: k.pid, sinds: new Date().toISOString(), map }));
+  }
   zeg({ gestart: true, map, elke_seconden: INTERVAL, stopt_uiterlijk_na_uur: MAX_UUR, let_op: "Alles blijft op de Mac. Geen toetsaanslagen of geluid." });
 } else if (cmd === "stop") {
   if (!s) { zeg({ fout: "Er loopt geen opname." }); process.exit(0); }
   fs.writeFileSync(path.join(s.map, "stop"), "");
-  for (let i = 0; i < 20 && leeft(s.pid); i++) await wacht(500);
-  if (leeft(s.pid)) { try { process.kill(s.pid); } catch {} }
+  if (s.label) { for (let i = 0; i < 20 && !fs.existsSync(path.join(s.map, "samenvatting.json")); i++) await wacht(500); launchctl("remove", LABEL); }
+  else { for (let i = 0; i < 20 && leeft(s.pid); i++) await wacht(500); if (leeft(s.pid)) { try { process.kill(s.pid); } catch {} } }
   try { fs.unlinkSync(STAAT); } catch {}
   const sam = samenvatting(s.map);
-  zeg({ gestopt: true, map: s.map, momenten: sam.momenten, beelden: sam.beelden, per_programma: sam.per_programma.slice(0, 8), wissels: sam.wissels.slice(0, 5) });
+  zeg({ gestopt: true, map: s.map, momenten: sam.momenten, beelden: sam.beelden, ...(sam.beeld_fout ? { beeld_fout: sam.beeld_fout } : {}), per_programma: sam.per_programma.slice(0, 8), wissels: sam.wissels.slice(0, 5) });
 } else if (cmd === "status") {
   if (!loopt) { if (s) try { fs.unlinkSync(STAAT); } catch {} zeg({ bezig: false }); process.exit(0); }
   let n = 0; try { n = fs.readFileSync(path.join(s.map, "tijdlijn.txt"), "utf8").trim().split("\n").filter(Boolean).length; } catch {}
