@@ -179,3 +179,9 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - **De brug herstarten vanuit `mac`:** los laten lopen, anders stopt de opdracht zichzelf: `(sleep 2; launchctl kickstart -k gui/$(id -u)/nl.triplet-it.jarvis-brug) >/dev/null 2>&1 &`.
 - **Wachtrij-punten** voor de Mac voortaan schrijven als "… Dit kan Jarvis zelf doen (mac <opdracht>)" in plaats van een plakregel.
 - **`project_activiteit` met `bestand`** (en optioneel `tak`, standaard develop): leest één tekstbestand uit een repo in `MCP_REPOS` via GitHub (`ghBestand`, hooguit 60.000 tekens, pad zonder `..`). Zo leest Jarvis `docs/JARVIS-DEMO.md` van de scout-app zonder dat de map op de Mac bijgewerkt is. Mogelijk moet de koppeling opnieuw verbonden worden om de nieuwe velden te zien.
+
+## Jarvis: Gmail lezen (26 november 2026)
+
+- **`gmail_lezen`** (Worker, alleen lezen, scope `gmail.readonly`): actie `zoek` (Gmail-zoekopdracht `q`, hooguit 20: afzender, onderwerp, datum, stukje, ongelezen) en `lees` (`id`: platte tekst tot 20.000 tekens + namen van bijlagen). Secrets `GOOGLE_CLIENT_ID` en `GOOGLE_CLIENT_SECRET` (Web application-client, omleiding `<worker>/gmail/terug`).
+- Koppelen: Micha opent `<worker>/gmail/start/<JARVIS_MCP_KEY>` (404 zonder juiste sleutel), logt in bij Google; `/gmail/terug` controleert een eenmalige state (KV `gmail_state:*`, 10 min), weigert meer rechten dan alleen lezen en zet het vernieuwtoken in KV `gmail_refresh` (een Worker kan zelf geen Secret schrijven). Toegangstoken in geheugen.
+- Los van de Gmail-koppeling in `index.html` (die draait in de browser met `gmail.modify`).
