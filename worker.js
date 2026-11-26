@@ -590,8 +590,8 @@ const MCP_TOOLS = [
   { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis.",
     inputSchema: { type: "object", properties: { actie: { type: "string" }, naam: { type: "string" }, bron: { type: "string" }, doel: { type: "string" }, config: { type: "object" }, bevestigd: { type: "boolean" } }, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
-  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. Geeft geen namen of dossiers terug, alleen aantallen.",
-    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht"] }, club: { type: "string" } }, required: ["actie"], additionalProperties: false },
+  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. Geen scores, notities of contactgegevens. Persoonsgegevens van kinderen: alleen gebruiken voor wat Micha vraagt.",
+    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers"] }, club: { type: "string" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" } }, required: ["actie"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
   { name: "rijplan", description: "Het rijplan uit de JO11-2-app: per dag de wedstrijden van JO11-2 en JO14-2 (tijd, tegenstander, thuis of uit, locatie), of ze overlappen, de gemaakte rijkeuze en wat er aan het andere team doorgegeven moet worden. Zonder datums: vandaag tot en met veertien dagen verder. Datums als JJJJ-MM-DD, hooguit 62 dagen. Alleen lezen.",
     inputSchema: { type: "object", properties: { van: { type: "string" }, tot: { type: "string" } }, additionalProperties: false },
@@ -1617,6 +1617,21 @@ async function mcpScoutLezen(args, env) {
   if (actie === "wie") { const d = await scoutGet(env, "action=sleutel-wie");
     if (!d.sleutel) throw new Error("De scout-app herkent dit verzoek niet als een sleutel.");
     return { werkt: true, naam: d.naam || null, niveau: d.niveau || null, geldig_tot: d.verlooptOp || null }; }
+  if (actie === "spelers") {
+    const club = String(args.club || "").replace(/\s+/g, " ").trim(); if (club.length < 2 || club.length > 60) throw new Error("Geef de naam van de club zoals die in de scout-app staat.");
+    const d = await scoutGet(env, new URLSearchParams({ club }).toString());
+    let team = d.knvb_team; if (typeof team === "string") { try { team = JSON.parse(team); } catch { team = []; } }
+    const jaarVan = x => { const m = String(x.jaar || x.geboortedatum || x.geboortejaar || "").match(/(19|20)\d{2}/); return m ? Number(m[0]) : null; };
+    const pos = x => Array.isArray(x.posities) ? x.posities.filter(Boolean).join(", ") : (x.positie || null);
+    const norm = v => String(v || "").toLowerCase().replace(/[\s-]/g, "");
+    const fTeam = norm(args.team), fLicht = norm(args.lichting), fJaar = Number(args.geboortejaar) || null, fZoek = String(args.zoek || "").toLowerCase().trim();
+    const rijen = (Array.isArray(team) ? team : []).filter(x => x && typeof x === "object" && x.naam)
+      .map(x => ({ id: x.id != null ? String(x.id) : null, naam: String(x.naam), team: x.huidig || x.team || null, geboortejaar: jaarVan(x), lichting: x.lichting || null,
+        positie: pos(x), voet: x.voet || null, geslacht: x.geslacht || null, dispensatie: x.dispensatie ? true : false }))
+      .filter(r => (!fTeam || norm(r.team) === fTeam) && (!fLicht || norm(r.lichting) === fLicht) && (!fJaar || r.geboortejaar === fJaar) && (!fZoek || r.naam.toLowerCase().includes(fZoek)))
+      .sort((a, b) => String(a.team || "~").localeCompare(String(b.team || "~"), "nl", { numeric: true }) || a.naam.localeCompare(b.naam, "nl"));
+    return { club, aantal: rijen.length, spelers: rijen.slice(0, 400), ...(rijen.length > 400 ? { let_op: "Meer dan 400 spelers; filter op team of geboortejaar." } : {}) };
+  }
   if (actie === "overzicht") {
     const club = String(args.club || "").replace(/\s+/g, " ").trim(); if (club.length < 2 || club.length > 60) throw new Error("Geef de naam van de club zoals die in de scout-app staat.");
     const d = await scoutGet(env, new URLSearchParams({ club }).toString());

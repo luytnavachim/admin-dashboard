@@ -1329,6 +1329,10 @@ await run("mcp: scout_lezen: sleutel in de header, alleen aantallen terug, nette
     const o = await tool(env, "scout_lezen", { actie: "overzicht", club: "Testclub 92" }), d = o.structuredContent;
     assert(d.spelers === 3 && d.per_team["O12-1"] === 2 && d.per_geboortejaar["2015"] === 2 && d.metingen_totaal === 2 && d.spelers_met_meting === 1 && d.stand === "41", "overzicht telt per team en geboortejaar", JSON.stringify(d));
     assert(!/Geheim|ksp_test/.test(o.content[0].text), "geen namen en geen sleutel in het antwoord");
+    const sp = (await tool(env, "scout_lezen", { actie: "spelers", club: "Testclub 92", team: "o12-1" })).structuredContent;
+    assert(sp.aantal === 2 && sp.spelers.map(x => x.naam).join() === "Jan Geheim,Piet Geheim" && sp.spelers[0].geboortejaar === 2015 && !("metingen" in sp.spelers[0]), "spelers: namen per team, zonder metingen", JSON.stringify(sp));
+    const sj = (await tool(env, "scout_lezen", { actie: "spelers", club: "Testclub 92", geboortejaar: 2016 })).structuredContent;
+    assert(sj.aantal === 1 && sj.spelers[0].naam === "Klaas Geheim" && seen.every(c => c.method === "GET"), "spelers: filter op geboortejaar, alleen GET");
     status = 401; const f = await tool(env, "scout_lezen", { actie: "wie" });
     assert(f.isError && /verlopen/.test(f.content[0].text) && !/ksp_test/.test(f.content[0].text), "verlopen sleutel: duidelijke melding zonder de sleutel");
     status = 200; const http = await tool({ ...env, SCOUT_URL: "http://scout.example" }, "scout_lezen", { actie: "wie" });
