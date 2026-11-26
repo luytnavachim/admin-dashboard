@@ -237,7 +237,30 @@ async function tabMetAdres(href) {   // staat dit adres al open? dan dat tabblad
   return r.code === 0 && r.out === "ok";
 }
 
-async function chrome(job) {
+// Schermafbeelding van het hoofdscherm (alles wat er staat, ook RDP/Citrix): screencapture, verkleinen met sips, afleveren bij de Worker.
+// Vraagt eenmalig Schermopname voor node in de systeeminstellingen; zonder die toestemming toont macOS alleen bureaublad en menubalk.
+async function scherm(job, key) {
+  const id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36), ruw = path.join(os.tmpdir(), "jarvis-scherm-" + id + ".jpg"), klein = ruw.replace(".jpg", "-k.jpg");
+  try {
+    const c = await run("screencapture", ["-x", "-t", "jpg", ruw], 10000);
+    if (c.code !== 0 || !fs.existsSync(ruw) || !fs.statSync(ruw).size) return { fout: "Schermafbeelding maken mislukt" + (c.err ? " (" + c.err.slice(0, 120) + ")" : "") + ". Zet aan: Systeeminstellingen > Privacy en beveiliging > Schermopname > node (of Terminal)." };
+    let buf = null, zijde = Number(job.breed) || 1440;
+    for (const [z, q] of [[zijde, 60], [Math.min(zijde, 1200), 45], [1000, 35]]) {   // kleiner en lager als hij te groot blijft
+      const s = await run("sips", ["-Z", String(z), "-s", "format", "jpeg", "-s", "formatOptions", String(q), ruw, "--out", klein], 10000);
+      if (s.code !== 0 || !fs.existsSync(klein)) return { fout: "Verkleinen van de schermafbeelding mislukt." };
+      buf = fs.readFileSync(klein); zijde = z;
+      if (buf.length <= 1000000) break;
+    }
+    if (buf.length > 1000000) return { fout: "De schermafbeelding blijft te groot om door te geven." };
+    const r = await fetch(WORKER + "/brug/scherm", { method: "POST", headers: { "x-brug-key": key, "Content-Type": "application/json" }, body: JSON.stringify({ id, mime: "image/jpeg", beeld: buf.toString("base64") }), signal: AbortSignal.timeout(15000) });
+    if (!r.ok) return { fout: "De Worker nam de schermafbeelding niet aan (" + r.status + ")." };
+    return { afgeleverd: id, breedte: zijde };
+  } catch (e) { return { fout: "Schermafbeelding doorgeven mislukt: " + String((e && e.message) || e).slice(0, 120) }; }
+  finally { for (const f of [ruw, klein]) { try { fs.unlinkSync(f); } catch {} } }
+}
+
+async function chrome(job, key) {
+  if (job.actie === "scherm") return scherm(job, key);
   if (job.actie === "app") return appOpen(String(job.naam || ""));
   if (job.actie === "typ" && String(job.veld || "") === "#outlook-antwoord") return outlookAntwoord(job.tekst);   // via 'typ' omdat de Worker daar lange tekst doorlaat
   if (job.actie === "outlook") return outlook(String(job.zoek || "").trim().slice(0, 120));
@@ -281,7 +304,7 @@ async function main() {
     }
     if (!d) { console.log("Er staat niets klaar."); process.exit(1); }
   } catch (e) { console.log("De Worker is niet bereikbaar: " + (e.message || e)); process.exit(1); }
-  if (d.job) { console.log(JSON.stringify(await chrome(d.job))); process.exit(0); }
+  if (d.job) { console.log(JSON.stringify(await chrome(d.job, key))); process.exit(0); }
   let u; try { u = new URL(d.url); } catch { u = null; }
   if (!u || !/^https?:$/.test(u.protocol)) { console.log("Dit adres wordt niet geopend."); process.exit(1); }
   const r = await run("open", ["-na", "Google Chrome", "--args", "--new-window", u.href]);
