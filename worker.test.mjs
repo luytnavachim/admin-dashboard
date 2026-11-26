@@ -1320,6 +1320,7 @@ await run("mcp: scout_lezen: sleutel in de header, alleen aantallen terug, nette
   const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
     if (status !== 200) return new Response(JSON.stringify({ sleutel: "verlopen" }), { status });
     if (u === "https://scout.example/api.php?action=sleutel-wie") return new Response(JSON.stringify({ ok: true, sleutel: true, naam: "Jarvis", niveau: "lezen", verlooptOp: "2027-11-24" }), { status: 200 });
+    if (u === "https://scout.example/api.php?club=Dubbel+FC") return new Response(JSON.stringify({ knvb_team: [{ id: "a", naam: "Sam de Vries", jaar: 2014, huidig: "O13-1" }, { id: "b", naam: "Sam de  Vries", jaar: 2014, huidig: "O13-2" }, { id: "b", naam: "Tim", jaar: 2015 }], knvb_periodes: JSON.stringify({ p1: { slots: [{ spelerId: "a" }, { spelerId: "z9" }], spelerIds: ["b", "x1"] } }) }), { status: 200 });
     if (u === "https://scout.example/api.php?club=Testclub+92") return new Response(JSON.stringify({ knvb_sync_rev: 41, knvb_team: JSON.stringify([{ naam: "Jan Geheim", huidig: "O12-1", club: "Testclub 92", jaar: 2015, metingen: [{}, {}] }, { naam: "Piet Geheim", team: "O12-1", club: "Testclub 92", geboortedatum: "2015-11-20" }, { naam: "Klaas Geheim", team: "O11-2", club: "Testclub 92", geboortedatum: "2016-01-05" }]), knvb_periodes: { p1: {}, p2: {} } }), { status: 200 });
     return new Response("nee", { status: 500 }); });
   try {
@@ -1335,6 +1336,14 @@ await run("mcp: scout_lezen: sleutel in de header, alleen aantallen terug, nette
     assert(sp.aantal === 2 && sp.spelers.map(x => x.naam).join() === "Jan Geheim,Piet Geheim" && sp.spelers[0].geboortejaar === 2015 && !("metingen" in sp.spelers[0]), "spelers: namen per team, zonder metingen", JSON.stringify(sp));
     const sj = (await tool(env, "scout_lezen", { actie: "spelers", club: "Testclub 92", geboortejaar: 2016 })).structuredContent;
     assert(sj.aantal === 1 && sj.spelers[0].naam === "Klaas Geheim" && seen.every(c => c.method === "GET"), "spelers: filter op geboortejaar, alleen GET");
+    const ds = (await tool(env, "scout_lezen", { actie: "speler", club: "Testclub 92", naam: "jan geheim" })).structuredContent;
+    assert(ds.inhoud && ds.inhoud.naam === "Jan Geheim" && ds.inhoud.metingen.length === 2, "speler: volledig dossier met metingen", JSON.stringify(ds));
+    const on = (await tool(env, "scout_lezen", { actie: "onderdeel", club: "Testclub 92", naam: "knvb_periodes" })).structuredContent;
+    assert(on.inhoud && on.inhoud.p1, "onderdeel: ruw opgehaald");
+    const ct = (await tool(env, "scout_lezen", { actie: "controle", club: "Testclub 92" })).structuredContent;
+    assert(ct.spelers === 3 && ct.zonder_id.length === 3 && Array.isArray(ct.dubbele_spelers), "controle draait", JSON.stringify(ct).slice(0, 300));
+    const cd = (await tool(env, "scout_lezen", { actie: "controle", club: "Dubbel FC" })).structuredContent;
+    assert(cd.dubbele_ids.length === 1 && cd.dubbele_spelers.length === 1 && cd.zonder_team.length === 1 && cd.verwijzingen_naar_onbekende_spelers.map(x => x.speler_id).sort().join() === "x1,z9", "controle vindt dubbele id's, dubbele spelers en losse verwijzingen", JSON.stringify(cd));
     status = 401; const f = await tool(env, "scout_lezen", { actie: "wie" });
     assert(f.isError && /verlopen/.test(f.content[0].text) && !/ksp_test/.test(f.content[0].text), "verlopen sleutel: duidelijke melding zonder de sleutel");
     status = 200; const http = await tool({ ...env, SCOUT_URL: "http://scout.example" }, "scout_lezen", { actie: "wie" });
