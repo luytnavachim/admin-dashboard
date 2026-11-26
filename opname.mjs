@@ -29,6 +29,9 @@ function voorgrond() {
   const [app = "", titel = ""] = String(r.stdout || "").replace(/\n$/, "").split("\t");
   return { app: app.slice(0, 80), titel: titel.slice(0, 200) };
 }
+// Wachtwoordbeheerders: geen schermbeeld en geen venstertitel, alleen 'verborgen' in de tijdlijn (keuze Micha, 26 november).
+const VERBORGEN = /^(strongbox|wachtwoorden|passwords|sleutelhangertoegang|keychain access|1password.*|bitwarden|keepassxc)$/i;
+const verborgen = app => VERBORGEN.test(String(app || "").trim());
 function beeld(map, nr) {
   // screencapture en sips mogen niet in ~/Documents schrijven (macOS-bescherming); node wel. Dus eerst in de tijdelijke map.
   const tmp = path.join(os.tmpdir(), `jarvis-opname-${process.pid}-${nr}`), ruw = tmp + "-ruw.jpg", klein = tmp + ".jpg", uit = path.join(map, `${String(nr).padStart(5, "0")}.jpg`);
@@ -53,8 +56,9 @@ async function lus(map) {
   let nr = 0;
   while (Date.now() < eind && !fs.existsSync(path.join(map, "stop"))) {
     nr++;
-    const v = voorgrond(), b = beeld(map, nr);
-    fs.appendFileSync(log, JSON.stringify({ t: new Date().toISOString(), ...v, beeld: b.naam || null, ...(b.fout ? { beeld_fout: b.fout } : {}) }) + "\n");
+    const v = voorgrond(), geheim = verborgen(v.app), b = geheim ? {} : beeld(map, nr);
+    if (geheim) v.titel = "";
+    fs.appendFileSync(log, JSON.stringify({ t: new Date().toISOString(), ...v, beeld: b.naam || null, ...(geheim ? { verborgen: true } : {}), ...(b.fout ? { beeld_fout: b.fout } : {}) }) + "\n");
     for (let i = 0; i < INTERVAL * 2 && !fs.existsSync(path.join(map, "stop")); i++) await wacht(500);
   }
   samenvatting(map);
@@ -77,7 +81,7 @@ function samenvatting(map) {
   const wissels = {};
   for (let i = 1; i < regels.length; i++) if (regels[i].app !== regels[i - 1].app) { const k = regels[i - 1].app + " → " + regels[i].app; wissels[k] = (wissels[k] || 0) + 1; }
   const s = { van: regels[0] && regels[0].t, tot: regels.length ? regels[regels.length - 1].t : null, momenten: regels.length, interval_sec: INTERVAL,
-    beelden: regels.filter(r => r.beeld).length, ...(regels.some(r => r.beeld_fout) ? { beeld_fout: regels.find(r => r.beeld_fout).beeld_fout } : {}),
+    beelden: regels.filter(r => r.beeld).length, verborgen: regels.filter(r => r.verborgen).length, ...(regels.some(r => r.beeld_fout) ? { beeld_fout: regels.find(r => r.beeld_fout).beeld_fout } : {}),
     per_programma: top(perApp, 15), per_venster: top(perVenster, 25),
     wissels: Object.entries(wissels).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([van_naar, keer]) => ({ van_naar, keer })) };
   fs.writeFileSync(path.join(map, "samenvatting.json"), JSON.stringify(s, null, 2));

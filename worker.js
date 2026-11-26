@@ -487,8 +487,8 @@ const MCP_TOOLS = [
   { name: "project_activiteit", description: "Wat er recent aan een project is gedaan volgens GitHub: laatste commits per tak, hoeveel wijzigingen acceptatie (develop) voorloopt op productie, en open pull requests. Alleen lezen. project is scout, team, jo11 of admin.",
     inputSchema: { type: "object", properties: { project: { type: "string" } }, required: ["project"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
-  { name: "administratie_overzicht", description: "Stand van de administratie uit Moneybird: openstaande inkoopfacturen (te betalen), openstaande verkoopfacturen (nog te ontvangen), onverwerkte banktransacties en nog te factureren uren. Alleen lezen.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  { name: "administratie_overzicht", description: "Stand van de administratie uit Moneybird: openstaande inkoopfacturen (te betalen), openstaande verkoopfacturen (nog te ontvangen), onverwerkte banktransacties en nog te factureren uren. Met jaar (bijv. 2025) alleen facturen, transacties en uren met een datum in dat jaar, om een boekjaar na te lopen. Alleen lezen.",
+    inputSchema: { type: "object", properties: { jaar: { type: "integer", minimum: 2000, maximum: 2100, description: "Optioneel boekjaar, bijv. 2025 of 2026." } }, additionalProperties: false },
     annotations: { readOnlyHint: true } },
   { name: "spraak_stemmen", description: "Lijst van stemmen waarmee Jarvis kan spreken (ElevenLabs). Alleen lezen.",
     inputSchema: { type: "object", properties: {}, additionalProperties: false },
@@ -1957,28 +1957,35 @@ function mcpInvoiceSection(list, openOf, numberOf, today, admin, kind) {
       nummer: numberOf(iv) || "", vervaldatum: iv.due_date || "", open, te_laat: !!(iv.due_date && iv.due_date < today),
       url: "https://moneybird.com/" + admin + "/" + kind + "/" + iv.id })) };
 }
-async function mcpAdministratie(_args, env) {
+async function mcpAdministratie(args, env) {
   const today = new Date().toISOString().slice(0, 10), admin = env.MONEYBIRD_ADMIN_ID;
+  let jaar = null;
+  if (args && args.jaar !== undefined && args.jaar !== null && String(args.jaar).trim() !== "") {
+    jaar = Number(args.jaar);
+    if (!Number.isInteger(jaar) || jaar < 2000 || jaar > 2100) throw new Error("jaar moet een jaartal zijn, bijv. 2025.");
+  }
+  const inJaar = d => jaar === null || String(d || "").slice(0, 4) === String(jaar);
+  const periode = jaar === null ? "" : `,period:${jaar}0101..${jaar}1231`;
   const paidOf = iv => (iv.payments || []).reduce((s, p) => s + (Number(p.price_base) || Number(p.price) || 0), 0);
   const section = async fn => { try { return await fn(); } catch (e) { return { fout: String(e.message || e) }; } };
   const [inkoop, verkoop, bank, uren] = await Promise.all([
     section(async () => mcpInvoiceSection(
-      (await mbPages(env, "documents/purchase_invoices.json?filter=" + encodeURIComponent("state:new|open|late"), 5)).filter(iv => iv.state !== "paid"),
+      (await mbPages(env, "documents/purchase_invoices.json?filter=" + encodeURIComponent("state:new|open|late"), 5)).filter(iv => iv.state !== "paid" && inJaar(iv.date)),
       iv => r2((Number(iv.total_price_incl_tax) || 0) - paidOf(iv)), iv => iv.reference, today, admin, "documents")),
     section(async () => mcpInvoiceSection(
-      await mbPages(env, "sales_invoices.json?filter=" + encodeURIComponent("state:open|late|reminded|pending_payment"), 5),
+      (await mbPages(env, "sales_invoices.json?filter=" + encodeURIComponent("state:open|late|reminded|pending_payment"), 5)).filter(iv => inJaar(iv.invoice_date || iv.date)),
       iv => r2(iv.total_unpaid != null ? Number(iv.total_unpaid) || 0 : (Number(iv.total_price_incl_tax) || 0) - paidOf(iv)), iv => iv.invoice_id, today, admin, "sales_invoices")),
     section(async () => {
-      const ids = await mbApi(env, "financial_mutations/synchronization.json?filter=" + encodeURIComponent("state:unprocessed"));
+      const ids = await mbApi(env, "financial_mutations/synchronization.json?filter=" + encodeURIComponent("state:unprocessed" + periode));
       return { onverwerkt: Array.isArray(ids) ? ids.length : 0 };
     }),
     section(async () => {
       const data = await mcpLoad(env); let h = 0, eur = 0;
-      for (const p of data.projects) for (const e of (p.entries || [])) if (!e.invoiced) { h += Number(e.hours) || 0; eur += (Number(e.hours) || 0) * (Number(e.rateAmount) || 0); }
+      for (const p of data.projects) for (const e of (p.entries || [])) if (!e.invoiced && inJaar(e.date)) { h += Number(e.hours) || 0; eur += (Number(e.hours) || 0) * (Number(e.rateAmount) || 0); }
       return { open_uren: r2(h), open_bedrag_excl_btw: r2(eur) };
     })
   ]);
-  return { peildatum: today, te_betalen: inkoop, te_ontvangen: verkoop, bank, te_factureren: uren };
+  return { peildatum: today, ...(jaar !== null ? { jaar } : {}), te_betalen: inkoop, te_ontvangen: verkoop, bank, te_factureren: uren };
 }
 
 async function mcpBoeken(args, env) {

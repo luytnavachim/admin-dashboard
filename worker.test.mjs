@@ -661,6 +661,39 @@ await run("mcp: administratie_overzicht leest Moneybird, fout per sectie", async
   } finally { restore(); }
 });
 
+await run("mcp: administratie_overzicht met jaarfilter", async () => {
+  const kv = fakeKv({ projects_v1: seed() });
+  const seen = [];
+  const restore = mockUpstream((c) => {
+    const u = String(c.url); seen.push(u);
+    if (u.includes("/documents/purchase_invoices.json")) return new Response(JSON.stringify([
+      { id: "d1", state: "open", reference: "INK-25", date: "2025-06-01", due_date: "2025-07-01", total_price_incl_tax: "100.00", payments: [] },
+      { id: "d2", state: "open", reference: "INK-26", date: "2026-02-01", due_date: "2999-01-01", total_price_incl_tax: "50.00", payments: [] }
+    ]), { status: 200 });
+    if (u.includes("/sales_invoices.json")) return new Response(JSON.stringify([
+      { id: "s1", state: "open", invoice_id: "2025-0100", invoice_date: "2025-12-30", total_unpaid: "300.00" },
+      { id: "s2", state: "open", invoice_id: "2026-0001", invoice_date: "2026-01-05", total_unpaid: "70.00" }
+    ]), { status: 200 });
+    if (u.includes("/financial_mutations/synchronization.json")) return new Response(JSON.stringify([{ id: "m1" }, { id: "m2" }]), { status: 200 });
+    return new Response("{}", { status: 404 });
+  });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, MONEYBIRD_TOKEN: "t", MONEYBIRD_ADMIN_ID: "1" };
+    const o = (await tool(env, "administratie_overzicht", { jaar: 2025 })).structuredContent;
+    assert(o.jaar === 2025 && o.te_betalen.aantal === 1 && o.te_betalen.facturen[0].nummer === "INK-25", "inkoop alleen 2025", JSON.stringify(o.te_betalen));
+    assert(o.te_ontvangen.aantal === 1 && o.te_ontvangen.totaal_open === 300, "verkoop alleen 2025", JSON.stringify(o.te_ontvangen));
+    assert(o.te_factureren.open_uren === 0, "uren van 2026 tellen niet mee in 2025");
+    const sync = seen.find(u => u.includes("synchronization"));
+    assert(decodeURIComponent(sync).includes("state:unprocessed,period:20250101..20251231"), "bankfilter met periode", sync);
+    const o26 = (await tool(env, "administratie_overzicht", { jaar: 2026 })).structuredContent;
+    assert(o26.te_betalen.aantal === 1 && o26.te_ontvangen.facturen[0].nummer === "2026-0001" && o26.te_factureren.open_uren === 2, "2026 werkt ook", JSON.stringify(o26));
+    const alles = (await tool(env, "administratie_overzicht", {})).structuredContent;
+    assert(alles.jaar === undefined && alles.te_betalen.aantal === 2 && alles.te_ontvangen.aantal === 2, "zonder jaar alles");
+    const fout = await tool(env, "administratie_overzicht", { jaar: 25 });
+    assert(fout.isError || /jaar/.test(JSON.stringify(fout)), "ongeldig jaar geweigerd", JSON.stringify(fout));
+  } finally { restore(); }
+});
+
 await run("mcp: uren_wijzigen met voorvertoning, PATCH naar Moneybird en bescherming tegen open tabblad", async () => {
   const s0 = JSON.parse(seed()); s0.projects[0].entries[0].mbTimeEntryId = "te1";
   const kv = fakeKv({ projects_v1: JSON.stringify(s0) });
