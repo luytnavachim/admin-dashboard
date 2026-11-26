@@ -1089,10 +1089,12 @@ await run("mcp: schermafbeelding van de Mac (chrome-actie scherm): afleveren met
     env.BRUG = { fetch: async () => { // de Mac: haalt de opdracht op en levert het beeld af
       gezien = (await (await worker.fetch(new Request("https://w.workers.dev/brug/open-url", { method: "POST", headers: { "x-brug-key": bk } }), env)).json()).job;
       const r = await lever({ id: "abc123xyz", mime: "image/jpeg", beeld });
-      return new Response(JSON.stringify({ gelukt: true, uitvoer: "x\n" + JSON.stringify(r.ok ? { afgeleverd: "abc123xyz", breedte: 1440 } : { fout: "nee" }) }), { status: 200 }); } };
+      return new Response(JSON.stringify({ gelukt: true, uitvoer: "x\n" + JSON.stringify(r.ok ? { afgeleverd: "abc123xyz", breedte: 1440, kb: 21 } : { fout: "nee" }) }), { status: 200 }); } };
     const f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm","breed":99999}' }), o = JSON.parse(f.content[0].text);
     assert(gezien && gezien.actie === "scherm" && gezien.breed === 2000, "breedte begrensd", JSON.stringify(gezien));
-    assert(!f.isError && !f.structuredContent && o.beeld === beeld && o.mime === "image/jpeg" && o.breedte === 1440 && /geen opdracht/.test(o.let_op), "beeld komt terug, niet dubbel", f.content[0].text.slice(0, 200));
+    assert(!f.isError && !f.structuredContent && o.beeld === beeld && o.mime === "image/jpeg" && o.breedte === 1440 && o.kb === 21 && /geen opdracht/.test(o.let_op), "beeld komt terug, niet dubbel", f.content[0].text.slice(0, 200));
+    const bron = (await import("node:fs")).readFileSync(new URL("./open-url.mjs", import.meta.url), "utf8"), doel = Number((bron.match(/const SCHERM_DOEL = (\d+);/) || [])[1]);
+    assert(doel > 0 && Math.ceil(doel / 3) * 4 < 32000, "open-url.mjs verkleint tot onder 32 kB base64", String(doel));
     assert((await lever({ id: "abc123xyz", mime: "image/jpeg", beeld }, "x".repeat(32))).status === 404, "verkeerde sleutel geweigerd");
     assert((await lever({ id: "abc123xyz", mime: "image/png", beeld })).status === 400 && (await lever({ id: "../x", mime: "image/jpeg", beeld })).status === 400, "alleen geldige jpeg en id");
     assert((await lever({ id: "abc123xyz", mime: "image/jpeg", beeld: "A".repeat(1500004) })).status === 413, "te groot geweigerd");
@@ -1329,6 +1331,10 @@ await run("mcp: scout_lezen: sleutel in de header, alleen aantallen terug, nette
     const o = await tool(env, "scout_lezen", { actie: "overzicht", club: "Testclub 92" }), d = o.structuredContent;
     assert(d.spelers === 3 && d.per_team["O12-1"] === 2 && d.per_geboortejaar["2015"] === 2 && d.metingen_totaal === 2 && d.spelers_met_meting === 1 && d.stand === "41", "overzicht telt per team en geboortejaar", JSON.stringify(d));
     assert(!/Geheim|ksp_test/.test(o.content[0].text), "geen namen en geen sleutel in het antwoord");
+    const sp = (await tool(env, "scout_lezen", { actie: "spelers", club: "Testclub 92", team: "o12-1" })).structuredContent;
+    assert(sp.aantal === 2 && sp.spelers.map(x => x.naam).join() === "Jan Geheim,Piet Geheim" && sp.spelers[0].geboortejaar === 2015 && !("metingen" in sp.spelers[0]), "spelers: namen per team, zonder metingen", JSON.stringify(sp));
+    const sj = (await tool(env, "scout_lezen", { actie: "spelers", club: "Testclub 92", geboortejaar: 2016 })).structuredContent;
+    assert(sj.aantal === 1 && sj.spelers[0].naam === "Klaas Geheim" && seen.every(c => c.method === "GET"), "spelers: filter op geboortejaar, alleen GET");
     status = 401; const f = await tool(env, "scout_lezen", { actie: "wie" });
     assert(f.isError && /verlopen/.test(f.content[0].text) && !/ksp_test/.test(f.content[0].text), "verlopen sleutel: duidelijke melding zonder de sleutel");
     status = 200; const http = await tool({ ...env, SCOUT_URL: "http://scout.example" }, "scout_lezen", { actie: "wie" });
