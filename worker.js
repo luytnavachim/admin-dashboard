@@ -486,8 +486,8 @@ const MCP_TOOLS = [
       datum: { type: "string", description: "JJJJ-MM-DD" }, bevestigd: { type: "boolean" }
     }, required: ["boeking_id"], additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
-  { name: "project_activiteit", description: "Wat er recent aan een project is gedaan volgens GitHub: laatste commits per tak, hoeveel wijzigingen acceptatie (develop) voorloopt op productie, en open pull requests. Met bestand (pad in de repo, bijv. docs/JARVIS-DEMO.md) de inhoud van dat bestand, van tak (standaard develop als die bestaat). Alleen lezen. project is scout, team, jo11 of admin.",
-    inputSchema: { type: "object", properties: { project: { type: "string" }, bestand: { type: "string" }, tak: { type: "string" } }, required: ["project"], additionalProperties: false },
+  { name: "project_activiteit", description: "Wat er recent aan een project is gedaan volgens GitHub: laatste commits per tak, hoeveel wijzigingen acceptatie (develop) voorloopt op productie, en open pull requests. Met bestand (pad in de repo, bijv. docs/JARVIS-DEMO.md) de inhoud van dat bestand; met map (pad, \"\" = hoofdmap) de bestanden en submappen daarin; met zoek (deel van een bestandsnaam of pad) alle bestanden in de repo die erop lijken. Steeds van tak (standaard develop als die bestaat). Alleen lezen. project is scout, team, jo11 of admin.",
+    inputSchema: { type: "object", properties: { project: { type: "string" }, bestand: { type: "string" }, map: { type: "string" }, zoek: { type: "string" }, tak: { type: "string" } }, required: ["project"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
   { name: "administratie_overzicht", description: "Stand van de administratie uit Moneybird: openstaande inkoopfacturen (te betalen), openstaande verkoopfacturen (nog te ontvangen), onverwerkte banktransacties en nog te factureren uren. Met jaar (bijv. 2025) alleen facturen, transacties en uren met een datum in dat jaar, om een boekjaar na te lopen. Alleen lezen.",
     inputSchema: { type: "object", properties: { jaar: { type: "integer", minimum: 2000, maximum: 2100, description: "Optioneel boekjaar, bijv. 2025 of 2026." } }, additionalProperties: false },
@@ -2002,12 +2002,34 @@ async function ghApi(env, path) {
 }
 // Eén tekstbestand uit de repo lezen (bijv. het demoscript), zonder dat de map op de Mac bijgewerkt hoeft te zijn.
 const GH_BESTAND_MAX = 60000;
-async function ghBestand(env, key, repo, args) {
-  const pad = String(args.bestand || "").trim().replace(/^\/+/, "");
-  if (!/^[\w.\-]+(\/[\w.\-]+)*$/.test(pad) || pad.split("/").some(x => x === ".." || x === ".")) throw new Error("Geef een pad in de repo, bijvoorbeeld docs/JARVIS-DEMO.md.");
+async function ghTak(env, repo, args) {
   let tak = String(args.tak || "").trim();
   if (tak && !/^[\w.\-\/]{1,100}$/.test(tak)) throw new Error("Ongeldige taknaam.");
   if (!tak) { const names = (await ghApi(env, "/repos/" + repo + "/branches?per_page=50")).map(b => b.name); tak = names.includes("develop") ? "develop" : (await ghApi(env, "/repos/" + repo)).default_branch || "main"; }
+  return tak;
+}
+const ghPadOk = pad => /^[\w.\-]+(\/[\w.\-]+)*$/.test(pad) && !pad.split("/").some(x => x === ".." || x === ".");
+// Inhoud van een map, of zoeken op bestandsnaam over de hele boom (git trees, recursief).
+const GH_ZOEK_MAX = 200;
+async function ghMap(env, key, repo, args) {
+  const tak = await ghTak(env, repo, args);
+  const zoek = String(args.zoek || "").trim().toLowerCase();
+  if (zoek) {
+    const boom = await ghApi(env, "/repos/" + repo + "/git/trees/" + encodeURIComponent(tak) + "?recursive=1");
+    const hits = (boom.tree || []).filter(x => x.type === "blob" && x.path.toLowerCase().includes(zoek) && !/(^|\/)(node_modules|min)\//.test(x.path));
+    return { project: key, repo, tak, zoek, aantal: hits.length, bestanden: hits.slice(0, GH_ZOEK_MAX).map(x => ({ pad: x.path, grootte: x.size })),
+      ...(hits.length > GH_ZOEK_MAX || boom.truncated ? { ingekort: true } : {}) };
+  }
+  const pad = String(args.map || "").trim().replace(/^\/+|\/+$/g, "");
+  if (pad && !ghPadOk(pad)) throw new Error("Geef een map in de repo, bijvoorbeeld docs of leeg voor de hoofdmap.");
+  const l = await ghApi(env, "/repos/" + repo + "/contents/" + pad.split("/").filter(Boolean).map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(tak));
+  if (!Array.isArray(l)) throw new Error("Dit pad is een bestand, geen map: gebruik bestand.");
+  return { project: key, repo, tak, map: pad || ".", items: l.map(x => ({ naam: x.name, soort: x.type === "dir" ? "map" : "bestand", ...(x.type === "dir" ? {} : { grootte: x.size }) })) };
+}
+async function ghBestand(env, key, repo, args) {
+  const pad = String(args.bestand || "").trim().replace(/^\/+/, "");
+  if (!ghPadOk(pad)) throw new Error("Geef een pad in de repo, bijvoorbeeld docs/JARVIS-DEMO.md.");
+  const tak = await ghTak(env, repo, args);
   const f = await ghApi(env, "/repos/" + repo + "/contents/" + pad.split("/").map(encodeURIComponent).join("/") + "?ref=" + encodeURIComponent(tak));
   if (Array.isArray(f) || f.type !== "file") throw new Error("Dit pad is geen bestand.");
   if (f.encoding !== "base64" || typeof f.content !== "string") throw new Error("Dit bestand is te groot om via GitHub te lezen.");
@@ -2020,6 +2042,7 @@ async function mcpActiviteit(args, env) {
   const key = String(args.project || "").toLowerCase().trim(), repo = MCP_REPOS[key];
   if (!repo) throw new Error("Onbekend project. Kies uit: " + Object.keys(MCP_REPOS).join(", ") + ".");
   if (args.bestand) return ghBestand(env, key, repo, args);
+  if (args.map !== undefined || args.zoek) return ghMap(env, key, repo, args);
   const info = await ghApi(env, "/repos/" + repo);
   const prod = info.default_branch || "main";
   const names = (await ghApi(env, "/repos/" + repo + "/branches?per_page=50")).map(b => b.name);

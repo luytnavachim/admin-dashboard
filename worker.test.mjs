@@ -1102,6 +1102,30 @@ await run("mcp: project_activiteit met bestand leest één bestand van GitHub (s
     for (const bad of ["../geheim", "docs/../x", "a b"]) { const f = await tool(env, "project_activiteit", { project: "scout", bestand: bad }); assert(f.isError, "geweigerd pad: " + bad); }
   } finally { globalThis.fetch = orig; }
 });
+await run("mcp: project_activiteit met map en zoek: inhoud van een map en bestanden op naam", async () => {
+  const orig = globalThis.fetch, urls = [];
+  globalThis.fetch = async (u) => { u = String(u); urls.push(u);
+    if (u.includes("/branches")) return new Response(JSON.stringify([{ name: "main" }, { name: "develop" }]), { status: 200 });
+    if (u.endsWith("/contents/?ref=develop")) return new Response(JSON.stringify([{ name: "docs", type: "dir" }, { name: "api.php", type: "file", size: 900 }]), { status: 200 });
+    if (u.includes("/contents/docs?ref=feat")) return new Response(JSON.stringify([{ name: "DEPLOY.md", type: "file", size: 40 }]), { status: 200 });
+    if (u.includes("/contents/api.php?ref=develop")) return new Response(JSON.stringify({ type: "file", size: 900 }), { status: 200 });
+    if (u.includes("/git/trees/develop?recursive=1")) return new Response(JSON.stringify({ tree: [{ type: "blob", path: "keeper.js", size: 5 }, { type: "blob", path: "scripts/test-keeper-gewicht.cjs", size: 6 }, { type: "blob", path: "min/keeper.js", size: 2 }, { type: "tree", path: "keeper" }, { type: "blob", path: "portal.js", size: 9 }] }), { status: 200 });
+    return new Response("{}", { status: 404 }); };
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", GITHUB_TOKEN: "t" };
+    const r = (await tool(env, "project_activiteit", { project: "scout", map: "" })).structuredContent;
+    assert(r.tak === "develop" && r.map === "." && r.items.length === 2 && r.items[0].soort === "map" && r.items[1].grootte === 900, "hoofdmap van develop", JSON.stringify(r));
+    const d = (await tool(env, "project_activiteit", { project: "scout", map: "docs/", tak: "feat" })).structuredContent;
+    assert(d.tak === "feat" && d.items[0].naam === "DEPLOY.md", "submap van een gekozen tak", JSON.stringify(d));
+    const z = (await tool(env, "project_activiteit", { project: "scout", zoek: "Keeper" })).structuredContent;
+    assert(z.aantal === 2 && z.bestanden.map(x => x.pad).join() === "keeper.js,scripts/test-keeper-gewicht.cjs", "zoeken op naam, zonder min/ en mappen", JSON.stringify(z));
+    assert((await tool(env, "project_activiteit", { project: "scout", map: "api.php" })).isError, "bestand als map geweigerd");
+    for (const bad of ["../x", "docs/../x"]) assert((await tool(env, "project_activiteit", { project: "scout", map: bad })).isError, "geweigerde map: " + bad);
+    const tools = (await (await mcpCall(env, { jsonrpc: "2.0", id: 1, method: "tools/list" })).json()).result.tools;
+    const pa = tools.find(t => t.name === "project_activiteit");
+    assert(JSON.stringify(pa).length < 1024, "omschrijving onder 1 KB", JSON.stringify(pa).length);
+  } finally { globalThis.fetch = orig; }
+});
 await run("mcp: chrome op de Mac: opdracht klaarzetten, antwoord van het script doorgeven, vorm gecontroleerd", async () => {
   const kv = fakeKv(), bk = "b".repeat(32); let uitvoer = "";
   const BRUG = { fetch: async () => new Response(JSON.stringify({ opdracht: "open-webadres", gelukt: true, uitvoer }), { status: 200 }) };
