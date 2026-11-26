@@ -1215,6 +1215,29 @@ async function mcpNetwerkWifi(args, env) {
   if (args.bevestigd !== true) return { voorvertoning: true, actie, wifi: w.name, gast: !!w.is_guest, uitleg: aan ? "Dit wifi-netwerk gaat weer uitzenden." : "Alles wat op dit wifi-netwerk zit verliest de verbinding. Zit je eigen apparaat erop, dan ben je Jarvis ook kwijt.", let_op: LET_OP };
   await unifi(env, "PUT", U + "rest/wlanconf/" + w._id, { enabled: aan }); return { uitgevoerd: true, wifi: w.name, aan };
 }
+// Leesbaar overzicht van een zone-firewallregel voor de pop-up: zonenamen en apparaatnamen in plaats van id's. Opzoeken is best effort; lukt het niet, dan blijven de id's staan.
+const FW_ACTIE = { BLOCK: "blokkeren", ALLOW: "toestaan", REJECT: "weigeren" };
+async function fwOverzicht(env, p) {
+  const zones = {}, namen = {}, netten = {};
+  const lees = async (pad, f) => { try { const r = await unifiCloud(env, "GET", pad); if (r.status === 200) uRows(r.json).forEach(f); } catch { /* id's blijven staan */ } };
+  await Promise.all([
+    lees("v2/api/site/default/firewall/zone", z => { if (z._id) zones[z._id] = z.name || z._id; }),
+    lees(U + "rest/user", c => { const n = c.name || c.hostname; if (!n) return; if (c.mac) namen[String(c.mac).toLowerCase()] = n; [c.fixed_ip, c.last_ip, c.ip].filter(Boolean).forEach(ip => { namen[ip] = namen[ip] || n; }); }),
+    lees(U + "stat/sta", c => { const n = c.name || c.hostname; if (n && c.ip) namen[c.ip] = n; if (n && c.mac) namen[String(c.mac).toLowerCase()] = namen[String(c.mac).toLowerCase()] || n; }),
+    lees(U + "rest/networkconf", n => { if (n._id) netten[n._id] = n.name || n._id; }),
+  ]);
+  const met = (x, n) => n && n !== x ? n + " (" + x + ")" : x;
+  const kant = e => { e = e || {}; const d = [];
+    (e.ips || []).forEach(ip => d.push(met(ip, namen[ip])));
+    (e.client_macs || []).forEach(m => d.push(met(m, namen[String(m).toLowerCase()])));
+    (e.network_ids || []).forEach(id => d.push("netwerk " + (netten[id] || id)));
+    (e.web_domains || []).forEach(w => d.push(w));
+    if (!d.length) d.push(e.matching_target && e.matching_target !== "ANY" ? String(e.matching_target).toLowerCase() : "alles");
+    return { wat: d.join(", "), zone: e.zone_id ? (zones[e.zone_id] || e.zone_id) : null, poort: e.port || (e.port_matching_type && e.port_matching_type !== "ANY" ? e.port_matching_type : null) }; };
+  const b = kant(p.source), d = kant(p.destination);
+  return { naam: p.name || null, actie: FW_ACTIE[String(p.action || "").toUpperCase()] || p.action || null, aan: p.enabled !== false,
+    bron: b.wat, bestemming: d.wat, van_zone: b.zone, naar_zone: d.zone, poort: d.poort || b.poort || "alle", protocol: p.protocol && p.protocol !== "all" ? p.protocol : "alle" };
+}
 async function mcpNetwerkFirewall(args, env) {
   const soort = String(args.soort || "").toLowerCase(), actie = String(args.actie || "").toLowerCase();
   let c = args.config; if (typeof c === "string") { try { c = JSON.parse(c); } catch { throw new Error("config is geen geldige JSON."); } }
@@ -1242,17 +1265,19 @@ async function mcpNetwerkFirewall(args, env) {
     if (r0.status !== 200) throw new Error("Deze console gebruikt geen zone-firewall (status " + r0.status + "). Firewallregels wijzigen kan dan alleen in UniFi zelf.");
     const lijst = uRows(r0.json), kies = () => { const q = String(args.regel || "").toLowerCase().trim(), t = lijst.filter(x => x._id === args.regel || String(x.name || "").toLowerCase() === q); if (t.length !== 1) throw new Error("Geef de exacte naam of het id van de firewallregel (vraag eerst het overzicht 'firewall' op)."); return t[0]; };
     const toon = p => ({ id: p._id || null, naam: p.name, aan: p.enabled !== false, actie: p.action, vooraf_ingesteld: !!p.predefined });
-    if (actie === "lees") return { regel: kies() };
+    const ov = p => fwOverzicht(env, p);
+    if (actie === "lees") { const p = kies(); return { regel: p, overzicht: await ov(p) }; }
     if (actie === "toevoegen") {
       if (!c || typeof c !== "object" || Array.isArray(c) || !c.name || !c.action || !c.source || !c.destination) throw new Error("Geef config als volledige regel met name, action, source en destination. Lees eerst een bestaande regel (actie lees) en gebruik die als voorbeeld.");
       if (JSON.stringify(c).length > 8000) throw new Error("De regel is te groot.");
       const nieuw = { ...c, enabled: c.enabled !== false }; delete nieuw._id; delete nieuw.predefined; delete nieuw.index;
-      if (args.bevestigd !== true) return { voorvertoning: true, soort, actie, regel: nieuw, uitleg: "Een verkeerde firewallregel kan verkeer blokkeren dat je nodig hebt, of juist iets openzetten. Controleer bron en bestemming.", let_op: LET_OP };
-      const r = await unifi(env, "POST", P, nieuw); return { toegevoegd: true, regel: toon((r && (r.data || r)) || nieuw) };
+      if (args.bevestigd !== true) return { voorvertoning: true, soort, actie, regel: nieuw, overzicht: await ov(nieuw), uitleg: "Een verkeerde firewallregel kan verkeer blokkeren dat je nodig hebt, of juist iets openzetten. Controleer bron en bestemming.", let_op: LET_OP };
+      const r = await unifi(env, "POST", P, nieuw), terug = (r && !Array.isArray(r) && r.source ? r : uRows(r)[0]) || null, echt = terug && terug.source ? { ...nieuw, ...terug } : nieuw;
+      return { toegevoegd: true, regel: toon(echt), overzicht: await ov(echt) };
     }
     const p = kies(); if (p.predefined) throw new Error("Dit is een vooraf ingestelde regel van UniFi; die kan Jarvis niet wijzigen.");
-    if (actie === "aan" || actie === "uit") { const aan = actie === "aan"; if ((p.enabled !== false) === aan) return { ongewijzigd: true, regel: toon(p) }; if (args.bevestigd !== true) return { voorvertoning: true, soort, actie, regel: toon(p), let_op: LET_OP }; await unifi(env, "PUT", P + "/" + p._id, { ...p, enabled: aan }); return { uitgevoerd: true, regel: toon({ ...p, enabled: aan }) }; }
-    if (actie === "verwijderen") { if (args.bevestigd !== true) return { voorvertoning: true, soort, actie, regel: p, let_op: LET_OP }; await unifi(env, "DELETE", P + "/" + p._id); return { verwijderd: true, regel: toon(p) }; }
+    if (actie === "aan" || actie === "uit") { const aan = actie === "aan", na = { ...p, enabled: aan }; if ((p.enabled !== false) === aan) return { ongewijzigd: true, regel: toon(p), overzicht: await ov(p) }; if (args.bevestigd !== true) return { voorvertoning: true, soort, actie, regel: toon(p), overzicht: await ov(na), let_op: LET_OP }; await unifi(env, "PUT", P + "/" + p._id, na); return { uitgevoerd: true, regel: toon(na), overzicht: await ov(na) }; }
+    if (actie === "verwijderen") { if (args.bevestigd !== true) return { voorvertoning: true, soort, actie, regel: p, overzicht: await ov(p), let_op: LET_OP }; await unifi(env, "DELETE", P + "/" + p._id); return { verwijderd: true, regel: toon(p), overzicht: await ov(p) }; }
     throw new Error("Kies een actie: lees, toevoegen, aan, uit of verwijderen.");
   }
   throw new Error("Geef soort: doorsturen (poorten doorsturen) of regel (firewallregel).");

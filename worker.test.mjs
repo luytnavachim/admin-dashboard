@@ -1286,6 +1286,37 @@ await run("mcp: netwerk: overzicht, blokkeren, PoE en doorsturen met voorvertoni
   } finally { restore(); }
 });
 
+await run("mcp: netwerk_firewall regel: overzicht met zonenamen en apparaatnaam in voorvertoning en na doorvoeren", async () => {
+  const seen = [];
+  const regel = { _id: "fw1", name: "NAS1 geen internet", action: "BLOCK", enabled: true, protocol: "all", source: { zone_id: "zInt", matching_target: "IP", ips: ["192.168.18.61"] }, destination: { zone_id: "zExt", matching_target: "ANY" } };
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (!u.startsWith("https://api.ui.com/v1/connector/consoles/console1/proxy/network/")) return new Response("nee", { status: 500 });
+    const p = u.split("/proxy/network/")[1];
+    if (p === "v2/api/site/default/firewall-policies") return new Response(JSON.stringify(c.method === "POST" ? { ...JSON.parse(c.body), _id: "fw2" } : [regel]), { status: 200 });
+    if (p === "v2/api/site/default/firewall-policies/fw1") return new Response("{}", { status: 200 });
+    if (p === "v2/api/site/default/firewall/zone") return new Response(JSON.stringify([{ _id: "zInt", name: "Intern" }, { _id: "zExt", name: "Extern" }]), { status: 200 });
+    if (p === "api/s/default/rest/user") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [{ name: "NAS1", mac: "aa:aa:aa:aa:aa:01", fixed_ip: "192.168.18.61" }] }), { status: 200 });
+    if (p === "api/s/default/stat/sta" || p === "api/s/default/rest/networkconf") return new Response(JSON.stringify({ meta: { rc: "ok" }, data: [] }), { status: 200 });
+    return new Response("nee", { status: 404 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), UNIFI_KEY: "sleutel", UNIFI_CONSOLE_ID: "console1" };
+    const pv = (await tool(env, "netwerk_firewall", { soort: "regel", actie: "toevoegen", config: { ...regel, _id: undefined, name: "NAS2 geen internet" } })).structuredContent;
+    assert(pv.voorvertoning && pv.overzicht.van_zone === "Intern" && pv.overzicht.naar_zone === "Extern" && pv.overzicht.bron === "NAS1 (192.168.18.61)" && pv.overzicht.actie === "blokkeren" && pv.overzicht.bestemming === "alles" && pv.overzicht.poort === "alle", "voorvertoning: leesbaar overzicht", JSON.stringify(pv.overzicht));
+    assert(!seen.some(c => c.method === "POST"), "voorvertoning: niets aangemaakt");
+    const ok = (await tool(env, "netwerk_firewall", { soort: "regel", actie: "toevoegen", config: { ...regel, _id: undefined, name: "NAS2 geen internet" }, bevestigd: true })).structuredContent;
+    assert(ok.toegevoegd && ok.overzicht.naam === "NAS2 geen internet" && ok.overzicht.naar_zone === "Extern" && ok.overzicht.aan === true, "na toevoegen: overzicht met bron, zones en aan", JSON.stringify(ok));
+    const uit = (await tool(env, "netwerk_firewall", { soort: "regel", actie: "uit", regel: "NAS1 geen internet", bevestigd: true })).structuredContent;
+    assert(uit.uitgevoerd && uit.overzicht.aan === false && uit.overzicht.van_zone === "Intern", "na uitzetten: overzicht", JSON.stringify(uit));
+  } finally { restore(); }
+  const restore2 = mockUpstream((c) => { const p = String(c.url).split("/proxy/network/")[1] || "";
+    if (p === "v2/api/site/default/firewall-policies") return new Response(JSON.stringify([regel]), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const l = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), UNIFI_KEY: "sleutel", UNIFI_CONSOLE_ID: "console1" }, "netwerk_firewall", { soort: "regel", actie: "lees", regel: "fw1" })).structuredContent;
+    assert(l.overzicht.van_zone === "zInt" && l.overzicht.bron === "192.168.18.61", "opzoeken mislukt: id's blijven staan", JSON.stringify(l));
+  } finally { restore2(); }
+});
+
 await run("mcp: huis_systeem integratie_toevoegen: voorvertoning, één aanmaak, geen inloggegevens, nette fout", async () => {
   const seen = []; let n = 0;
   const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
