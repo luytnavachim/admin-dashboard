@@ -30,12 +30,15 @@ function voorgrond() {
   return { app: app.slice(0, 80), titel: titel.slice(0, 200) };
 }
 function beeld(map, nr) {
-  const ruw = path.join(map, `.ruw-${nr}.jpg`), uit = path.join(map, `${String(nr).padStart(5, "0")}.jpg`);
+  // screencapture en sips mogen niet in ~/Documents schrijven (macOS-bescherming); node wel. Dus eerst in de tijdelijke map.
+  const tmp = path.join(os.tmpdir(), `jarvis-opname-${process.pid}-${nr}`), ruw = tmp + "-ruw.jpg", klein = tmp + ".jpg", uit = path.join(map, `${String(nr).padStart(5, "0")}.jpg`);
   const c = spawnSync("/usr/sbin/screencapture", ["-x", "-t", "jpg", ruw], { timeout: 10000, encoding: "utf8" });
   if (c.status !== 0 || !fs.existsSync(ruw)) return { fout: String(c.stderr || (c.error && c.error.message) || ("code " + c.status)).trim().slice(0, 160) };
-  spawnSync("/usr/bin/sips", ["-Z", "1600", "-s", "format", "jpeg", "-s", "formatOptions", "45", ruw, "--out", uit], { timeout: 10000 });
-  try { fs.unlinkSync(ruw); } catch {}
-  return fs.existsSync(uit) ? { naam: path.basename(uit) } : { fout: "verkleinen mislukt" };
+  spawnSync("/usr/bin/sips", ["-Z", "1600", "-s", "format", "jpeg", "-s", "formatOptions", "45", ruw, "--out", klein], { timeout: 10000 });
+  let fout = null;
+  try { fs.copyFileSync(fs.existsSync(klein) ? klein : ruw, uit); } catch (e) { fout = "opslaan mislukt: " + String(e.message).slice(0, 120); }
+  for (const f of [ruw, klein]) { try { fs.unlinkSync(f); } catch {} }
+  return fout ? { fout } : { naam: path.basename(uit) };
 }
 
 // De opname draait als eigen launchd-taak (launchctl submit), net als de brug: alleen dan rekent macOS de schermopname
