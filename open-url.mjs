@@ -237,6 +237,9 @@ async function tabMetAdres(href) {   // staat dit adres al open? dan dat tabblad
   return r.code === 0 && r.out === "ok";
 }
 
+// Doel: hooguit 22 kB JPEG (base64 ruim 29 kB), zodat het beeld ook door een doorgifte met 32 kB-grens past. Lukt dat niet, dan gaat de kleinste versie mee.
+const SCHERM_DOEL = 22000;
+const SCHERM_STAPPEN = (z) => [[z, 50], [Math.min(z, 1200), 40], [1000, 32], [900, 26], [800, 22], [700, 18], [600, 15]];
 // Schermafbeelding van het hoofdscherm (alles wat er staat, ook RDP/Citrix): screencapture, verkleinen met sips, afleveren bij de Worker.
 // Vraagt eenmalig Schermopname voor node in de systeeminstellingen; zonder die toestemming toont macOS alleen bureaublad en menubalk.
 async function scherm(job, key) {
@@ -246,16 +249,16 @@ async function scherm(job, key) {
     if (/ENOENT/.test(c.err)) return { fout: "Het programma screencapture is niet gevonden op de Mac (/usr/sbin/screencapture)." };
     if (c.code !== 0 || !fs.existsSync(ruw) || !fs.statSync(ruw).size) return { fout: "Schermafbeelding maken mislukt" + (c.err ? " (" + c.err.slice(0, 120) + ")" : "") + ". Zet aan: Systeeminstellingen > Privacy en beveiliging > Schermopname > node (of Terminal)." };
     let buf = null, zijde = Number(job.breed) || 1440;
-    for (const [z, q] of [[zijde, 60], [Math.min(zijde, 1200), 45], [1000, 35]]) {   // kleiner en lager als hij te groot blijft
+    for (const [z, q] of SCHERM_STAPPEN(zijde)) {   // steeds kleiner en lager tot hij onder SCHERM_DOEL zit
       const s = await run("/usr/bin/sips", ["-Z", String(z), "-s", "format", "jpeg", "-s", "formatOptions", String(q), ruw, "--out", klein], 10000);
       if (s.code !== 0 || !fs.existsSync(klein)) return { fout: "Verkleinen van de schermafbeelding mislukt." };
       buf = fs.readFileSync(klein); zijde = z;
-      if (buf.length <= 1000000) break;
+      if (buf.length <= SCHERM_DOEL) break;
     }
-    if (buf.length > 1000000) return { fout: "De schermafbeelding blijft te groot om door te geven." };
+    if (buf.length > 1000000) return { fout: "De schermafbeelding blijft te groot om door te geven (" + Math.round(buf.length / 1024) + " kB)." };
     const r = await fetch(WORKER + "/brug/scherm", { method: "POST", headers: { "x-brug-key": key, "Content-Type": "application/json" }, body: JSON.stringify({ id, mime: "image/jpeg", beeld: buf.toString("base64") }), signal: AbortSignal.timeout(15000) });
     if (!r.ok) return { fout: "De Worker nam de schermafbeelding niet aan (" + r.status + ")." };
-    return { afgeleverd: id, breedte: zijde };
+    return { afgeleverd: id, breedte: zijde, kb: Math.round(buf.length / 1024) };
   } catch (e) { return { fout: "Schermafbeelding doorgeven mislukt: " + String((e && e.message) || e).slice(0, 120) }; }
   finally { for (const f of [ruw, klein]) { try { fs.unlinkSync(f); } catch {} } }
 }

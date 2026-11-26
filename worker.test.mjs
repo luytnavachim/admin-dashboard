@@ -1089,10 +1089,12 @@ await run("mcp: schermafbeelding van de Mac (chrome-actie scherm): afleveren met
     env.BRUG = { fetch: async () => { // de Mac: haalt de opdracht op en levert het beeld af
       gezien = (await (await worker.fetch(new Request("https://w.workers.dev/brug/open-url", { method: "POST", headers: { "x-brug-key": bk } }), env)).json()).job;
       const r = await lever({ id: "abc123xyz", mime: "image/jpeg", beeld });
-      return new Response(JSON.stringify({ gelukt: true, uitvoer: "x\n" + JSON.stringify(r.ok ? { afgeleverd: "abc123xyz", breedte: 1440 } : { fout: "nee" }) }), { status: 200 }); } };
+      return new Response(JSON.stringify({ gelukt: true, uitvoer: "x\n" + JSON.stringify(r.ok ? { afgeleverd: "abc123xyz", breedte: 1440, kb: 21 } : { fout: "nee" }) }), { status: 200 }); } };
     const f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm","breed":99999}' }), o = JSON.parse(f.content[0].text);
     assert(gezien && gezien.actie === "scherm" && gezien.breed === 2000, "breedte begrensd", JSON.stringify(gezien));
-    assert(!f.isError && !f.structuredContent && o.beeld === beeld && o.mime === "image/jpeg" && o.breedte === 1440 && /geen opdracht/.test(o.let_op), "beeld komt terug, niet dubbel", f.content[0].text.slice(0, 200));
+    assert(!f.isError && !f.structuredContent && o.beeld === beeld && o.mime === "image/jpeg" && o.breedte === 1440 && o.kb === 21 && /geen opdracht/.test(o.let_op), "beeld komt terug, niet dubbel", f.content[0].text.slice(0, 200));
+    const bron = (await import("node:fs")).readFileSync(new URL("./open-url.mjs", import.meta.url), "utf8"), doel = Number((bron.match(/const SCHERM_DOEL = (\d+);/) || [])[1]);
+    assert(doel > 0 && Math.ceil(doel / 3) * 4 < 32000, "open-url.mjs verkleint tot onder 32 kB base64", String(doel));
     assert((await lever({ id: "abc123xyz", mime: "image/jpeg", beeld }, "x".repeat(32))).status === 404, "verkeerde sleutel geweigerd");
     assert((await lever({ id: "abc123xyz", mime: "image/png", beeld })).status === 400 && (await lever({ id: "../x", mime: "image/jpeg", beeld })).status === 400, "alleen geldige jpeg en id");
     assert((await lever({ id: "abc123xyz", mime: "image/jpeg", beeld: "A".repeat(1500004) })).status === 413, "te groot geweigerd");
