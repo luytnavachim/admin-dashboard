@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Werkopname op de Mac, voor het zoeken naar herhaald werk dat geautomatiseerd kan worden.
 // Vaste opdrachten van de brug: opname-start, opname-stop, opname-status (node opname.mjs start|stop|status).
+// De tijdlijn (tijdlijn.txt, één JSON-regel per moment) is .txt zodat Jarvis hem via mappen_lezen kan lezen.
 // Tijdens een opname legt een achtergrondproces elke INTERVAL seconden vast: het programma en de venstertitel die
 // voor staan, plus een verkleinde schermafbeelding. Alles blijft op de Mac in ~/Documents/jarvis-opnames/<start>/.
 // Geen toetsaanslagen, geen geluid. Stopt vanzelf na MAX_UUR. Bij stoppen komt er een samenvatting.json bij.
@@ -38,7 +39,7 @@ function beeld(map, nr) {
 }
 
 async function lus(map) {
-  const eind = Date.now() + MAX_UUR * 3600000, log = path.join(map, "log.jsonl");
+  const eind = Date.now() + MAX_UUR * 3600000, log = path.join(map, "tijdlijn.txt");
   let nr = 0;
   while (Date.now() < eind && !fs.existsSync(path.join(map, "stop"))) {
     nr++;
@@ -52,7 +53,7 @@ async function lus(map) {
 
 function samenvatting(map) {
   let regels = [];
-  try { regels = fs.readFileSync(path.join(map, "log.jsonl"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)); } catch { regels = []; }
+  try { regels = fs.readFileSync(path.join(map, "tijdlijn.txt"), "utf8").trim().split("\n").filter(Boolean).map(l => JSON.parse(l)); } catch { regels = []; }
   const perApp = {}, perVenster = {};
   regels.forEach((r, i) => {
     const volgende = regels[i + 1] ? Date.parse(regels[i + 1].t) : Date.parse(r.t) + INTERVAL * 1000;
@@ -65,6 +66,7 @@ function samenvatting(map) {
   const wissels = {};
   for (let i = 1; i < regels.length; i++) if (regels[i].app !== regels[i - 1].app) { const k = regels[i - 1].app + " → " + regels[i].app; wissels[k] = (wissels[k] || 0) + 1; }
   const s = { van: regels[0] && regels[0].t, tot: regels.length ? regels[regels.length - 1].t : null, momenten: regels.length, interval_sec: INTERVAL,
+    beelden: regels.filter(r => r.beeld).length,
     per_programma: top(perApp, 15), per_venster: top(perVenster, 25),
     wissels: Object.entries(wissels).sort((a, b) => b[1] - a[1]).slice(0, 15).map(([van_naar, keer]) => ({ van_naar, keer })) };
   fs.writeFileSync(path.join(map, "samenvatting.json"), JSON.stringify(s, null, 2));
@@ -89,7 +91,7 @@ if (cmd === "start") {
   if (leeft(s.pid)) { try { process.kill(s.pid); } catch {} }
   try { fs.unlinkSync(STAAT); } catch {}
   const sam = samenvatting(s.map);
-  zeg({ gestopt: true, map: s.map, momenten: sam.momenten, per_programma: sam.per_programma.slice(0, 8), wissels: sam.wissels.slice(0, 5) });
+  zeg({ gestopt: true, map: s.map, momenten: sam.momenten, beelden: sam.beelden, per_programma: sam.per_programma.slice(0, 8), wissels: sam.wissels.slice(0, 5) });
 } else if (cmd === "status") {
   if (!loopt) { if (s) try { fs.unlinkSync(STAAT); } catch {} zeg({ bezig: false }); process.exit(0); }
   let n = 0; try { n = fs.readFileSync(path.join(s.map, "log.jsonl"), "utf8").trim().split("\n").filter(Boolean).length; } catch {}
