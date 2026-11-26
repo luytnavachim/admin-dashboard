@@ -242,11 +242,12 @@ async function tabMetAdres(href) {   // staat dit adres al open? dan dat tabblad
 async function scherm(job, key) {
   const id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36), ruw = path.join(os.tmpdir(), "jarvis-scherm-" + id + ".jpg"), klein = ruw.replace(".jpg", "-k.jpg");
   try {
-    const c = await run("screencapture", ["-x", "-t", "jpg", ruw], 10000);
+    const c = await run("/usr/sbin/screencapture", ["-x", "-t", "jpg", ruw], 10000);   // vol pad: de brug draait als launchd-dienst zonder /usr/sbin in PATH
+    if (/ENOENT/.test(c.err)) return { fout: "Het programma screencapture is niet gevonden op de Mac (/usr/sbin/screencapture)." };
     if (c.code !== 0 || !fs.existsSync(ruw) || !fs.statSync(ruw).size) return { fout: "Schermafbeelding maken mislukt" + (c.err ? " (" + c.err.slice(0, 120) + ")" : "") + ". Zet aan: Systeeminstellingen > Privacy en beveiliging > Schermopname > node (of Terminal)." };
     let buf = null, zijde = Number(job.breed) || 1440;
     for (const [z, q] of [[zijde, 60], [Math.min(zijde, 1200), 45], [1000, 35]]) {   // kleiner en lager als hij te groot blijft
-      const s = await run("sips", ["-Z", String(z), "-s", "format", "jpeg", "-s", "formatOptions", String(q), ruw, "--out", klein], 10000);
+      const s = await run("/usr/bin/sips", ["-Z", String(z), "-s", "format", "jpeg", "-s", "formatOptions", String(q), ruw, "--out", klein], 10000);
       if (s.code !== 0 || !fs.existsSync(klein)) return { fout: "Verkleinen van de schermafbeelding mislukt." };
       buf = fs.readFileSync(klein); zijde = z;
       if (buf.length <= 1000000) break;
