@@ -4,7 +4,8 @@
 // De tijdlijn (tijdlijn.txt, één JSON-regel per moment) is .txt zodat Jarvis hem via mappen_lezen kan lezen.
 // Tijdens een opname legt een achtergrondproces elke INTERVAL seconden vast: het programma en de venstertitel die
 // voor staan, plus een verkleinde schermafbeelding. Alles blijft op de Mac in ~/Documents/jarvis-opnames/<start>/.
-// Geen toetsaanslagen, geen geluid. Stopt vanzelf na MAX_UUR. Bij stoppen komt er een samenvatting.json bij.
+// Geen toetsaanslagen, geen geluid. Stopt vanzelf na MAX_UUR. Bij stoppen komt er een samenvatting.json bij,
+// en maakt ffmpeg (als die op de Mac staat) op de achtergrond een versnelde video.mp4 uit de beelden (2 beelden per seconde).
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -88,9 +89,51 @@ function samenvatting(map) {
   return s;
 }
 
+// Versnelde video uit de losse beelden (keuze Micha, 26 november: ffmpeg, klein bestand). Draait als eigen launchd-taak,
+// want de brug geeft een opdracht maar 20 seconden. Kopie via de tijdelijke map: ffmpeg mag niet in ~/Documents lezen of schrijven.
+const VIDEO_LABEL = LABEL + ".video";
+const FPS = 2;
+function ffmpegPad() { return [process.env.JARVIS_FFMPEG, "/opt/homebrew/bin/ffmpeg", "/usr/local/bin/ffmpeg", "/usr/bin/ffmpeg"].find(p => p && fs.existsSync(p)) || null; }
+function videoStaat(map) {
+  try { return JSON.parse(fs.readFileSync(path.join(map, "video.json"), "utf8")); } catch {}
+  return fs.existsSync(path.join(map, "video.mp4")) ? { klaar: true, bestand: path.join(map, "video.mp4") } : null;
+}
+export function maakVideo(map, ffmpeg = ffmpegPad()) {
+  const meld = o => { fs.writeFileSync(path.join(map, "video.json"), JSON.stringify({ ...o, op: new Date().toISOString() })); return o; };
+  if (!ffmpeg) return meld({ fout: "ffmpeg niet gevonden (brew install ffmpeg)." });
+  const beelden = fs.readdirSync(map).filter(f => /^\d{5}\.jpg$/.test(f)).sort();
+  if (!beelden.length) return meld({ fout: "Geen beelden in deze opname." });
+  meld({ bezig: true, beelden: beelden.length });
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "jarvis-video-"));
+  try {
+    // doorlopend nummeren: verborgen momenten hebben geen beeld, ffmpeg wil een ononderbroken reeks
+    beelden.forEach((f, i) => fs.copyFileSync(path.join(map, f), path.join(tmp, String(i + 1).padStart(5, "0") + ".jpg")));
+    const r = spawnSync(ffmpeg, ["-y", "-loglevel", "error", "-framerate", String(FPS), "-i", path.join(tmp, "%05d.jpg"),
+      "-vf", "scale=1280:-2,format=yuv420p", "-c:v", "libx264", "-crf", "30", "-movflags", "+faststart", path.join(tmp, "video.mp4")],
+      { encoding: "utf8", timeout: 30 * 60000 });
+    if (r.status !== 0 || !fs.existsSync(path.join(tmp, "video.mp4"))) return meld({ fout: "ffmpeg: " + String(r.stderr || (r.error && r.error.message) || r.status).trim().slice(0, 200) });
+    fs.copyFileSync(path.join(tmp, "video.mp4"), path.join(map, "video.mp4"));
+    const mb = Math.round(fs.statSync(path.join(map, "video.mp4")).size / 1e5) / 10;
+    return meld({ klaar: true, bestand: path.join(map, "video.mp4"), beelden: beelden.length, seconden: Math.round(beelden.length / FPS), mb });
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+}
+function startVideo(map) {
+  if (!ffmpegPad()) return { video: "niet gemaakt: ffmpeg staat niet op de Mac (brew install ffmpeg)" };
+  launchctl("remove", VIDEO_LABEL);
+  const sub = launchctl("submit", "-l", VIDEO_LABEL, "--", process.execPath, fileURLToPath(import.meta.url), "maakvideo", map);
+  if (sub.status !== 0) spawn(process.execPath, [fileURLToPath(import.meta.url), "maakvideo", map], { detached: true, stdio: "ignore" }).unref();
+  return { video: "wordt gemaakt (versneld, " + FPS + " beelden per seconde); opname-status meldt wanneer hij klaar is" };
+}
+function laatsteMap() {
+  try { return fs.readdirSync(MAP).filter(d => /^\d{4}-\d\d-\d\d_\d{4}$/.test(d)).sort().map(d => path.join(MAP, d)).pop() || null; } catch { return null; }
+}
+
 const [, , cmd, arg] = process.argv;
+const alsProgramma = !!process.argv[1] && fileURLToPath(import.meta.url) === path.resolve(process.argv[1]);   // niet bij import (test)
+if (alsProgramma) {
 fs.mkdirSync(MAP, { recursive: true });
 if (cmd === "lus") { await lus(arg); process.exit(0); }
+if (cmd === "maakvideo") { if (arg) maakVideo(arg); launchctl("remove", VIDEO_LABEL); process.exit(0); }
 const s = leesStaat(), loopt = !!(s && (s.label ? taakLoopt() : leeft(s.pid)));
 if (cmd === "start") {
   if (loopt) { zeg({ al_bezig: true, sinds: s.sinds, map: s.map }); process.exit(0); }
@@ -111,9 +154,15 @@ if (cmd === "start") {
   else { for (let i = 0; i < 20 && leeft(s.pid); i++) await wacht(500); if (leeft(s.pid)) { try { process.kill(s.pid); } catch {} } }
   try { fs.unlinkSync(STAAT); } catch {}
   const sam = samenvatting(s.map);
-  zeg({ gestopt: true, map: s.map, momenten: sam.momenten, beelden: sam.beelden, ...(sam.beeld_fout ? { beeld_fout: sam.beeld_fout } : {}), per_programma: sam.per_programma.slice(0, 8), wissels: sam.wissels.slice(0, 5) });
+  const vid = sam.beelden ? startVideo(s.map) : {};
+  zeg({ gestopt: true, map: s.map, momenten: sam.momenten, beelden: sam.beelden, ...(sam.beeld_fout ? { beeld_fout: sam.beeld_fout } : {}), ...vid, per_programma: sam.per_programma.slice(0, 8), wissels: sam.wissels.slice(0, 5) });
 } else if (cmd === "status") {
-  if (!loopt) { if (s) try { fs.unlinkSync(STAAT); } catch {} zeg({ bezig: false }); process.exit(0); }
+  if (!loopt) {
+    if (s) try { fs.unlinkSync(STAAT); } catch {}
+    const m = laatsteMap(), v = m && videoStaat(m);
+    zeg({ bezig: false, ...(m ? { laatste_opname: m } : {}), ...(v ? { video: v } : {}) }); process.exit(0);
+  }
   let n = 0; try { n = fs.readFileSync(path.join(s.map, "tijdlijn.txt"), "utf8").trim().split("\n").filter(Boolean).length; } catch {}
   zeg({ bezig: true, sinds: s.sinds, momenten: n, map: s.map });
 } else { zeg({ fout: "Gebruik: start, stop of status." }); process.exit(1); }
+}

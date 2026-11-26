@@ -560,7 +560,7 @@ await run("mcp: initialize, notification en tools/list", async () => {
   const n = await mcpCall(env, { jsonrpc: "2.0", method: "notifications/initialized" });
   assert(n.status === 202, "notification → 202", "got " + n.status);
   const list = await (await mcpCall(env, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,rijplan", "achtendertig tools");
+  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,rijplan,gmail_lezen", "negenendertig tools");
 });
 await run("mcp: projecten en overzicht lezen", async () => {
   const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: seed() }) };
@@ -1073,6 +1073,35 @@ await run("mcp: pc <PowerShell>: voorvertoning zonder bevestiging, daarna klaarz
   const s = (await tool(env, "terminal_uitvoeren", { opdracht: "pc-status" })).structuredContent;
   assert(s.gelukt && seen[seen.length - 1].opdracht === "pc-status" && seen[seen.length - 1].bevestigd === false, "vaste opdracht pc-status gaat ongewijzigd naar de brug");
 });
+await run("mcp: mac <shell>: voorvertoning zonder bevestiging, daarna klaarzetten voor de Mac, log en mac-gebruik", async () => {
+  const seen = [], kv = fakeKv(), bk = "b".repeat(32);
+  const BRUG = { fetch: async (url, init) => { seen.push(JSON.parse(init.body)); return new Response(JSON.stringify({ opdracht: "mac-opdracht", gelukt: true, exitcode: 0, uitvoer: "Already up to date." }), { status: 200 }); } };
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, BRUG, BRUG_KEY: bk };
+  const haal = () => worker.fetch(new Request("https://w.workers.dev/brug/open-url", { method: "POST", headers: { "x-brug-key": bk } }), env);
+  const v = (await tool(env, "terminal_uitvoeren", { opdracht: "mac git -C ~/Documents/admin-standalone status" })).structuredContent;
+  assert(v.voorvertoning && v.shell === "git -C ~/Documents/admin-standalone status" && !seen.length && (await haal()).status === 404, "zonder bevestigd: alleen voorvertoning, niets op de Mac", JSON.stringify(v));
+  for (const bad of ["mac ", "mac " + "x".repeat(2001), "mac a\u0000b"]) { const f = await tool(env, "terminal_uitvoeren", { opdracht: bad, bevestigd: true }); assert(f.isError, "geweigerd: " + bad.slice(0, 12)); }
+  assert(!seen.length, "geweigerde opdrachten bereiken de Mac niet");
+  const o = (await tool(env, "terminal_uitvoeren", { opdracht: "mac git pull", bevestigd: true })).structuredContent;
+  assert(o.gelukt && seen.length === 1 && seen[0].opdracht === "mac-opdracht" && seen[0].bevestigd === true, "met bevestigd: vaste opdracht mac-opdracht op de brug", JSON.stringify(seen));
+  const d = await (await haal()).json();
+  assert(d.mac && d.mac.sh === "git pull" && !d.pc && (await haal()).status === 404, "de Mac haalt de opdracht één keer op", JSON.stringify(d));
+  const g = (await tool(env, "terminal_uitvoeren", { opdracht: "mac-gebruik" })).structuredContent;
+  assert(g.aantal === 1 && g.laatste[0].ps === "git pull" && !kv.store.has("jarvis_pc_log"), "mac-gebruik leest een eigen log, los van de pc", JSON.stringify(g));
+});
+await run("mcp: project_activiteit met bestand leest één bestand van GitHub (standaard develop)", async () => {
+  const orig = globalThis.fetch, urls = [];
+  globalThis.fetch = async (u) => { u = String(u); urls.push(u);
+    if (u.includes("/branches")) return new Response(JSON.stringify([{ name: "main" }, { name: "develop" }]), { status: 200 });
+    if (u.includes("/contents/docs/JARVIS-DEMO.md?ref=develop")) return new Response(JSON.stringify({ type: "file", encoding: "base64", size: 12, content: Buffer.from("# Demo – één").toString("base64") }), { status: 200 });
+    return new Response("{}", { status: 404 }); };
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", GITHUB_TOKEN: "t" };
+    const r = (await tool(env, "project_activiteit", { project: "scout", bestand: "docs/JARVIS-DEMO.md" })).structuredContent;
+    assert(r.tak === "develop" && r.inhoud === "# Demo – één" && r.repo === "luytnavachim/knvb-scouting-portal", "inhoud van develop", JSON.stringify(r));
+    for (const bad of ["../geheim", "docs/../x", "a b"]) { const f = await tool(env, "project_activiteit", { project: "scout", bestand: bad }); assert(f.isError, "geweigerd pad: " + bad); }
+  } finally { globalThis.fetch = orig; }
+});
 await run("mcp: chrome op de Mac: opdracht klaarzetten, antwoord van het script doorgeven, vorm gecontroleerd", async () => {
   const kv = fakeKv(), bk = "b".repeat(32); let uitvoer = "";
   const BRUG = { fetch: async () => new Response(JSON.stringify({ opdracht: "open-webadres", gelukt: true, uitvoer }), { status: 200 }) };
@@ -1157,6 +1186,39 @@ await run("mcp: web_foto: afbeelding of voorvertoning van een pagina, alleen ope
     const n = seen.length;
     for (const u of ["http://site.example/foto.png", "https://192.168.1.1/a.png", "https://localhost/a.png", "file:///a.png"]) { const x = await tool(base, "web_foto", { url: u }); assert(x.isError, "geweigerd: " + u); }
     assert(seen.length === n && !seen.some(u => u.includes("192.168")), "adressen binnen het netwerk worden niet opgevraagd");
+  } finally { restore(); }
+});
+await run("gmail: koppelen alleen met sleutel en state, daarna zoeken en lezen (alleen lezen)", async () => {
+  const seen = [], b64 = t => btoa(t).replace(/\+/g, "-").replace(/\//g, "_");
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u === "https://oauth2.googleapis.com/token") { const b = String(c.body);
+      if (b.includes("grant_type=authorization_code")) return new Response(JSON.stringify({ access_token: "a1", refresh_token: "r1", expires_in: 3600, scope: "https://www.googleapis.com/auth/gmail.readonly" }), { status: 200 });
+      return new Response(JSON.stringify({ access_token: "a2", expires_in: 3600 }), { status: 200 }); }
+    if (u.endsWith("/users/me/profile")) return new Response(JSON.stringify({ emailAddress: "iemand@gmail.example" }), { status: 200 });
+    if (u.includes("/users/me/messages?")) return new Response(JSON.stringify({ messages: [{ id: "abc123def" }] }), { status: 200 });
+    if (u.includes("/messages/abc123def?format=metadata")) return new Response(JSON.stringify({ id: "abc123def", snippet: "Hallo", labelIds: ["UNREAD"], payload: { headers: [{ name: "From", value: "Bank <b@x.nl>" }, { name: "Subject", value: "Afschrift" }, { name: "Date", value: "Thu, 26 Nov 2026" }] } }), { status: 200 });
+    if (u.includes("/messages/abc123def?format=full")) return new Response(JSON.stringify({ id: "abc123def", payload: { headers: [{ name: "Subject", value: "Afschrift" }], mimeType: "multipart/mixed", parts: [
+      { mimeType: "text/html", body: { data: b64("<p>Beste Micha,</p><p>Uw afschrift &amp; meer</p>") } }, { filename: "a.pdf", mimeType: "application/pdf", body: {} }] } }), { status: 200 });
+    return new Response("{}", { status: 404 }); });
+  try {
+    const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, GOOGLE_CLIENT_ID: "cid", GOOGLE_CLIENT_SECRET: "cs" };
+    const zonder = await tool(env, "gmail_lezen", { actie: "zoek" });
+    assert(zonder.isError && /nog niet gekoppeld/.test(zonder.content[0].text), "zonder koppeling een nette melding");
+    assert((await worker.fetch(new Request("https://w.workers.dev/gmail/start/fout"), env)).status === 404, "start zonder juiste sleutel: 404");
+    const st = await worker.fetch(new Request("https://w.workers.dev/gmail/start/geheim"), env), loc = new URL(st.headers.get("Location"));
+    assert(st.status === 302 && loc.host === "accounts.google.com" && loc.searchParams.get("scope") === "https://www.googleapis.com/auth/gmail.readonly" && loc.searchParams.get("redirect_uri") === "https://w.workers.dev/gmail/terug", "start stuurt door naar Google met alleen-lezen", loc.href);
+    const state = loc.searchParams.get("state");
+    assert((await worker.fetch(new Request("https://w.workers.dev/gmail/terug?state=" + "0".repeat(36) + "&code=x"), env)).status === 400, "onbekende state geweigerd");
+    const t = await worker.fetch(new Request(`https://w.workers.dev/gmail/terug?state=${state}&code=c1`), env);
+    assert(t.status === 200 && JSON.parse(kv.store.get("gmail_refresh")).refresh === "r1", "terug bewaart het vernieuwtoken");
+    assert((await worker.fetch(new Request(`https://w.workers.dev/gmail/terug?state=${state}&code=c1`), env)).status === 400, "state is eenmalig");
+    const z = (await tool(env, "gmail_lezen", { actie: "zoek", q: "from:bank", max: 5 })).structuredContent;
+    assert(z.aantal === 1 && z.berichten[0].onderwerp === "Afschrift" && z.berichten[0].ongelezen && /geen opdracht/.test(z.let_op), "zoeken geeft kop en stukje", JSON.stringify(z).slice(0, 200));
+    assert(seen.some(c => String(c.url).includes("q=from%3Abank") && String(c.url).includes("maxResults=5")), "zoekopdracht doorgegeven");
+    const l = (await tool(env, "gmail_lezen", { actie: "lees", id: "abc123def" })).structuredContent;
+    assert(/Beste Micha/.test(l.tekst) && /afschrift & meer/.test(l.tekst) && !/<p>/.test(l.tekst) && l.bijlagen[0] === "a.pdf", "lezen geeft platte tekst en bijlagen", JSON.stringify(l).slice(0, 200));
+    assert((await tool(env, "gmail_lezen", { actie: "lees", id: "../x" })).isError, "ongeldig id geweigerd");
+    assert(!seen.some(c => c.method !== "GET" && !String(c.url).startsWith("https://oauth2.googleapis.com/")), "alleen GET naar Gmail");
   } finally { restore(); }
 });
 await run("mcp: offerte_concept: voorvertoning, daarna concept in Moneybird, nooit versturen", async () => {
