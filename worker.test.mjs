@@ -1684,6 +1684,17 @@ await run("whatsapp: webhook alleen met juiste handtekening, daarna lezen (allee
   assert(!JSON.stringify(await tool(env, "whatsapp_lezen", { actie: "gesprekken" })).includes("appgeheim"), "geheim nooit in het antwoord");
 });
 
+await run("privacy.html: openbare privacyverklaring voor de Meta-app", async () => {
+  const { readFileSync } = await import("node:fs");
+  const html = readFileSync(new URL("./privacy.html", import.meta.url), "utf8");
+  assert(/micha@vantuyl\.it/.test(html) && /7 dagen/.test(html) && /7 days/.test(html), "contact en bewaartermijn in NL en EN");
+  assert(html.includes('id="verwijderen"') && html.includes('id="delete"'), "anker voor gegevens verwijderen");
+  const ignore = readFileSync(new URL("./.assetsignore", import.meta.url), "utf8").split(/\r?\n/).map(x => x.trim());
+  assert(!ignore.includes("privacy.html") && !ignore.includes("*.html"), "niet uitgesloten van de Worker-assets");
+  assert(!/privacy/.test(readFileSync(new URL("./.htaccess", import.meta.url), "utf8")), "niet afgeschermd op Apache");
+  assert(/const WA_TTL = 7 \* 24 \* 3600/.test(readFileSync(new URL("./worker.js", import.meta.url), "utf8")), "bewaartermijn in de tekst klopt met WA_TTL");
+});
+
 console.log(`\n${"=".repeat(60)}`);
 console.log(`Results: ${passed} passed, ${failed} failed`);
 console.log("=".repeat(60));
