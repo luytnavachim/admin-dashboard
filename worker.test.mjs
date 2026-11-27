@@ -1712,6 +1712,28 @@ await run("whatsapp_sturen: eerst voorvertoning met code, alleen met code + beve
   } finally { restore(); }
 });
 
+await run("whatsapp: contacten uit smb_app_state_sync, daarna versturen op naam", async () => {
+  const { createHmac } = await import("node:crypto");
+  const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, WA_APP_SECRET: "appgeheim", WA_TOKEN: "watoken", WA_PHONE_ID: "123456" };
+  const hook = b => worker.fetch(new Request("https://w.workers.dev/whatsapp/webhook", { method: "POST", headers: { "content-type": "application/json", "X-Hub-Signature-256": "sha256=" + createHmac("sha256", "appgeheim").update(b).digest("hex") }, body: b }), env);
+  const sync = lijst => JSON.stringify({ entry: [{ changes: [{ field: "smb_app_state_sync", value: { messaging_product: "whatsapp", state_sync: lijst } }] }] });
+  const ct = (naam, nr, action) => ({ type: "contact", contact: { full_name: naam, first_name: naam.split(" ")[0], phone_number: nr }, action, metadata: { timestamp: "1795000000" } });
+  assert((await worker.fetch(new Request("https://w.workers.dev/whatsapp/webhook", { method: "POST", body: sync([ct("X Y", "31600000000", "add")]) }), env)).status === 403 && !kv.store.has("wa_contacten"), "zonder handtekening geen contacten");
+  assert((await hook(sync([ct("Paul Erlings", "31611112222", "add"), ct("Paul Erlings jr", "31633334444", "add"), ct("Weg Ermee", "31655556666", "add")]))).status === 200, "sync ontvangen");
+  await hook(sync([ct("Weg Ermee", "31655556666", "remove")]));
+  const boek = JSON.parse(kv.store.get("wa_contacten"));
+  assert(boek["31611112222"] === "Paul Erlings" && !boek["31655556666"] && ![...kv.store.keys()].some(k => k.startsWith("wa:")), "contacten bewaard, verwijderd contact eruit, geen berichten", JSON.stringify(boek));
+  const calls = [], restore = mockUpstream(c => { calls.push(c); return new Response("{}", { status: 200 }); });
+  try {
+    const t = (await tool(env, "whatsapp_sturen", { contact: "paul erlings", tekst: "Hoi Paul", template: "update_micha" })).structuredContent;
+    assert(t.voorvertoning && t.nummer === "31611112222" && t.aan === "Paul Erlings" && !t.venster_open && calls.length === 0, "exacte naam wint, niets verstuurd", JSON.stringify(t));
+    const meer = await tool(env, "whatsapp_sturen", { contact: "Paul", tekst: "Hoi", template: "update_micha" });
+    assert(meer.isError && /Meer contacten/.test(meer.content[0].text), "dubbelzinnige naam: preciezer");
+    const buiten = await tool(env, "whatsapp_sturen", { contact: "Paul Erlings", tekst: "Hoi" });
+    assert(buiten.isError && /24-uursvenster/.test(buiten.content[0].text), "contact zonder gesprek: alleen template");
+  } finally { restore(); }
+});
+
 await run("privacy.html: openbare privacyverklaring voor de Meta-app", async () => {
   const { readFileSync } = await import("node:fs");
   const html = readFileSync(new URL("./privacy.html", import.meta.url), "utf8");
