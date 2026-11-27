@@ -228,6 +228,10 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - Omschrijving van `scout_lezen` ingekort naar onder 1 KB (was 1,5 KB).
 - Het fraaie TC-rapport (pop-up/PDF in Jarvis, download in de scout-app, vakje 'extra aandacht' richting O19) is nog niet gebouwd; dat bouwt hierop voort.
 
+## Jarvis: grote bestanden in delen (27 november 2026)
+
+- `project_activiteit` met `bestand` knipt een groot bestand in delen op regelgrenzen (`ghDelen`, elk deel als JSON hooguit `GH_DEEL_BYTES` = 12 KB). Veld `deel` (standaard 1); het antwoord heeft dan `deel`, `delen` en `volgende` of `laatste: true`. Reden: elk antwoord gaat twee keer mee (tekst + `structuredContent`) en de pagina weigert antwoorden boven 32 KB ("result too large"). De oude grens `GH_BESTAND_MAX` is weg.
+- De pagina geeft `deel` door (bundel `opzoeken`, actie `project`) en heeft de startzin "Jarvis, presenteer de Scout-app" (knop + regel PRESENTATIE in de systeemtekst). De beschrijving van `opzoeken` zit op 997 van de 1024 bytes: er kan daar niets meer bij.
 ## Jarvis: automatiseringen nalezen (27 november 2026)
 
 - `huis_automatisering` actie `lees` met `naam` (of de id `jarvis_…`) geeft de volledige config van een eigen Jarvis-automatisering (`GET /api/config/automation/config/<id>`), alleen lezen. De id volgt dezelfde regel als bij aanmaken: `jarvis_` + slug van de naam (dus "Jarvis verwarming rooster" → `jarvis_jarvis_verwarming_rooster`). Wijzigen blijft: naam + aangepaste config, eerst voorvertoning.
