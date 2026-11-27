@@ -1575,6 +1575,28 @@ await run("mcp: scout_lezen metingen: samenvatting per speler voor een jaargroep
     assert(d.spelers === 2 && d.zonder_meting === 1 && a.metingen === 2 && a.trainer === 1 && a.scout === 1 && a.techniek === 3 && a.mentaal === null && a.aanvallen === 4 && a.laatste === "2026-11-01", "O12 = O12-1 en O12-3, gemiddelden kloppen", JSON.stringify(d));
   } finally { restore(); }
 });
+await run("mcp: scout_lezen team: rapport per team met beoordelaars, vergelijking en signalen", async () => {
+  const restore = mockUpstream((c) => { const u = String(c.url);
+    if (u === "https://scout.example/api.php?club=Wijhe+92") return new Response(JSON.stringify({ knvb_team: [
+      { id: 1, naam: "Anna", huidig: "O17-1", jaar: "2010-03-01", positie: "middenveld", metingen: [
+        { datum: "2026-10-20", type: "trainer", trainerNaam: "Trainer A", periode_id: "2026-2027-P1", periodeNr: 1, techScore: 4, tactScore: 3, mentScore: 4, fysScore: 2, pos: "Middenveld", werk: "Kopballen", vrij: "Goed overzicht", knvbMatrix: { aanvallen: { scores: { a: 3, b: 5 } } } },
+        { datum: "2026-10-21", type: "trainer", trainerNaam: "Trainer B", periode_id: "2026-2027-P1", periodeNr: 1, techScore: 2, tactScore: 3, mentScore: 4, fysScore: 2, pos: "Verdediger", naBevriezing: true },
+        { datum: "2026-12-01", type: "trainer", trainerNaam: "Trainer A", periode_id: "2026-2027-P2", periodeNr: 2, techScore: 1 }] },
+      { id: 2, naam: "Bert", huidig: "O17-2", metingen: [{ type: "trainer", trainerNaam: "Trainer C", periodeNr: 1, techScore: 3, familieSignaal: true }] },
+      { id: 3, naam: "Cor", huidig: "O15-1", metingen: [{ type: "trainer", trainerNaam: "X", periodeNr: 1, techScore: 5 }] }] }), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), SCOUT_SLEUTEL: "ksp_test", SCOUT_URL: "https://scout.example" };
+    const d = (await tool(env, "scout_lezen", { actie: "team", club: "Wijhe 92", team: "O17-1, O17-2", periode: "1" })).structuredContent;
+    const t1 = d.teams.find(t => t.team === "O17-1"), t2 = d.teams.find(t => t.team === "O17-2"), a = t1.lijst[0];
+    assert(d.teams.length === 2 && !d.teams.some(t => t.team === "O15-1"), "alleen gevraagde teams", JSON.stringify(d.teams.map(t => t.team)));
+    assert(a.beoordelingen.length === 2 && a.geboortejaar === 2010 && a.beoordelingen[0].door === "Trainer A" && a.beoordelingen[0].matrix.aanvallen === 4 && a.beoordelingen[0].werkpunt === "Kopballen" && a.beoordelingen[0].opmerking === "Goed overzicht", "beoordelingen per beoordelaar, periode 2 eruit", JSON.stringify(a));
+    assert(a.vergelijking.verschil.techniek === 2 && a.vergelijking.gelijke_cijfers === 3 && a.vergelijking.groot_verschil && a.vergelijking.positie_oneens.length === 2, "vergelijking tussen beoordelaars", JSON.stringify(a.vergelijking));
+    assert(t1.gesprek[0] === "Anna" && t1.signalen.na_bevriezing[0] === "Anna" && t2.signalen.familie[0] === "Bert" && /niets te vergelijken/.test(t2.let_op_vergelijking), "gesprek, signalen en één beoordelaar", JSON.stringify([t1.gesprek, t2]));
+    const leeg = await tool(env, "scout_lezen", { actie: "team", club: "Wijhe 92", team: "O19-1" });
+    assert(leeg.isError, "onbekend team: nette fout");
+  } finally { restore(); }
+});
 await run("mcp: scout_lezen trainers: stand per trainer, zonder tokens en spelers", async () => {
   const seen = [];
   const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);

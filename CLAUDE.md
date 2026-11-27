@@ -218,3 +218,10 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 ## Jarvis: Hetzner-check inrichten (27 november 2026)
 
 - `hetzner-check-inrichten.sh` (eenmalig op de Mac, via `mac bash ~/Documents/admin-standalone/hetzner-check-inrichten.sh` na een ja): maakt `~/.ssh/jarvis_hetzner_check` als die ontbreekt, zet via de gewone root-sleutel `jarvis-check.sh` (alleen lezen) in `/usr/local/bin` op de server en voegt `restrict,command="/usr/local/bin/jarvis-check.sh" <pub>` toe aan `/root/.ssh/authorized_keys` (reservekopie `.voor-jarvis-check`), zet de vaste opdracht `hetzner-beveiliging` in `brug.config.json` (reservekopie `.voor-hetzner-check`) en herstart de brug los. Mag vaker draaien. Getest: alleen het config- en authorized_keys-deel met nagebootste bestanden, niet tegen de echte server.
+
+## Jarvis: teamrapport voor de TC (27 november 2026)
+
+- **Bewaartak samengevoegd**: `bewaar/mac-lokaal-2026-11-26` (commit 320b9f8: `scout_lezen` actie `metingen`, `scout_wijzigen` route `deadline` en vriendelijke periodenamen) is zonder conflicten in `claude/jarvis-wachtrij` gemerged, samen met WhatsApp Business lezen.
+- **`scout_lezen` actie `team`** (`scoutTeam`, alleen lezen): één of meer teams (`team: "O17-1, O17-2"`, of `O17` = alle O17-teams, hooguit 6), optioneel `periode` (nummer of naam; `1` matcht `periodeNr` of `…-P1`). Per speler positie, geboortejaar, alle beoordelingen per beoordelaar (vier vakken, gemiddelde, matrix per fase, positie, werkpunt, opmerking, toelichting per vak, `na_bevriezing`, `familie`) en een `vergelijking` (laatste beoordeling per beoordelaar, verschil = hoogste min laagste per vak, gelijke cijfers, positie oneens). Per team `oneens` (meest naar minst), `gesprek` (verschil ≥ 2 of positie oneens), `signalen` en bij één beoordelaar `let_op_vergelijking`. Boven 120.000 tekens eerst toelichting weg, dan opmerkingen ingekort.
+- Omschrijving van `scout_lezen` ingekort naar onder 1 KB (was 1,5 KB).
+- Het fraaie TC-rapport (pop-up/PDF in Jarvis, download in de scout-app, vakje 'extra aandacht' richting O19) is nog niet gebouwd; dat bouwt hierop voort.

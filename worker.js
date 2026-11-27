@@ -594,8 +594,8 @@ const MCP_TOOLS = [
   { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis.",
     inputSchema: { type: "object", properties: { actie: { type: "string" }, naam: { type: "string" }, bron: { type: "string" }, doel: { type: "string" }, config: { type: "object" }, bevestigd: { type: "boolean" } }, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
-  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. actie speler = volledig dossier van één speler (id of naam), met metingen en scores, voor advies en rapporten. actie onderdeel = één onderdeel van de app ruw (naam, bv. knvb_periodes; zonder naam de lijst). actie controle = datacontrole: dubbele spelers en id's, verwijzingen naar onbekende spelers, spelers zonder team of geboortejaar. actie metingen = tabel per speler van een team of jaargroep (team = O12-1, of O12 voor alle O12-teams; optioneel periode): aantal metingen (trainer, scout, wedstrijd), gemiddelden techniek, tactiek, mentaal, fysiek en de KNVB-fases; gebruik dit in plaats van speler per speler. actie trainers = stand van de trainersformulieren van een periode (standaard de actieve; periode = naam of id, club optioneel): per trainer team, status, ingevuld, deadline; standaard alleen wie nog niet heeft ingeleverd (alleen_open:false = iedereen). Gegevens van kinderen: alleen voor wat Micha vraagt.",
-    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers", "speler", "onderdeel", "controle", "trainers", "metingen"] }, club: { type: "string" }, periode: { type: "string" }, alleen_open: { type: "boolean" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" }, id: { type: "string" }, naam: { type: "string" } }, required: ["actie"], additionalProperties: false },
+  { name: "scout_lezen", description: "Scout-app (scout.app1x.online), alleen lezen. club = naam zoals in de app. actie wie = werkt de sleutel. overzicht = aantallen per team en geboortejaar. spelers = lijst met namen (filters team, geboortejaar, lichting, zoek). speler = dossier van één speler (id of naam). onderdeel = één onderdeel ruw (naam). controle = datacontrole (dubbelen, losse verwijzingen). metingen = tabel per speler met gemiddelden (team = O12-1, of O12 = alle O12-teams; optioneel periode). team = teamrapport voor de TC (team = O17-1, O17-2; optioneel periode, bv. 1): per speler positie, geboortejaar, alle beoordelingen per beoordelaar (vier vakken, matrix, werkpunt, opmerking), signalen en vergelijking tussen beoordelaars; gebruik dit voor een rapport. trainers = stand van de trainersformulieren (periode, alleen_open). Gegevens van kinderen: alleen voor wat Micha vraagt.",
+    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers", "speler", "onderdeel", "controle", "trainers", "metingen", "team"] }, club: { type: "string" }, periode: { type: "string" }, alleen_open: { type: "boolean" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" }, id: { type: "string" }, naam: { type: "string" } }, required: ["actie"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
   { name: "scout_wijzigen", description: "Een wijziging in de scout-app doen met de sleutel van Jarvis (die moet het niveau lezen en wijzigen hebben). route = script?action=..., alleen periodes.php (start, periode, indeling, intrek, uitsluit, uitsluit_terug, evaluatie, keepers, trainers, trainers_over) of kijkplan.php (toewijzen, ontwijzen, inschrijven, uitschrijven); gegevens = de JSON zoals in de kop van dat script staat. route deadline = deadline van open trainersformulieren verzetten (gegevens: datum JJJJ-MM-DD, periode, optioneel teams). periodes.php?action=periode = datums of naam van een periode: gegevens periode (naam of nummer), start, eind. Zonder bevestigd:true alleen een voorvertoning: laat Micha zien wat er verandert en vraag om een ja. Nooit scores bijsturen, metingen aanmaken of antwoorden van trainers wijzigen.",
     inputSchema: { type: "object", properties: { route: { type: "string" }, gegevens: { type: "object" }, bevestigd: { type: "boolean" } }, required: ["route"], additionalProperties: false } },
@@ -1939,7 +1939,8 @@ async function mcpScoutLezen(args, env) {
   }
   if (actie === "trainers") return scoutTrainers(args, env);
   if (actie === "metingen") return scoutMetingen(args, env);
-  throw new Error("Kies een actie: wie, overzicht, spelers, speler, onderdeel, controle of trainers.");
+  if (actie === "team") return scoutTeam(args, env);
+  throw new Error("Kies een actie: wie, overzicht, spelers, speler, onderdeel, controle, metingen, team of trainers.");
 }
 // Samenvatting van metingen per speler voor een team of jaargroep (bv. O12 = O12-1, O12-2, O12-3): klein genoeg voor Jarvis.
 function scoutGetal(v) { if (v && typeof v === "object") v = v.score ?? v.waarde ?? v.s; const n = Number(v); return isFinite(n) && n > 0 ? n : null; }
@@ -1967,6 +1968,71 @@ async function scoutMetingen(args, env) {
   return { club, team: args.team, periode_filter: pv || null, spelers: rijen.length, zonder_meting: rijen.filter(r => !r.metingen).length,
     per_team: rijen.reduce((o, r) => { o[r.team] = (o[r.team] || 0) + 1; return o; }, {}), lijst: rijen.slice(0, 120),
     let_op: "Gemiddelden op schaal 1-5 van alle metingen (niet ingevuld telt niet mee). Matrix = KNVB-fases, apart van de vier vakken." };
+}
+// Teamrapport voor de TC: per speler alle beoordelingen (per beoordelaar) plus een vergelijking tussen beoordelaars. Eén aanroep voor één of meer teams.
+function scoutTekst(v, max) { const t = String(v == null ? "" : v).replace(/\s+/g, " ").trim(); return t ? t.slice(0, max) : null; }
+function scoutPeriodeFilter(pv) {
+  const p = String(pv || "").toLowerCase().trim(); if (!p) return () => true;
+  const nr = (p.match(/^(?:periode|p)?\s*(\d{1,2})$/) || [])[1];
+  return m => { if (nr) return Number(m.periodeNr) === Number(nr) || new RegExp("-p" + nr + "$").test(String(m.periode_id || "").toLowerCase());
+    return [m.periode_id, m.periodeNaam, m.periodeLabel, m.periode].some(x => String(x || "").toLowerCase().includes(p)); };
+}
+async function scoutTeam(args, env) {
+  const club = scoutClub(args), d = await scoutGet(env, new URLSearchParams({ club }).toString());
+  let team = d.knvb_team; if (typeof team === "string") { try { team = JSON.parse(team); } catch { team = []; } }
+  const norm = v => String(v || "").toLowerCase().replace(/\s+/g, "");
+  const wens = String(args.team || "").split(/[,;]|\sen\s/).map(norm).filter(Boolean);
+  if (!wens.length || wens.length > 6) throw new Error("Geef team mee (bv. O17-1, of O17-1, O17-2; O17 = alle O17-teams), hooguit 6.");
+  const past = t => { const n = norm(t); return wens.some(f => f.includes("-") ? n === f : (n === f || n.startsWith(f + "-"))); };
+  const inPeriode = scoutPeriodeFilter(args.periode);
+  const jaar = x => { const m = String(x.jaar || x.geboortedatum || x.geboortejaar || "").match(/(19|20)\d{2}/); return m ? Number(m[0]) : null; };
+  const pos = x => Array.isArray(x.posities) ? x.posities.filter(Boolean).join(", ") || null : (x.positie || x.pos || null);
+  const VAK = { techniek: "techScore", tactiek: "tactScore", mentaal: "mentScore", fysiek: "fysScore" };
+  const soort = m => /trainer|evaluatie/i.test(String(m.type || "")) ? "trainer" : (/wedstrijd/i.test(String(m.type || "") + " " + String(m.bron || "")) ? "wedstrijd" : "scout");
+  const fase = (m, f) => { const mx = m.knvbMatrix && (m.knvbMatrix[f] || m.knvbMatrix[f[0].toUpperCase() + f.slice(1)]); const sc = mx && (mx.scores || mx);
+    return sc && typeof sc === "object" ? scoutGem(Object.values(sc).map(scoutGetal)) : null; };
+  const spelers = (Array.isArray(team) ? team : []).filter(x => x && typeof x === "object" && x.naam && past(x.huidig || x.team)).map(x => {
+    const ms = (Array.isArray(x.metingen) ? x.metingen : []).filter(m => m && typeof m === "object" && inPeriode(m));
+    const beoordelingen = ms.map(m => {
+      const c = {}; for (const [k, f] of Object.entries(VAK)) c[k] = scoutGetal(m[f]);
+      const mx = {}; for (const f of ["aanvallen", "verdedigen", "omschakelen"]) { const g = fase(m, f); if (g != null) mx[f] = g; }
+      const toel = {}; for (const k of ["tech", "tact", "ment", "fys"]) { const t = scoutTekst(m[k], 200); if (t) toel[k] = t; }
+      return { door: scoutTekst(m.trainerNaam || m.scoutNaam || m.bron, 60) || "onbekend", soort: soort(m), datum: String(m.datum || "").slice(0, 10) || null,
+        periode: scoutTekst(m.periodeNaam || m.periode_id, 40), ...c, gemiddelde: scoutGem(Object.values(c)), matrix: Object.keys(mx).length ? mx : null,
+        positie: scoutTekst(m.pos, 30), werkpunt: scoutTekst(m.werk, 300), opmerking: scoutTekst(m.vrij || m.notitie, 400), toelichting: Object.keys(toel).length ? toel : null,
+        na_bevriezing: m.naBevriezing ? true : undefined, familie: (m.familie || m.familieSignaal) ? true : undefined };
+    }).sort((a, b) => String(a.datum).localeCompare(String(b.datum)));
+    // vergelijking: laatste beoordeling per beoordelaar (trainer en scout), per vak hoogste min laagste
+    const per = {}; beoordelingen.filter(b => b.soort !== "wedstrijd").forEach(b => { per[b.door] = b; });
+    const door = Object.values(per); let vergelijking = null;
+    if (door.length >= 2) {
+      const vakken = {}; let gelijk = 0, som = 0;
+      for (const k of Object.keys(VAK)) { const v = door.map(b => b[k]).filter(n => n != null); if (v.length < 2) continue;
+        const vs = Math.round((Math.max(...v) - Math.min(...v)) * 10) / 10; vakken[k] = vs; som += vs; if (vs === 0) gelijk++; }
+      const posities = [...new Set(door.map(b => b.positie).filter(Boolean).map(p => p.toLowerCase()))];
+      vergelijking = { beoordelaars: door.map(b => b.door), verschil: vakken, totaal_verschil: Math.round(som * 10) / 10, gelijke_cijfers: gelijk,
+        groot_verschil: Object.values(vakken).some(v => v >= 2), positie_oneens: posities.length > 1 ? posities : undefined };
+    }
+    return { id: x.id != null ? String(x.id) : null, naam: String(x.naam), team: x.huidig || x.team || null, geboortejaar: jaar(x), positie: pos(x),
+      beoordelingen, gemiddelde: Object.fromEntries(Object.keys(VAK).map(k => [k, scoutGem(beoordelingen.map(b => b[k]))])), vergelijking };
+  }).sort((a, b) => String(a.team).localeCompare(String(b.team), "nl", { numeric: true }) || a.naam.localeCompare(b.naam, "nl"));
+  const teams = {}; spelers.forEach(s => { (teams[s.team] = teams[s.team] || []).push(s); });
+  const uit = Object.entries(teams).map(([t, l]) => {
+    const vg = l.filter(s => s.vergelijking);
+    return { team: t, spelers: l.length, zonder_beoordeling: l.filter(s => !s.beoordelingen.length).map(s => s.naam),
+      beoordelaars: [...new Set(l.flatMap(s => s.beoordelingen.map(b => b.door)))],
+      oneens: vg.length ? vg.slice().sort((a, b) => b.vergelijking.totaal_verschil - a.vergelijking.totaal_verschil).map(s => ({ naam: s.naam, totaal_verschil: s.vergelijking.totaal_verschil, gelijke_cijfers: s.vergelijking.gelijke_cijfers })) : null,
+      gesprek: vg.filter(s => s.vergelijking.groot_verschil || s.vergelijking.positie_oneens).map(s => s.naam),
+      signalen: { na_bevriezing: l.filter(s => s.beoordelingen.some(b => b.na_bevriezing)).map(s => s.naam), familie: l.filter(s => s.beoordelingen.some(b => b.familie)).map(s => s.naam) },
+      let_op_vergelijking: vg.length ? undefined : "Per speler hooguit één beoordelaar: niets te vergelijken.", lijst: l };
+  });
+  if (!uit.length) throw new Error("Geen spelers gevonden in " + wens.join(", ") + " bij " + club + ".");
+  const res = { club, periode_filter: args.periode ? String(args.periode) : null, teams: uit,
+    let_op: "Cijfers 1-5; 0 of leeg telt niet mee. Vergelijking = laatste beoordeling per beoordelaar, verschil = hoogste min laagste per vak; gesprek = verschil van 2 of meer, of oneens over de positie." };
+  // Te groot voor één antwoord: eerst de toelichtingen per vak weg, dan de opmerkingen inkorten.
+  if (JSON.stringify(res).length > 120000) { uit.forEach(t => t.lijst.forEach(s => s.beoordelingen.forEach(b => { delete b.toelichting; }))); res.ingekort = "zonder toelichting per vak"; }
+  if (JSON.stringify(res).length > 120000) { uit.forEach(t => t.lijst.forEach(s => s.beoordelingen.forEach(b => { if (b.opmerking) b.opmerking = b.opmerking.slice(0, 120); if (b.werkpunt) b.werkpunt = b.werkpunt.slice(0, 120); }))); res.ingekort = "toelichting weg, opmerkingen ingekort; vraag één team tegelijk voor alles"; }
+  return res;
 }
 // Stand van de trainersformulieren per periode (voor TC-overleg). Geen formulierlinks (token) en geen spelersgegevens.
 const SCOUT_FASE = { ingetrokken: "ingetrokken", geimporteerd: "verwerkt", klaar: "ingeleverd", wacht: "alles ingevuld, niet ingeleverd", bezig: "bezig", geopend: "geopend, niets ingevuld", verstuurd: "verstuurd, niet geopend" };
