@@ -1200,6 +1200,35 @@ await run("mcp: schermafbeelding van de Mac (chrome-actie scherm): afleveren met
     assert(g.isError && /niet bij de Worker aangekomen/.test(g.content[0].text), "zonder afgeleverd beeld een nette fout (" + (metObject ? "object" : "KV") + ")");
   }
 });
+await run("mcp: schermafbeelding van één venster (app, zoom, deel): vorm begrensd, velden terug, oude Mac-versie eerlijk gemeld", async () => {
+  const bk = "s".repeat(32), beeld = btoa("jpegdata".repeat(50));
+  const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, BRUG_KEY: bk };
+  let gezien = null, antwoord = null;
+  env.BRUG = { fetch: async () => {
+    gezien = (await (await worker.fetch(new Request("https://w.workers.dev/brug/open-url", { method: "POST", headers: { "x-brug-key": bk } }), env)).json()).job;
+    await worker.fetch(new Request("https://w.workers.dev/brug/scherm", { method: "POST", headers: { "x-brug-key": bk, "Content-Type": "application/json" }, body: JSON.stringify({ id: "abc123xyz", mime: "image/jpeg", beeld }) }), env);
+    return new Response(JSON.stringify({ gelukt: true, uitvoer: JSON.stringify(antwoord) }), { status: 200 }); } };
+  antwoord = { afgeleverd: "abc123xyz", breedte: 1440, kb: 20, programma: "Windows App", vergroot: true, zoom: 3, deel: "linksboven", teruggezet: true };
+  let f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm","app":"Windows App","zoom":9,"deel":"linksboven"}' }), o = JSON.parse(f.content[0].text);
+  assert(gezien.venster === true && gezien.app === "Windows App" && gezien.zoom === 3 && gezien.deel === "linksboven" && gezien.groot === undefined, "zoom begrensd op 3, app en deel mee", JSON.stringify(gezien));
+  assert(!f.isError && o.beeld === beeld && o.programma === "Windows App" && o.vergroot === true && o.zoom === 3 && o.deel === "linksboven" && o.teruggezet === true && !/niet teruggezet/.test(o.let_op), "velden van het venster komen terug", f.content[0].text.slice(-300));
+  antwoord = { ...antwoord, teruggezet: false };
+  f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm","venster":true,"groot":false,"deel":"ergens"}' }); o = JSON.parse(f.content[0].text);
+  assert(gezien.venster === true && gezien.app === undefined && gezien.zoom === 0 && gezien.groot === false && gezien.deel === undefined, "voorste venster zonder vergroten, onbekend deel weg", JSON.stringify(gezien));
+  assert(/niet teruggezet/.test(o.let_op), "niet teruggezet wordt gemeld");
+  antwoord = { afgeleverd: "abc123xyz", breedte: 1440, kb: 20 };   // oude open-url.mjs op de Mac: hele scherm
+  f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm","app":"Preview"}' }); o = JSON.parse(f.content[0].text);
+  assert(o.hele_scherm === true && /haal-op-admin/.test(o.let_op), "oude versie op de Mac eerlijk gemeld", o.let_op);
+  f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm","app":"x; rm -rf"}' });
+  assert(f.isError && /naam van het programma/.test(f.content[0].text), "vreemde programmanaam geweigerd");
+  f = await tool(env, "terminal_uitvoeren", { opdracht: 'chrome {"actie":"scherm"}' });
+  assert(gezien.venster === undefined && gezien.zoom === undefined, "zonder velden blijft het hele scherm", JSON.stringify(gezien));
+  const m = await import("./open-url.mjs"), v = { x: 0, y: 25, b: 1728, h: 1055 };
+  assert(m.schermVak(v).join() === "0,25,1728,1055" && m.schermVak(v, "rechtsonder").join() === "864,553,864,528" && m.schermVak(v, "boven").join() === "0,25,1728,528" && m.schermVak(v, "onzin").join() === "0,25,1728,1055", "vak van het venster en van een deel", m.schermVak(v, "rechtsonder").join());
+  assert(m.GEHEIM_APP.test("1Password 7") && m.GEHEIM_APP.test("Strongbox") && !m.GEHEIM_APP.test("Google Chrome"), "wachtwoordprogramma's uitgesloten");
+  const bron = (await import("node:fs")).readFileSync(new URL("./open-url.mjs", import.meta.url), "utf8");
+  assert(/finally \{ if \(st\) await vensterTerug\(st\);/.test(bron), "terugzetten staat in een finally");
+});
 await run("mcp: web_foto: afbeelding of voorvertoning van een pagina, alleen openbare adressen", async () => {
   const seen = [], png = new Uint8Array(300).fill(7);
   const restore = mockUpstream((c) => { const u = String(c.url); seen.push(u);

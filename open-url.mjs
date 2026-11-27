@@ -309,10 +309,76 @@ const SCHERM_DOEL = 22000;
 const SCHERM_STAPPEN = (z) => [[z, 50], [Math.min(z, 1200), 40], [1000, 32], [900, 26], [800, 22], [700, 18], [600, 15]];
 // Schermafbeelding van het hoofdscherm (alles wat er staat, ook RDP/Citrix): screencapture, verkleinen met sips, afleveren bij de Worker.
 // Vraagt eenmalig Schermopname voor node in de systeeminstellingen; zonder die toestemming toont macOS alleen bureaublad en menubalk.
+// Eén venster in plaats van het hele scherm (27 november): het venster van een programma naar voren halen, zo groot als het scherm maken,
+// eventueel inzoomen (cmd +), alleen dat venster vastleggen en daarna alles terugzetten (zoom, maat, plek en het programma dat voor stond).
+// Het terugzetten gebeurt hier in een finally, niet door het taalmodel. Wachtwoordprogramma's worden nooit vastgelegd.
+const GEHEIM_APP = /^(strongbox|wachtwoorden|passwords|sleutelhangertoegang|keychain access|1password.*|bitwarden|keepassxc)$/i;
+const DELEN = { linksboven: [0, 0, .5, .5], rechtsboven: [.5, 0, .5, .5], linksonder: [0, .5, .5, .5], rechtsonder: [.5, .5, .5, .5], boven: [0, 0, 1, .5], onder: [0, .5, 1, .5], links: [0, 0, .5, 1], rechts: [.5, 0, .5, 1] };
+// Het vak (x, y, breed, hoog in schermpunten) dat vastgelegd wordt: het hele venster of een deel ervan.
+function schermVak(v, deel) {
+  const d = DELEN[deel] || [0, 0, 1, 1];
+  return [Math.round(v.x + v.b * d[0]), Math.round(v.y + v.h * d[1]), Math.max(1, Math.round(v.b * d[2])), Math.max(1, Math.round(v.h * d[3]))];
+}
+const OSA = "/usr/bin/osascript", SE = 'tell application "System Events"';
+async function vensterKlaar(job) {
+  const naam = String(job.app || ""), zoom = Math.min(Math.max(Math.round(Number(job.zoom) || 0), 0), 3);
+  if (naam && !/^[\p{L}\p{N}][\p{L}\p{N} ._+&-]*$/u.test(naam)) return { fout: "Geen geldige programmanaam." };
+  // stap 1: alleen kijken (programma naar voren, plek en maat van het voorste venster); nog niets veranderd
+  const a = await run(OSA, ["-e", "on run a", "-e", "set naam to item 1 of a", "-e", SE,
+    "-e", "set vorig to name of (first application process whose frontmost is true)",
+    "-e", 'if naam is "" then', "-e", "set p to first application process whose frontmost is true", "-e", "else",
+    "-e", "if not (exists application process naam) then", "-e", 'set AppleScript\'s text item delimiters to ", "',
+    "-e", 'error "NIETOPEN " & ((name of every application process whose background only is false) as text) number 9001', "-e", "end if",
+    "-e", "set p to application process naam", "-e", "set frontmost of p to true", "-e", "delay 0.5", "-e", "end if",
+    "-e", 'if (count of windows of p) is 0 then error "GEENVENSTER" number 9002', "-e", "set w to window 1 of p",
+    "-e", "set {x0, y0} to position of w", "-e", "set {b0, h0} to size of w",
+    "-e", 'return (name of p) & tab & vorig & tab & x0 & tab & y0 & tab & b0 & tab & h0', "-e", "end tell", "-e", "end run", naam], 8000);
+  if (a.code !== 0) {
+    const open = (a.err.match(/NIETOPEN (.*?)(?: \(-?\d+\))?$/) || [])[1];
+    if (open != null) return { fout: "Dat programma staat niet open onder die naam.", open_programmas: open.split(", ").filter(x => x && !GEHEIM_APP.test(x)).slice(0, 30) };
+    if (/GEENVENSTER/.test(a.err)) return { fout: "Dat programma heeft geen venster open." };
+    return { fout: a.err ? uitleg(a.err).replace(/^Chrome gaf een fout/, "Het venster zoeken gaf een fout") : "Het venster zoeken duurde te lang." };
+  }
+  const [prog, vorig, x0, y0, b0, h0] = a.out.split("\t"), begin = { x: +x0, y: +y0, b: +b0, h: +h0 };
+  const stand = { prog, vorig, begin, zoom: 0, vergroot: false, nu: begin };
+  if (GEHEIM_APP.test(prog.trim())) { await vensterTerug(stand); return { fout: "Van een wachtwoordprogramma maakt Jarvis geen opname." }; }
+  if (![begin.x, begin.y, begin.b, begin.h].every(Number.isFinite) || begin.b < 50 || begin.h < 50) { await vensterTerug(stand); return { fout: "De maat van het venster is niet te lezen." }; }
+  // stap 2: vergroten tot het hele hoofdscherm en inzoomen; lukt vergroten niet (schermvullend venster), dan blijft het zoals het is
+  let scherm = null;
+  if (job.groot !== false) {
+    const m = await run(OSA, ["-l", "JavaScript", "-e", 'ObjC.import("AppKit"); var f = $.NSScreen.mainScreen.frame; Math.round(f.size.width) + " " + Math.round(f.size.height)'], 6000);
+    const [sb, sh] = m.out.split(" ").map(Number); if (m.code === 0 && sb > 400 && sh > 300) scherm = sb + ";" + (sh - 25);
+  }
+  stand.zoom = zoom; stand.vergroot = !!scherm;   // vanaf hier altijd terugzetten, ook als de stap halverwege misgaat
+  const b = await run(OSA, ["-e", "on run a", "-e", 'set AppleScript\'s text item delimiters to ";"', "-e", SE, "-e", "set p to application process (item 1 of a)", "-e", "set w to window 1 of p",
+    "-e", 'if (item 2 of a) is not "" then', "-e", "try", "-e", "set m to text items of (item 2 of a)", "-e", "set position of w to {0, 25}",
+    "-e", "set size of w to {(item 1 of m) as integer, (item 2 of m) as integer}", "-e", "delay 0.6", "-e", "end try", "-e", "end if",
+    "-e", "repeat (item 3 of a) as integer times", "-e", 'keystroke "+" using command down', "-e", "delay 0.3", "-e", "end repeat", "-e", "delay 0.5",
+    "-e", "set {x1, y1} to position of w", "-e", "set {b1, h1} to size of w", "-e", 'return "" & x1 & tab & y1 & tab & b1 & tab & h1', "-e", "end tell", "-e", "end run", prog, scherm || "", String(zoom)], 9000);
+  const n = b.out.split("\t").map(Number);
+  if (b.code !== 0 || n.length !== 4 || !n.every(Number.isFinite)) { await vensterTerug(stand); return { fout: b.err ? uitleg(b.err).replace(/^Chrome gaf een fout/, "Het venster vergroten gaf een fout") : "Het venster vergroten duurde te lang." }; }
+  stand.nu = { x: n[0], y: n[1], b: n[2], h: n[3] };
+  stand.vergroot = !!scherm && (stand.nu.b !== begin.b || stand.nu.h !== begin.h || stand.nu.x !== begin.x || stand.nu.y !== begin.y);
+  return stand;
+}
+// Alles terug: uitzoomen (zelfde aantal stappen), maat en plek van het venster, en het programma dat voor stond weer naar voren.
+async function vensterTerug(st) {
+  const g = st.begin, r = await run(OSA, ["-e", "on run a", "-e", 'set AppleScript\'s text item delimiters to ";"', "-e", "set m to text items of (text 2 thru -1 of (item 3 of a))", "-e", SE,
+    "-e", "set p to application process (item 1 of a)",
+    "-e", "if ((item 2 of a) as integer) > 0 then", "-e", "set frontmost of p to true", "-e", "delay 0.3", "-e", "repeat (item 2 of a) as integer times", "-e", 'keystroke "-" using command down', "-e", "delay 0.25", "-e", "end repeat", "-e", "end if",
+    "-e", 'if (item 4 of a) is "1" then', "-e", "set w to window 1 of p", "-e", "set size of w to {(item 3 of m) as integer, (item 4 of m) as integer}",
+    "-e", "set position of w to {(item 1 of m) as integer, (item 2 of m) as integer}", "-e", "end if",
+    "-e", "if (item 5 of a) is not (item 1 of a) then", "-e", "try", "-e", "set frontmost of application process (item 5 of a) to true", "-e", "end try", "-e", "end if",
+    "-e", "end tell", "-e", 'return "ok"', "-e", "end run", st.prog, String(st.zoom), "p" + [g.x, g.y, g.b, g.h].join(";"), st.vergroot ? "1" : "0", st.vorig], 8000);
+  return r.code === 0;
+}
 async function scherm(job, key) {
   const id = Math.random().toString(36).slice(2, 10) + Date.now().toString(36), ruw = path.join(os.tmpdir(), "jarvis-scherm-" + id + ".jpg"), klein = ruw.replace(".jpg", "-k.jpg");
+  let st = null, terug = null;
   try {
-    const c = await run("/usr/sbin/screencapture", ["-x", "-t", "jpg", ruw], 10000);   // vol pad: de brug draait als launchd-dienst zonder /usr/sbin in PATH
+    if (job.venster) { st = await vensterKlaar(job); if (st.fout) { const f = st; st = null; return f; } }
+    const c = await run("/usr/sbin/screencapture", ["-x", ...(st ? ["-R", schermVak(st.nu, job.deel).join(",")] : []), "-t", "jpg", ruw], 10000);   // vol pad: de brug draait als launchd-dienst zonder /usr/sbin in PATH
+    if (st) { terug = await vensterTerug(st); const klaar = st; st = null; job = { ...job, _v: klaar }; }   // meteen terugzetten, vóór het verkleinen en afleveren
     if (/ENOENT/.test(c.err)) return { fout: "Het programma screencapture is niet gevonden op de Mac (/usr/sbin/screencapture)." };
     if (c.code !== 0 || !fs.existsSync(ruw) || !fs.statSync(ruw).size) return { fout: "Schermafbeelding maken mislukt" + (c.err ? " (" + c.err.slice(0, 120) + ")" : "") + ". Zet aan: Systeeminstellingen > Privacy en beveiliging > Schermopname > node (of Terminal)." };
     let buf = null, zijde = Number(job.breed) || 1440;
@@ -325,9 +391,10 @@ async function scherm(job, key) {
     if (buf.length > 1000000) return { fout: "De schermafbeelding blijft te groot om door te geven (" + Math.round(buf.length / 1024) + " kB)." };
     const r = await fetch(WORKER + "/brug/scherm", { method: "POST", headers: { "x-brug-key": key, "Content-Type": "application/json" }, body: JSON.stringify({ id, mime: "image/jpeg", beeld: buf.toString("base64") }), signal: AbortSignal.timeout(15000) });
     if (!r.ok) return { fout: "De Worker nam de schermafbeelding niet aan (" + r.status + ")." };
-    return { afgeleverd: id, breedte: zijde, kb: Math.round(buf.length / 1024) };
+    const v = job._v;
+    return { afgeleverd: id, breedte: zijde, kb: Math.round(buf.length / 1024), ...(v ? { programma: v.prog, vergroot: v.vergroot, zoom: v.zoom, ...(DELEN[job.deel] ? { deel: job.deel } : {}), teruggezet: terug === true } : {}) };
   } catch (e) { return { fout: "Schermafbeelding doorgeven mislukt: " + String((e && e.message) || e).slice(0, 120) }; }
-  finally { for (const f of [ruw, klein]) { try { fs.unlinkSync(f); } catch {} } }
+  finally { if (st) await vensterTerug(st); for (const f of [ruw, klein]) { try { fs.unlinkSync(f); } catch {} } }
 }
 
 async function chrome(job, key) {
@@ -383,5 +450,5 @@ async function main() {
   const r = await run("open", ["-na", "Google Chrome", "--args", "--new-window", u.href]);
   console.log(r.code === 0 ? "Geopend in Chrome: " + u.hostname : "Chrome starten mislukt: " + (r.err || "foutcode " + r.code)); process.exit(r.code || 0);
 }
-export { SDOEL, safari };
+export { SDOEL, safari, schermVak, DELEN, GEHEIM_APP };
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
