@@ -594,10 +594,10 @@ const MCP_TOOLS = [
   { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis.",
     inputSchema: { type: "object", properties: { actie: { type: "string" }, naam: { type: "string" }, bron: { type: "string" }, doel: { type: "string" }, config: { type: "object" }, bevestigd: { type: "boolean" } }, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
-  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. actie speler = volledig dossier van één speler (id of naam), met metingen en scores, voor advies en rapporten. actie onderdeel = één onderdeel van de app ruw (naam, bv. knvb_periodes; zonder naam de lijst). actie controle = datacontrole: dubbele spelers en id's, verwijzingen naar onbekende spelers, spelers zonder team of geboortejaar. actie trainers = stand van de trainersformulieren van een periode (standaard de actieve; periode = naam of id, club optioneel): per trainer team, status, ingevuld, deadline; standaard alleen wie nog niet heeft ingeleverd (alleen_open:false = iedereen). Gegevens van kinderen: alleen voor wat Micha vraagt.",
-    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers", "speler", "onderdeel", "controle", "trainers"] }, club: { type: "string" }, periode: { type: "string" }, alleen_open: { type: "boolean" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" }, id: { type: "string" }, naam: { type: "string" } }, required: ["actie"], additionalProperties: false },
+  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. actie speler = volledig dossier van één speler (id of naam), met metingen en scores, voor advies en rapporten. actie onderdeel = één onderdeel van de app ruw (naam, bv. knvb_periodes; zonder naam de lijst). actie controle = datacontrole: dubbele spelers en id's, verwijzingen naar onbekende spelers, spelers zonder team of geboortejaar. actie metingen = tabel per speler van een team of jaargroep (team = O12-1, of O12 voor alle O12-teams; optioneel periode): aantal metingen (trainer, scout, wedstrijd), gemiddelden techniek, tactiek, mentaal, fysiek en de KNVB-fases; gebruik dit in plaats van speler per speler. actie trainers = stand van de trainersformulieren van een periode (standaard de actieve; periode = naam of id, club optioneel): per trainer team, status, ingevuld, deadline; standaard alleen wie nog niet heeft ingeleverd (alleen_open:false = iedereen). Gegevens van kinderen: alleen voor wat Micha vraagt.",
+    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers", "speler", "onderdeel", "controle", "trainers", "metingen"] }, club: { type: "string" }, periode: { type: "string" }, alleen_open: { type: "boolean" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" }, id: { type: "string" }, naam: { type: "string" } }, required: ["actie"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
-  { name: "scout_wijzigen", description: "Een wijziging in de scout-app doen met de sleutel van Jarvis (die moet het niveau lezen en wijzigen hebben). route = script?action=..., alleen periodes.php (start, periode, indeling, intrek, uitsluit, uitsluit_terug, evaluatie, keepers, trainers, trainers_over) of kijkplan.php (toewijzen, ontwijzen, inschrijven, uitschrijven); gegevens = de JSON zoals in de kop van dat script staat. Zonder bevestigd:true alleen een voorvertoning: laat Micha zien wat er verandert en vraag om een ja. Nooit scores bijsturen, metingen aanmaken of antwoorden van trainers wijzigen.",
+  { name: "scout_wijzigen", description: "Een wijziging in de scout-app doen met de sleutel van Jarvis (die moet het niveau lezen en wijzigen hebben). route = script?action=..., alleen periodes.php (start, periode, indeling, intrek, uitsluit, uitsluit_terug, evaluatie, keepers, trainers, trainers_over) of kijkplan.php (toewijzen, ontwijzen, inschrijven, uitschrijven); gegevens = de JSON zoals in de kop van dat script staat. route deadline = deadline van open trainersformulieren verzetten (gegevens: datum JJJJ-MM-DD, periode, optioneel teams). periodes.php?action=periode = datums of naam van een periode: gegevens periode (naam of nummer), start, eind. Zonder bevestigd:true alleen een voorvertoning: laat Micha zien wat er verandert en vraag om een ja. Nooit scores bijsturen, metingen aanmaken of antwoorden van trainers wijzigen.",
     inputSchema: { type: "object", properties: { route: { type: "string" }, gegevens: { type: "object" }, bevestigd: { type: "boolean" } }, required: ["route"], additionalProperties: false } },
   { name: "rijplan", description: "Het rijplan uit de JO11-2-app: per dag de wedstrijden van JO11-2 en JO14-2 (tijd, tegenstander, thuis of uit, locatie), of ze overlappen, de gemaakte rijkeuze en wat er aan het andere team doorgegeven moet worden. Zonder datums: vandaag tot en met veertien dagen verder. Datums als JJJJ-MM-DD, hooguit 62 dagen. Alleen lezen.",
     inputSchema: { type: "object", properties: { van: { type: "string" }, tot: { type: "string" } }, additionalProperties: false },
@@ -1938,7 +1938,35 @@ async function mcpScoutLezen(args, env) {
     return { club, spelers: spelers.length, per_team: tel(spelers, x => x.huidig || x.team), per_geboortejaar: tel(spelers, jaar), per_lichting: tel(spelers, x => x.lichting), per_club: tel(spelers, x => x.club), spelers_met_meting: metM.length, metingen_totaal: nM, spelers_zonder_team: spelers.filter(x => !(x.huidig || x.team)).length, spelers_zonder_geboortejaar: spelers.filter(x => jaar(x) === "onbekend").length, velden_van_een_speler: spelers[0] ? Object.keys(spelers[0]).sort().slice(0, 80) : [], onderdelen, stand: d.knvb_sync_rev != null ? String(d.knvb_sync_rev) : null };
   }
   if (actie === "trainers") return scoutTrainers(args, env);
+  if (actie === "metingen") return scoutMetingen(args, env);
   throw new Error("Kies een actie: wie, overzicht, spelers, speler, onderdeel, controle of trainers.");
+}
+// Samenvatting van metingen per speler voor een team of jaargroep (bv. O12 = O12-1, O12-2, O12-3): klein genoeg voor Jarvis.
+function scoutGetal(v) { if (v && typeof v === "object") v = v.score ?? v.waarde ?? v.s; const n = Number(v); return isFinite(n) && n > 0 ? n : null; }
+function scoutGem(l) { const v = l.filter(x => x != null); return v.length ? Math.round(v.reduce((a, b) => a + b, 0) / v.length * 10) / 10 : null; }
+async function scoutMetingen(args, env) {
+  const club = scoutClub(args), d = await scoutGet(env, new URLSearchParams({ club }).toString());
+  let team = d.knvb_team; if (typeof team === "string") { try { team = JSON.parse(team); } catch { team = []; } }
+  const norm = v => String(v || "").toLowerCase().replace(/[\s]/g, "");
+  const f = norm(args.team); if (!f) throw new Error("Geef team mee, bijvoorbeeld O12-1, of O12 voor alle O12-teams.");
+  const past = t => { const n = norm(t); return f.includes("-") ? n === f : (n === f || n.startsWith(f + "-")); };
+  const pv = String(args.periode || "").toLowerCase().trim();
+  const rijen = (Array.isArray(team) ? team : []).filter(x => x && typeof x === "object" && x.naam && past(x.huidig || x.team)).map(x => {
+    let ms = Array.isArray(x.metingen) ? x.metingen.filter(m => m && typeof m === "object") : [];
+    if (pv) ms = ms.filter(m => JSON.stringify([m.periode, m.periode_id, m.periodeNaam, m.bron, m.type, m.notitie]).toLowerCase().includes(pv));
+    const soort = m => /trainer|evaluatie|periode/i.test(String(m.type || "") + " " + String(m.bron || "")) ? "trainer" : (/wedstrijd/i.test(String(m.type || "") + String(m.bron || "")) ? "wedstrijd" : "scout");
+    const vak = k => scoutGem(ms.map(m => scoutGetal(m[k])));
+    const fase = naam => scoutGem(ms.flatMap(m => { const mx = m.knvbMatrix && m.knvbMatrix[naam]; const sc = mx && (mx.scores || mx); return sc && typeof sc === "object" ? Object.values(sc).map(scoutGetal) : []; }));
+    const datums = ms.map(m => String(m.datum || "").slice(0, 10)).filter(Boolean).sort();
+    return { naam: String(x.naam), team: x.huidig || x.team || null, metingen: ms.length,
+      trainer: ms.filter(m => soort(m) === "trainer").length, scout: ms.filter(m => soort(m) === "scout").length, wedstrijd: ms.filter(m => soort(m) === "wedstrijd").length,
+      techniek: vak("techScore"), tactiek: vak("tactScore"), mentaal: vak("mentScore"), fysiek: vak("fysScore"),
+      aanvallen: fase("aanvallen") ?? fase("Aanvallen"), verdedigen: fase("verdedigen") ?? fase("Verdedigen"), omschakelen: fase("omschakelen") ?? fase("Omschakelen"),
+      eerste: datums[0] || null, laatste: datums[datums.length - 1] || null };
+  }).sort((a, b) => String(a.team).localeCompare(String(b.team), "nl", { numeric: true }) || a.naam.localeCompare(b.naam, "nl"));
+  return { club, team: args.team, periode_filter: pv || null, spelers: rijen.length, zonder_meting: rijen.filter(r => !r.metingen).length,
+    per_team: rijen.reduce((o, r) => { o[r.team] = (o[r.team] || 0) + 1; return o; }, {}), lijst: rijen.slice(0, 120),
+    let_op: "Gemiddelden op schaal 1-5 van alle metingen (niet ingevuld telt niet mee). Matrix = KNVB-fases, apart van de vier vakken." };
 }
 // Stand van de trainersformulieren per periode (voor TC-overleg). Geen formulierlinks (token) en geen spelersgegevens.
 const SCOUT_FASE = { ingetrokken: "ingetrokken", geimporteerd: "verwerkt", klaar: "ingeleverd", wacht: "alles ingevuld, niet ingeleverd", bezig: "bezig", geopend: "geopend, niets ingevuld", verstuurd: "verstuurd, niet geopend" };
@@ -1988,12 +2016,63 @@ function scoutZonderTokens(v, d = 0) {
   if (Array.isArray(v)) return v.slice(0, 200).map(x => scoutZonderTokens(x, d + 1));
   const o = {}; for (const [k, x] of Object.entries(v)) { if (/^(token|link|url|sleutel|secret)$/i.test(k)) continue; o[k] = scoutZonderTokens(x, d + 1); } return o;
 }
+// Deadline van trainersformulieren verzetten via de bestaande portalknop (forms.php heropen); tokens blijven in de Worker.
+async function scoutDeadline(args, env) {
+  const g = args.gegevens && typeof args.gegevens === "object" ? args.gegevens : {};
+  const datum = String(g.datum || g.deadline || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(datum) || isNaN(Date.parse(datum))) throw new Error("Geef gegevens.datum als JJJJ-MM-DD.");
+  if (datum < new Date().toISOString().slice(0, 10)) throw new Error("De nieuwe deadline ligt in het verleden.");
+  const q = new URLSearchParams({ action: "state" }); if (g.club) q.set("club", String(g.club));
+  const d = await scoutGet(env, q.toString(), "periodes.php");
+  const periodes = Array.isArray(d.periodes) ? d.periodes : [];
+  const zoek = String(g.periode || "").toLowerCase().trim();
+  const per = (zoek && periodes.find(p => String(p.id).toLowerCase() === zoek || String(p.naam || "").toLowerCase().includes(zoek))) || periodes.find(p => String(p.id) === String(d.actiefId));
+  if (!per) throw new Error("Periode niet gevonden. Kies uit: " + periodes.map(p => p.naam || p.id).join(", ") + ".");
+  const teams = Array.isArray(g.teams) ? g.teams.map(t => String(t).toLowerCase().replace(/\s+/g, "")) : [];
+  const naam = {}; (d.personen || []).forEach(p => { naam[String(p.id)] = String(p.naam || ""); });
+  const doel = (d.evaluaties || []).filter(e => String(e.periode_id) === String(per.id) && e.token && !["klaar", "geimporteerd", "ingetrokken"].includes(scoutFase(e))
+    && (!teams.length || teams.includes(String(e.team_id).toLowerCase().replace(/\s+/g, ""))));
+  const regels = doel.map(e => ({ team: e.team_id, trainer: naam[String(e.persoon_id)] || e.trainerNaam || "onbekend", status: SCOUT_FASE[scoutFase(e)] + (e.geslotenOp ? " (link gesloten)" : ""), oude_deadline: e.verlooptOp ? String(e.verlooptOp).slice(0, 10) : null, nieuwe_deadline: datum }))
+    .sort((a, b) => String(a.team).localeCompare(String(b.team), "nl", { numeric: true }));
+  if (!doel.length) return { periode: per.naam || per.id, aantal: 0, let_op: "Geen open formulieren in deze periode: niets te verzetten." };
+  if (args.bevestigd !== true) return { voorvertoning: true, periode: per.naam || per.id, aantal: regels.length, formulieren: regels, let_op: "Nog niets gewijzigd. Noem Micha het aantal formulieren en de nieuwe datum, vraag om een ja, en roep daarna opnieuw aan met dezelfde route en gegevens en bevestigd:true. Een gesloten link gaat hierbij weer open; antwoorden blijven staan." };
+  const basis = String(env.SCOUT_URL || "https://scout.app1x.online").replace(/\/+$/, "");
+  const gelukt = [], mislukt = [];
+  for (let i = 0; i < doel.length; i++) {
+    const e = doel[i], r0 = regels.find(r => r.team === e.team_id && r.trainer === (naam[String(e.persoon_id)] || e.trainerNaam || "onbekend")) || { team: e.team_id };
+    try {
+      const r = await fetch(basis + "/forms.php", { method: "POST", redirect: "manual", signal: AbortSignal.timeout(20000), body: JSON.stringify({ action: "heropen", token: e.token, verlooptOp: datum }),
+        headers: { Authorization: "Bearer " + String(env.SCOUT_SLEUTEL).trim(), Origin: basis, "Content-Type": "application/json", Accept: "application/json", "User-Agent": "Jarvis-scout" } });
+      let j = null; try { j = await r.json(); } catch { j = null; }
+      if (r.ok && j && j.ok) gelukt.push({ team: r0.team, trainer: r0.trainer, deadline: j.verlooptOp || datum });
+      else mislukt.push({ team: r0.team, trainer: r0.trainer, fout: String((j && (j.reden || j.error)) || ("status " + r.status)).slice(0, 120) });
+    } catch { mislukt.push({ team: r0.team, trainer: r0.trainer, fout: "niet bereikbaar" }); }
+  }
+  return { gewijzigd: gelukt.length > 0, periode: per.naam || per.id, nieuwe_deadline: datum, gelukt, mislukt };
+}
 async function mcpScoutWijzigen(args, env) {
+  if (String(args.route || "").trim().toLowerCase() === "deadline") return scoutDeadline(args, env);
   const m = String(args.route || "").trim().match(/^\/?([a-z]+\.php)\?action=([a-z_]+)$/);
   if (!m || !SCOUT_SCHRIJF[m[1]] || !SCOUT_SCHRIJF[m[1]].includes(m[2])) throw new Error("Deze route mag niet. Toegestaan: " + Object.entries(SCOUT_SCHRIJF).map(([k, v]) => k + " (" + v.join(", ") + ")").join("; ") + ".");
-  const gegevens = args.gegevens && typeof args.gegevens === "object" && !Array.isArray(args.gegevens) ? args.gegevens : {};
+  const gegevens = Object.assign({}, args.gegevens && typeof args.gegevens === "object" && !Array.isArray(args.gegevens) ? args.gegevens : {});
+  let huidig = null;
+  if (m[1] === "periodes.php") {
+    // Vriendelijke namen omzetten: periode (naam, nummer of id) -> periode_id; einde/einddatum -> eind; begin -> start.
+    if (gegevens.id !== undefined && gegevens.periode_id === undefined && gegevens.periode === undefined) { gegevens.periode = String(gegevens.id); delete gegevens.id; }
+    for (const [van, naar] of [["einde", "eind"], ["einddatum", "eind"], ["eind_datum", "eind"], ["begin", "start"], ["startdatum", "start"]]) if (gegevens[van] !== undefined && gegevens[naar] === undefined) { gegevens[naar] = gegevens[van]; delete gegevens[van]; }
+    if (!gegevens.periode_id && (gegevens.periode !== undefined || m[2] === "periode")) {
+      const st = await scoutGet(env, "action=state", "periodes.php"), ps = Array.isArray(st.periodes) ? st.periodes : [];
+      const z = String(gegevens.periode ?? "").toLowerCase().trim();
+      const p = ps.find(x => String(x.id).toLowerCase() === z || String(x.naam || "").toLowerCase() === z || String(x.nr) === z || String(x.naam || "").toLowerCase() === "periode " + z) || (!z ? ps.find(x => String(x.id) === String(st.actiefId)) : null);
+      if (!p) throw new Error("Periode '" + z + "' niet gevonden. Kies uit: " + ps.map(x => x.naam || x.id).join(", ") + ".");
+      gegevens.periode_id = String(p.id); delete gegevens.periode;
+      huidig = { periode: p.naam || p.id, start: p.start || null, eind: p.eind || null };
+    }
+    if (m[2] === "periode") { for (const k of Object.keys(gegevens)) if (!["periode_id", "naam", "start", "eind"].includes(k)) delete gegevens[k];
+      if (gegevens.start === undefined && gegevens.eind === undefined && !gegevens.naam) throw new Error("Geef naam, start of eind (JJJJ-MM-DD) mee."); }
+  }
   const body = JSON.stringify(gegevens); if (body.length > 200000) throw new Error("De gegevens zijn te groot.");
-  if (args.bevestigd !== true) return { voorvertoning: true, route: m[1] + "?action=" + m[2], gegevens, let_op: "Nog niets gewijzigd. Vertel Micha in gewone woorden wat er verandert en vraag om een ja; roep daarna opnieuw aan met dezelfde route en gegevens en bevestigd:true." };
+  if (args.bevestigd !== true) return { voorvertoning: true, route: m[1] + "?action=" + m[2], gegevens, ...(huidig ? { nu: huidig } : {}), let_op: "Nog niets gewijzigd. Vertel Micha in gewone woorden wat er verandert en vraag om een ja; roep daarna opnieuw aan met dezelfde route en gegevens en bevestigd:true." };
   if (!env.SCOUT_SLEUTEL) throw new Error("De scout-app is nog niet gekoppeld: de Secret SCOUT_SLEUTEL ontbreekt in de Worker.");
   const basis = String(env.SCOUT_URL || "https://scout.app1x.online").replace(/\/+$/, "");
   if (!/^https:\/\//.test(basis)) throw new Error("SCOUT_URL moet met https:// beginnen.");
@@ -2006,7 +2085,14 @@ async function mcpScoutWijzigen(args, env) {
   if (r.status === 401) throw new Error("De scout-app weigert de sleutel (" + String((d && d.sleutel) || "onbekend") + ").");
   if (r.status === 403) throw new Error("Niet gewijzigd: " + String((d && (d.reden || d.error)) || "geen toegang") + (/alleen lezen/i.test(String(d && d.reden)) ? " Micha moet in de scout-app een sleutel met niveau lezen en wijzigen maken en die als SCOUT_SLEUTEL in de Worker zetten." : ""));
   if (!r.ok) throw new Error("Niet gewijzigd: de scout-app gaf " + r.status + (d && (d.error || d.fout) ? " (" + String(d.error || d.fout).slice(0, 200) + ")" : "") + ".");
-  return { gewijzigd: true, route: m[1] + "?action=" + m[2], antwoord: scoutKort(scoutZonderTokens(d), 20000) };
+  // Alleen een korte bevestiging terug: nooit de hele stand met namen van spelers.
+  const kort = {}; if (d && typeof d === "object") for (const [k, v] of Object.entries(d)) {
+    if (k === "periodes" && Array.isArray(v)) kort.periodes = v.map(p => ({ id: p.id, naam: p.naam, start: p.start, eind: p.eind, status: p.status }));
+    else if (v === null || ["string", "number", "boolean"].includes(typeof v)) kort[k] = typeof v === "string" ? v.slice(0, 300) : v;
+    else if (/^(info|resultaat|status_oud|status_nieuw)$/.test(k) && JSON.stringify(v).length < 2000) kort[k] = scoutZonderTokens(v);
+    else if (Array.isArray(v)) kort[k + "_aantal"] = v.length;
+  }
+  return { gewijzigd: true, route: m[1] + "?action=" + m[2], antwoord: kort };
 }
 async function mcpRijplan(args, env) {
   if (!env.JO11_KEY) throw new Error("Het rijplan is nog niet gekoppeld: de Secret JO11_KEY ontbreekt in de Worker.");

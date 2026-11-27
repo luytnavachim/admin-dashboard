@@ -1523,6 +1523,58 @@ await run("mcp: scout_wijzigen: alleen toegestane routes, eerst voorvertoning, s
     assert(l.isError && /lezen en wijzigen/.test(l.content[0].text), "leessleutel: duidelijke uitleg");
   } finally { restore(); }
 });
+await run("mcp: scout_wijzigen periode: periode op naam, einde wordt eind, huidige datums in voorvertoning", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
+    if (u === "https://scout.example/periodes.php?action=state") return new Response(JSON.stringify({ actiefId: "p2", periodes: [{ id: "p1", nr: 1, naam: "Periode 1", start: "2026-09-05", eind: "2026-10-23" }, { id: "p2", nr: 2, naam: "Periode 2", start: "2026-10-24", eind: "" }] }), { status: 200 });
+    if (u === "https://scout.example/periodes.php?action=periode") return new Response(JSON.stringify({ ok: true, periodes: [{ id: "p2", naam: "Periode 2", start: "2026-10-24", eind: "2026-12-05" }], team_indeling: [{ naam: "Kind Geheim" }] }), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), SCOUT_SLEUTEL: "ksp_test", SCOUT_URL: "https://scout.example" };
+    const v = (await tool(env, "scout_wijzigen", { route: "periodes.php?action=periode", gegevens: { club: "Wijhe 92", periode: "2", einde: "2026-12-05" } })).structuredContent;
+    assert(v.voorvertoning && v.gegevens.periode_id === "p2" && v.gegevens.eind === "2026-12-05" && !("club" in v.gegevens) && v.nu.start === "2026-10-24", "omgezet naar periode_id en eind", JSON.stringify(v));
+    const w = (await tool(env, "scout_wijzigen", { route: "periodes.php?action=periode", gegevens: { periode: "Periode 2", eind: "2026-12-05" }, bevestigd: true })).structuredContent;
+    const post = seen.find(c => /action=periode/.test(c.url));
+    assert(w.gewijzigd && JSON.parse(post.body).periode_id === "p2", "POST met periode_id", post && post.body);
+    assert(!/Kind Geheim/.test(JSON.stringify(w)) && w.antwoord.periodes[0].eind === "2026-12-05" && w.antwoord.team_indeling_aantal === 1, "antwoord zonder spelersnamen", JSON.stringify(w));
+    const i = (await tool(env, "scout_wijzigen", { route: "periodes.php?action=periode", gegevens: { id: "p2", einddatum: "2026-12-12" } })).structuredContent;
+    assert(i.gegevens.periode_id === "p2" && i.gegevens.eind === "2026-12-12", "id en einddatum worden herkend", JSON.stringify(i));
+  } finally { restore(); }
+});
+await run("mcp: scout_wijzigen deadline: voorvertoning, dan heropen per open formulier, tokens blijven binnen", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
+    if (u === "https://scout.example/periodes.php?action=state") return new Response(JSON.stringify({ actiefId: "p2", periodes: [{ id: "p1", naam: "Periode 1" }, { id: "p2", naam: "Periode 2" }],
+      personen: [{ id: "t1", naam: "Anna" }, { id: "t2", naam: "Bert" }, { id: "t3", naam: "Cor" }],
+      evaluaties: [{ token: "TOKA", periode_id: "p1", club: "C", team_id: "O11-1", persoon_id: "t1", aantalSpelers: 9, aantalIngevuld: 0, verlooptOp: "2026-11-27" },
+        { token: "TOKB", periode_id: "p1", club: "C", team_id: "O12-1", persoon_id: "t2", ingeleverdOp: "2026-11-01", aantalSpelers: 9, aantalIngevuld: 9 },
+        { token: "TOKC", periode_id: "p1", club: "C", team_id: "O13-1", persoon_id: "t3", aantalSpelers: 14, aantalIngevuld: 1, verlooptOp: "2026-12-04", geslotenOp: "2026-11-20" }] }), { status: 200 });
+    if (u === "https://scout.example/forms.php") { const b = JSON.parse(c.body); return new Response(JSON.stringify({ ok: true, token: b.token, verlooptOp: b.verlooptOp }), { status: 200 }); }
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), SCOUT_SLEUTEL: "ksp_test", SCOUT_URL: "https://scout.example" };
+    const v = await tool(env, "scout_wijzigen", { route: "deadline", gegevens: { datum: "2099-12-15", periode: "Periode 1" } });
+    assert(v.structuredContent.voorvertoning && v.structuredContent.aantal === 2 && seen.filter(c => /forms/.test(c.url)).length === 0 && !/TOK/.test(v.content[0].text), "voorvertoning: twee open formulieren, niets verstuurd, geen tokens", v.content[0].text);
+    const w = await tool(env, "scout_wijzigen", { route: "deadline", gegevens: { datum: "2099-12-15", periode: "Periode 1" }, bevestigd: true });
+    const posts = seen.filter(c => /forms\.php/.test(c.url));
+    assert(w.structuredContent.gelukt.length === 2 && posts.length === 2 && posts.every(c => c.method === "POST" && JSON.parse(c.body).action === "heropen" && JSON.parse(c.body).verlooptOp === "2099-12-15") && !/TOK/.test(w.content[0].text), "heropen per open formulier, ingeleverd overgeslagen", w.content[0].text);
+    const oud = await tool(env, "scout_wijzigen", { route: "deadline", gegevens: { datum: "2020-01-01" }, bevestigd: true });
+    assert(oud.isError, "datum in het verleden geweigerd");
+  } finally { restore(); }
+});
+await run("mcp: scout_lezen metingen: samenvatting per speler voor een jaargroep", async () => {
+  const restore = mockUpstream((c) => { const u = String(c.url);
+    if (u === "https://scout.example/api.php?club=Wijhe+92") return new Response(JSON.stringify({ knvb_team: [
+      { naam: "Anna", huidig: "O12-1", metingen: [{ datum: "2026-10-20", type: "periode-evaluatie", techScore: 4, tactScore: 3, mentScore: 0, fysScore: 5, knvbMatrix: { aanvallen: { scores: { a: 3, b: { score: 5 } } } } }, { datum: "2026-11-01", bron: "Scout", techScore: 2 }] },
+      { naam: "Bert", huidig: "O12-3", metingen: [] }, { naam: "Cor", huidig: "O13-1", metingen: [{ techScore: 5 }] }] }), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), SCOUT_SLEUTEL: "ksp_test", SCOUT_URL: "https://scout.example" };
+    const d = (await tool(env, "scout_lezen", { actie: "metingen", club: "Wijhe 92", team: "O12" })).structuredContent;
+    const a = d.lijst[0];
+    assert(d.spelers === 2 && d.zonder_meting === 1 && a.metingen === 2 && a.trainer === 1 && a.scout === 1 && a.techniek === 3 && a.mentaal === null && a.aanvallen === 4 && a.laatste === "2026-11-01", "O12 = O12-1 en O12-3, gemiddelden kloppen", JSON.stringify(d));
+  } finally { restore(); }
+});
 await run("mcp: scout_lezen trainers: stand per trainer, zonder tokens en spelers", async () => {
   const seen = [];
   const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
