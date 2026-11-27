@@ -227,3 +227,7 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - **`scout_lezen` actie `team`** (`scoutTeam`, alleen lezen): één of meer teams (`team: "O17-1, O17-2"`, of `O17` = alle O17-teams, hooguit 6), optioneel `periode` (nummer of naam; `1` matcht `periodeNr` of `…-P1`). Per speler positie, geboortejaar, alle beoordelingen per beoordelaar (vier vakken, gemiddelde, matrix per fase, positie, werkpunt, opmerking, toelichting per vak, `na_bevriezing`, `familie`) en een `vergelijking` (laatste beoordeling per beoordelaar, verschil = hoogste min laagste per vak, gelijke cijfers, positie oneens). Per team `oneens` (meest naar minst), `gesprek` (verschil ≥ 2 of positie oneens), `signalen` en bij één beoordelaar `let_op_vergelijking`. Boven 120.000 tekens eerst toelichting weg, dan opmerkingen ingekort.
 - Omschrijving van `scout_lezen` ingekort naar onder 1 KB (was 1,5 KB).
 - Het fraaie TC-rapport (pop-up/PDF in Jarvis, download in de scout-app, vakje 'extra aandacht' richting O19) is nog niet gebouwd; dat bouwt hierop voort.
+
+## Jarvis: automatiseringen nalezen (27 november 2026)
+
+- `huis_automatisering` actie `lees` met `naam` (of de id `jarvis_…`) geeft de volledige config van een eigen Jarvis-automatisering (`GET /api/config/automation/config/<id>`), alleen lezen. De id volgt dezelfde regel als bij aanmaken: `jarvis_` + slug van de naam (dus "Jarvis verwarming rooster" → `jarvis_jarvis_verwarming_rooster`). Wijzigen blijft: naam + aangepaste config, eerst voorvertoning.

@@ -591,7 +591,7 @@ const MCP_TOOLS = [
   { name: "mappen_lezen", description: "Via de tunnel naar de Mac: lees een tekstbestand uit een vrijgegeven map (max. 40.000 tekens). Alleen lezen.",
     inputSchema: { type: "object", properties: { map: { type: "string" }, pad: { type: "string" } }, required: ["map", "pad"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
-  { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis.",
+  { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis; actie 'lees' met naam (of id jarvis_…) toont de volledige inhoud (trigger, condition, action) van zo'n automatisering, alleen lezen.",
     inputSchema: { type: "object", properties: { actie: { type: "string" }, naam: { type: "string" }, bron: { type: "string" }, doel: { type: "string" }, config: { type: "object" }, bevestigd: { type: "boolean" } }, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
   { name: "scout_lezen", description: "Scout-app (scout.app1x.online), alleen lezen. club = naam zoals in de app. actie wie = werkt de sleutel. overzicht = aantallen per team en geboortejaar. spelers = lijst met namen (filters team, geboortejaar, lichting, zoek). speler = dossier van één speler (id of naam). onderdeel = één onderdeel ruw (naam). controle = datacontrole (dubbelen, losse verwijzingen). metingen = tabel per speler met gemiddelden (team = O12-1, of O12 = alle O12-teams; optioneel periode). team = teamrapport voor de TC (team = O17-1, O17-2; optioneel periode, bv. 1): per speler positie, geboortejaar, alle beoordelingen per beoordelaar (vier vakken, matrix, werkpunt, opmerking), signalen en vergelijking tussen beoordelaars; gebruik dit voor een rapport. trainers = stand van de trainersformulieren (periode, alleen_open). Gegevens van kinderen: alleen voor wat Micha vraagt.",
@@ -903,6 +903,15 @@ async function mcpHuisAuto(args, env) {
     const alle = await r.json().catch(() => []);
     return { automatiseringen: (Array.isArray(alle) ? alle : []).filter(x => String(x.entity_id || "").startsWith("automation.") && String((x.attributes && x.attributes.id) || "").startsWith("jarvis_"))
       .map(x => ({ id: x.attributes.id, naam: x.attributes.friendly_name || x.entity_id, staat: x.state, laatst_afgegaan: x.attributes.last_triggered || null })) };
+  }
+  if (String(args.actie || "").toLowerCase() === "lees") {
+    const ruw = String(args.naam || "").trim(), lid = /^jarvis_[a-z0-9_]+$/.test(ruw) ? ruw : "jarvis_" + haSlug(ruw);
+    if (lid.length < 10) throw new Error("Geef de naam of de id (jarvis_…) van de automatisering.");
+    const r = await haApi(env, "/api/config/automation/config/" + lid);
+    if (r.status === 404) throw new Error("Geen automatisering van Jarvis met id " + lid + ". Gebruik actie lijst voor de juiste naam of id.");
+    if (r.status === 401 || r.status === 403) throw new Error("Het token van Home Assistant mag geen automatiseringen lezen (beheerdersrechten nodig).");
+    if (!r.ok) throw new Error("Home Assistant gaf " + r.status + " bij het lezen van " + lid + ".");
+    return { id: lid, config: await r.json().catch(() => ({})), let_op: "Alleen gelezen. Wijzigen: geef naam en de aangepaste config, eerst zonder bevestigd voor de voorvertoning." };
   }
   const naam = String(args.naam || "").replace(/\s+/g, " ").trim().slice(0, 80);
   if (naam.length < 3) throw new Error("Geef een naam voor de automatisering.");

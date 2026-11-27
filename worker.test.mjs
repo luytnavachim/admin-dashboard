@@ -891,6 +891,24 @@ await run("mcp: huis_automatisering: voorvertoning, daarna aanmaken, alleen eige
     assert(zonder.isError && /HA_URL/.test(zonder.content[0].text), "zonder Secrets: nette fout");
   } finally { restore(); }
 });
+await run("mcp: huis_automatisering lees: inhoud van een eigen automatisering, alleen GET", async () => {
+  const seen = [];
+  const cfg = { id: "jarvis_jarvis_verwarming_rooster", alias: "Jarvis verwarming rooster", trigger: [{ platform: "time", at: "17:30" }], action: [{ service: "climate.set_temperature", target: { entity_id: "climate.badkamer_tado" }, data: { temperature: 17 } }] };
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
+    if (u.endsWith("/api/config/automation/config/jarvis_jarvis_verwarming_rooster")) return new Response(JSON.stringify(cfg), { status: 200 });
+    if (u.includes("/api/config/automation/config/")) return new Response("x", { status: 404 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), HA_URL: "https://ha.example", HA_TOKEN: "tok" };
+    const op = (await tool(env, "huis_automatisering", { actie: "lees", naam: "Jarvis verwarming rooster" })).structuredContent;
+    assert(op.id === cfg.id && op.config.action[0].data.temperature === 17, "lees op naam", JSON.stringify(op));
+    const opId = (await tool(env, "huis_automatisering", { actie: "lees", naam: "jarvis_jarvis_verwarming_rooster" })).structuredContent;
+    assert(opId.id === cfg.id && opId.config.trigger[0].at === "17:30", "lees op id");
+    const mis = await tool(env, "huis_automatisering", { actie: "lees", naam: "Bestaat niet" });
+    assert(mis.isError && /Geen automatisering/.test(mis.content[0].text), "onbekend: nette fout");
+    assert(seen.every(c => (c.method || "GET") === "GET"), "alleen lezen");
+  } finally { restore(); }
+});
 await run("mcp: camera_beeld haalt één verkleind beeld uit Home Assistant", async () => {
   const seen = [];
   const restore = mockUpstream((c) => { seen.push(c);
