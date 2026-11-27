@@ -1102,6 +1102,32 @@ await run("mcp: project_activiteit met bestand leest één bestand van GitHub (s
     for (const bad of ["../geheim", "docs/../x", "a b"]) { const f = await tool(env, "project_activiteit", { project: "scout", bestand: bad }); assert(f.isError, "geweigerd pad: " + bad); }
   } finally { globalThis.fetch = orig; }
 });
+await run("mcp: project_activiteit leest een groot bestand in delen op regelgrenzen, elk antwoord onder 32 KB", async () => {
+  const orig = globalThis.fetch;
+  const regels = Array.from({ length: 900 }, (_, i) => "Regel " + i + " – \"één\" stukje presentatie voor de scout-app.\n");
+  const tekst = regels.join("");
+  globalThis.fetch = async (u) => { u = String(u);
+    if (u.includes("/branches")) return new Response(JSON.stringify([{ name: "develop" }]), { status: 200 });
+    if (u.includes("/contents/docs/JARVIS-PRESENTATIE.md")) return new Response(JSON.stringify({ type: "file", encoding: "base64", size: tekst.length, content: Buffer.from(tekst).toString("base64") }), { status: 200 });
+    return new Response("{}", { status: 404 }); };
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", GITHUB_TOKEN: "t" };
+    const een = await tool(env, "project_activiteit", { project: "scout", bestand: "docs/JARVIS-PRESENTATIE.md" });
+    const r1 = een.structuredContent;
+    assert(r1.deel === 1 && r1.delen > 1 && /deel 2/.test(r1.volgende), "deel 1 met verwijzing naar deel 2", JSON.stringify({ deel: r1.deel, delen: r1.delen, volgende: r1.volgende }));
+    let samen = "";
+    for (let d = 1; d <= r1.delen; d++) {
+      const res = await tool(env, "project_activiteit", { project: "scout", bestand: "docs/JARVIS-PRESENTATIE.md", deel: d });
+      assert(Buffer.byteLength(JSON.stringify(res)) < 32768, "deel " + d + " onder 32 KB");
+      const r = res.structuredContent; assert(r.inhoud.endsWith("\n"), "deel " + d + " eindigt op een regelgrens");
+      if (d === r1.delen) assert(r.laatste === true && !r.volgende, "laatste deel gemarkeerd");
+      samen += r.inhoud;
+    }
+    assert(samen === tekst, "alle delen samen = het hele bestand");
+    const te = await tool(env, "project_activiteit", { project: "scout", bestand: "docs/JARVIS-PRESENTATIE.md", deel: r1.delen + 1 });
+    assert(te.isError, "deel buiten bereik geeft een fout");
+  } finally { globalThis.fetch = orig; }
+});
 await run("mcp: project_activiteit met map en zoek: inhoud van een map en bestanden op naam", async () => {
   const orig = globalThis.fetch, urls = [];
   globalThis.fetch = async (u) => { u = String(u); urls.push(u);
