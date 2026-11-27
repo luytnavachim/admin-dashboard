@@ -214,3 +214,7 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - Elk bericht in KV als `wa:<nummer>:<tijd13>:<in|uit>:<id>` met `expirationTtl` 7 dagen (keuze Micha). Gelezen-stand per nummer in KV `wa_gelezen`. Alleen tekst; media als `[afbeelding] <bijschrift>`, niets gedownload.
 - **`whatsapp_lezen`** (alleen lezen): `gesprekken`, `ongelezen`, `lees` (contact = nummer of deel van de naam; zet gelezen). Versturen bestaat bewust niet: Jarvis maakt een concept, Micha verstuurt zelf.
 - In de Meta-app: Webhook-callback `<worker>/whatsapp/webhook`, verify token = `WA_VERIFY_TOKEN`, abonneren op `messages` (en `smb_message_echoes`). Alleen met nagebootste berichten getest.
+
+## Jarvis: Hetzner-check inrichten (27 november 2026)
+
+- `hetzner-check-inrichten.sh` (eenmalig op de Mac, via `mac bash ~/Documents/admin-standalone/hetzner-check-inrichten.sh` na een ja): maakt `~/.ssh/jarvis_hetzner_check` als die ontbreekt, zet via de gewone root-sleutel `jarvis-check.sh` (alleen lezen) in `/usr/local/bin` op de server en voegt `restrict,command="/usr/local/bin/jarvis-check.sh" <pub>` toe aan `/root/.ssh/authorized_keys` (reservekopie `.voor-jarvis-check`), zet de vaste opdracht `hetzner-beveiliging` in `brug.config.json` (reservekopie `.voor-hetzner-check`) en herstart de brug los. Mag vaker draaien. Getest: alleen het config- en authorized_keys-deel met nagebootste bestanden, niet tegen de echte server.
