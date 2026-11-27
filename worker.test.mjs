@@ -1756,6 +1756,63 @@ await run("whatsapp_sturen: eerst voorvertoning met code, alleen met code + beve
   } finally { restore(); }
 });
 
+await run("whatsapp_sturen met WA_SEND_PHONE_ID: apart afzendernummer, venster per afzender, template zonder parameter", async () => {
+  const { createHmac } = await import("node:crypto");
+  const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, WA_APP_SECRET: "appgeheim", WA_TOKEN: "watoken", WA_PHONE_ID: "123456", WA_SEND_PHONE_ID: "999888" }, nu = Math.floor(Date.now() / 1000);
+  const hook = b => worker.fetch(new Request("https://w.workers.dev/whatsapp/webhook", { method: "POST", headers: { "content-type": "application/json", "X-Hub-Signature-256": "sha256=" + createHmac("sha256", "appgeheim").update(b).digest("hex") }, body: b }), env);
+  const bericht = (pid, id) => JSON.stringify({ entry: [{ changes: [{ field: "messages", value: { metadata: { phone_number_id: pid }, contacts: [{ wa_id: "31648919022", profile: { name: "Micha" } }], messages: [{ from: "31648919022", id, timestamp: String(nu - 60), type: "text", text: { body: "hoi" } }] } }] }] });
+  assert((await hook(bericht("123456", "wamid.Z1"))).status === 200, "webhook neemt bericht aan");
+  const calls = [], restore = mockUpstream(c => { calls.push(c); return new Response(JSON.stringify({ messages: [{ id: "wamid.T1" }] }), { status: 200 }); });
+  try {
+    const dicht = await tool(env, "whatsapp_sturen", { contact: "0648919022", tekst: "Test van Jarvis" });
+    assert(dicht.isError && /afzendernummer van Jarvis/.test(dicht.content[0].text), "bericht aan het zakelijke nummer opent het venster van de aparte afzender niet");
+    const hw = (await tool(env, "whatsapp_sturen", { contact: "0648919022", template: "hello_world", taal: "en_US" })).structuredContent;
+    assert(hw.voorvertoning && hw.afzender === "apart afzendernummer" && hw.soort === "template hello_world" && calls.length === 0, "template zonder tekst: voorvertoning", JSON.stringify(hw));
+    const s = (await tool(env, "whatsapp_sturen", { bevestigd: true, code: hw.code })).structuredContent;
+    assert(s.verstuurd && calls[0].url === "https://graph.facebook.com/v21.0/999888/messages", "verstuurd vanaf het aparte nummer", calls[0] && calls[0].url);
+    const b = JSON.parse(calls[0].body);
+    assert(b.template.name === "hello_world" && b.template.language.code === "en_US" && !b.template.components, "geen parameter bij lege tekst", calls[0].body);
+    assert((await hook(bericht("999888", "wamid.Z2"))).status === 200, "bericht aan het testnummer");
+    const open = (await tool(env, "whatsapp_sturen", { contact: "0648919022", tekst: "Test van Jarvis" })).structuredContent;
+    assert(open.venster_open && open.soort === "tekst", "na een bericht aan het aparte nummer mag vrije tekst", JSON.stringify(open));
+    assert(!JSON.stringify(s).includes("watoken"), "token nooit in het antwoord");
+  } finally { restore(); }
+});
+
+await run("whatsapp_lezen afzender: nummers bij Meta en controle op berichtenaccount (alleen lezen)", async () => {
+  const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), WA_APP_SECRET: "x", WA_TOKEN: "watoken", WA_PHONE_ID: "123456", WA_SEND_PHONE_ID: "999888" };
+  const calls = [], restore = mockUpstream(c => { calls.push(c);
+    if (c.url.includes("/1603773318434141/phone_numbers")) return new Response(JSON.stringify({ data: [{ id: "999888" }] }), { status: 200 });
+    if (c.url.includes("/999888?")) return new Response(JSON.stringify({ display_phone_number: "+1 555-879-2459", verified_name: "Test Number", code_verification_status: "VERIFIED" }), { status: 200 });
+    return new Response(JSON.stringify({ display_phone_number: "+31 6 48919022", verified_name: "Triplet IT" }), { status: 200 }); });
+  try {
+    const r = (await tool(env, "whatsapp_lezen", { actie: "afzender", waba: "1603773318434141" })).structuredContent;
+    assert(r.apart_afzendernummer && r.nummers.length === 2, "twee nummers", JSON.stringify(r));
+    const t = r.nummers.find(n => n.telefoonnummer_id === "999888"), z = r.nummers.find(n => n.telefoonnummer_id === "123456");
+    assert(t.nummer === "+1 555-879-2459" && t.hoort_bij_waba === true && z.hoort_bij_waba === false, "testnummer hoort bij het account", JSON.stringify(r));
+    assert(calls.every(c => !c.method || c.method === "GET"), "alleen GET");
+    assert(!JSON.stringify(r).includes("watoken"), "token nooit in het antwoord");
+  } finally { restore(); }
+});
+
+await run("scout_lezen doorstroom: tabel van het scherm, compact, nette melding zonder tabel", async () => {
+  const env = { JARVIS_MCP_KEY: "geheim", SCOUT_SLEUTEL: "sk" }; let calls = [], geen = false;
+  const restore = mockUpstream(c => { calls.push(c);
+    if (geen) return new Response(JSON.stringify({ error: "nog geen tabel" }), { status: 404 });
+    return new Response(JSON.stringify({ tabel: { standVan: "2026-11-27", bewaardOp: "2026-11-27T10:00:00Z", rijen: [
+      { id: "a", naam: "Speler A", team: "O12-1", tabel: "veld", tech: 7.1, tact: 6.8, ment: 7, fys: 6.5, plaatsing: "13-1", teamPerPeriode: { 1: "O12-1" }, trainersMetingen: { 1: 2 }, extraVeld: "weg" },
+      { id: "k", naam: "Keeper K", team: "O12-2", tabel: "keepers", keeper: true, techniek: 6, spel: 6.5 }, { id: "k", naam: "Keeper K", team: "O12-2", tabel: "veld", tech: 5 } ] } }), { status: 200 }); });
+  try {
+    const r = (await tool(env, "scout_lezen", { actie: "doorstroom", club: "Wijhe 92", team: "o12" })).structuredContent;
+    assert(calls[0].url.startsWith("https://scout.app1x.online/periodes.php?") && calls[0].url.includes("action=doorstroom_tabel") && calls[0].url.includes("groep=O12") && calls[0].url.includes("club=Wijhe+92"), "juiste route", calls[0].url);
+    assert(r.aantal_rijen === 3 && r.spelers === 2 && r.rijen[0].tech === 7.1 && !("extraVeld" in r.rijen[0]) && r.stand_van === "2026-11-27", "compact en spelers op id", JSON.stringify(r));
+    geen = true;
+    const f = await tool(env, "scout_lezen", { actie: "doorstroom", club: "Wijhe 92", team: "O12" });
+    assert(f.isError && /scherm Doorstroom/.test(f.content[0].text), "404 geeft uitleg");
+    assert((await tool(env, "scout_lezen", { actie: "doorstroom", club: "Wijhe 92", team: "O12-1; x" })).isError, "rare groep geweigerd");
+  } finally { restore(); }
+});
+
 await run("whatsapp: contacten uit smb_app_state_sync, daarna versturen op naam", async () => {
   const { createHmac } = await import("node:crypto");
   const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, WA_APP_SECRET: "appgeheim", WA_TOKEN: "watoken", WA_PHONE_ID: "123456" };

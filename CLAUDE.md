@@ -235,3 +235,10 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 ## Jarvis: automatiseringen nalezen (27 november 2026)
 
 - `huis_automatisering` actie `lees` met `naam` (of de id `jarvis_…`) geeft de volledige config van een eigen Jarvis-automatisering (`GET /api/config/automation/config/<id>`), alleen lezen. De id volgt dezelfde regel als bij aanmaken: `jarvis_` + slug van de naam (dus "Jarvis verwarming rooster" → `jarvis_jarvis_verwarming_rooster`). Wijzigen blijft: naam + aangepaste config, eerst voorvertoning.
+
+## Jarvis: WhatsApp vanaf het testnummer en Doorstroom lezen (28 november 2026, wachtrij)
+
+- **Apart afzendernummer**: Secret `WA_SEND_PHONE_ID` (het testnummer van Meta, telefoonnummer-ID 1379714181901969, berichtenaccount Triplet it BV 1603773318434141). `whatsapp_sturen` verstuurt dan vanaf dat nummer (`waAfz`); zonder die Secret blijft het `WA_PHONE_ID`. De webhook bewaart nu `pid` (metadata.phone_number_id) bij elk bericht; met een apart afzendernummer telt voor het 24-uursvenster alleen een bericht dat het contact naar dát nummer stuurde. Template zonder `tekst` gaat zonder parameter (bv. `hello_world`, taal `en_US`). Voorvertoning en antwoord melden `afzender`.
+- **`whatsapp_lezen` actie `afzender`** (alleen lezen, GET): naam, nummer en status van `WA_PHONE_ID` en `WA_SEND_PHONE_ID` bij Meta; met `waba` ook `hoort_bij_waba` via `/{waba}/phone_numbers`.
+- **`scout_lezen` actie `doorstroom`** (`scoutDoorstroom`): `periodes.php?action=doorstroom_tabel&club=&groep=` (team = groep, bv. O12; optioneel `seizoen`), compacte rijen; 404 = scherm Doorstroom nog niet geopend.
+- Alleen met nagebootste antwoorden getest, niet tegen Meta of de scout-app.
