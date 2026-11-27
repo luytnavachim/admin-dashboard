@@ -592,9 +592,11 @@ const MCP_TOOLS = [
   { name: "huis_automatisering", description: "Maak of vervang een automatisering in Home Assistant. Eenvoudig: geef naam, bron en doel; dan gaat doel (schakelaar of lamp) mee aan en uit met bron. Vrij: geef naam en config (Home Assistant-automatisering als JSON met trigger, condition, action). Zonder bevestigd:true alleen een voorvertoning; er wordt niets gewijzigd. Alleen automatiseringen die Jarvis zelf maakte worden vervangen. actie 'lijst' toont de automatiseringen van Jarvis.",
     inputSchema: { type: "object", properties: { actie: { type: "string" }, naam: { type: "string" }, bron: { type: "string" }, doel: { type: "string" }, config: { type: "object" }, bevestigd: { type: "boolean" } }, additionalProperties: false },
     annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true } },
-  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. actie speler = volledig dossier van één speler (id of naam), met metingen en scores, voor advies en rapporten. actie onderdeel = één onderdeel van de app ruw (naam, bv. knvb_periodes; zonder naam de lijst). actie controle = datacontrole: dubbele spelers en id's, verwijzingen naar onbekende spelers, spelers zonder team of geboortejaar. Gegevens van kinderen: alleen voor wat Micha vraagt.",
-    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers", "speler", "onderdeel", "controle"] }, club: { type: "string" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" }, id: { type: "string" }, naam: { type: "string" } }, required: ["actie"], additionalProperties: false },
+  { name: "scout_lezen", description: "De scout-app (scout.app1x.online), alleen lezen, met de eigen toegangssleutel van Jarvis. actie wie = werkt de sleutel, welk niveau en tot wanneer geldig. actie overzicht = cijfers van één club (club = naam zoals in de app): aantallen spelers per team en per geboortejaar, welke onderdelen gevuld zijn en de versie van de app. actie spelers = spelerslijst van één club mét namen (voor lijsten die Micha naar de club stuurt), optioneel gefilterd op team, geboortejaar, lichting of zoek (deel van de naam): naam, team, geboortejaar, lichting, positie, voet, geslacht, dispensatie. actie speler = volledig dossier van één speler (id of naam), met metingen en scores, voor advies en rapporten. actie onderdeel = één onderdeel van de app ruw (naam, bv. knvb_periodes; zonder naam de lijst). actie controle = datacontrole: dubbele spelers en id's, verwijzingen naar onbekende spelers, spelers zonder team of geboortejaar. actie trainers = stand van de trainersformulieren van een periode (standaard de actieve; periode = naam of id, club optioneel): per trainer team, status, ingevuld, deadline; standaard alleen wie nog niet heeft ingeleverd (alleen_open:false = iedereen). Gegevens van kinderen: alleen voor wat Micha vraagt.",
+    inputSchema: { type: "object", properties: { actie: { type: "string", enum: ["wie", "overzicht", "spelers", "speler", "onderdeel", "controle", "trainers"] }, club: { type: "string" }, periode: { type: "string" }, alleen_open: { type: "boolean" }, team: { type: "string" }, geboortejaar: { type: "integer" }, lichting: { type: "string" }, zoek: { type: "string" }, id: { type: "string" }, naam: { type: "string" } }, required: ["actie"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
+  { name: "scout_wijzigen", description: "Een wijziging in de scout-app doen met de sleutel van Jarvis (die moet het niveau lezen en wijzigen hebben). route = script?action=..., alleen periodes.php (start, periode, indeling, intrek, uitsluit, uitsluit_terug, evaluatie, keepers, trainers, trainers_over) of kijkplan.php (toewijzen, ontwijzen, inschrijven, uitschrijven); gegevens = de JSON zoals in de kop van dat script staat. Zonder bevestigd:true alleen een voorvertoning: laat Micha zien wat er verandert en vraag om een ja. Nooit scores bijsturen, metingen aanmaken of antwoorden van trainers wijzigen.",
+    inputSchema: { type: "object", properties: { route: { type: "string" }, gegevens: { type: "object" }, bevestigd: { type: "boolean" } }, required: ["route"], additionalProperties: false } },
   { name: "rijplan", description: "Het rijplan uit de JO11-2-app: per dag de wedstrijden van JO11-2 en JO14-2 (tijd, tegenstander, thuis of uit, locatie), of ze overlappen, de gemaakte rijkeuze en wat er aan het andere team doorgegeven moet worden. Zonder datums: vandaag tot en met veertien dagen verder. Datums als JJJJ-MM-DD, hooguit 62 dagen. Alleen lezen.",
     inputSchema: { type: "object", properties: { van: { type: "string" }, tot: { type: "string" } }, additionalProperties: false },
     annotations: { readOnlyHint: true } },
@@ -638,7 +640,7 @@ async function handleMcp(request, env, url) {
           wachtrij_start: mcpWachtrijStart,
           netwerk_dreigingen: (a, e) => e.UNIFI_KEY ? mcpDreigingen(a, e) : brug(e, "/unifi/dreigingen", { uren: a.uren }),
           huis_register: mcpHuisRegister, huis_dashboard: mcpHuisDashboard, huis_config: mcpHuisConfig, huis_systeem: mcpHuisSysteem, netwerk_overzicht: mcpNetwerkOverzicht, netwerk_client: mcpNetwerkClient, netwerk_apparaat: mcpNetwerkApparaat, netwerk_wifi: mcpNetwerkWifi, netwerk_firewall: mcpNetwerkFirewall,
-          mappen_lijst: (a, e) => brug(e, "/mappen/lijst", a), mappen_lezen: (a, e) => brug(e, "/mappen/lezen", a), rijplan: mcpRijplan, scout_lezen: mcpScoutLezen, gmail_lezen: mcpGmail }[name];
+          mappen_lijst: (a, e) => brug(e, "/mappen/lijst", a), mappen_lezen: (a, e) => brug(e, "/mappen/lezen", a), rijplan: mcpRijplan, scout_lezen: mcpScoutLezen, scout_wijzigen: mcpScoutWijzigen, gmail_lezen: mcpGmail }[name];
         if (!fn) return rpc({ jsonrpc: "2.0", id, error: { code: -32602, message: "Onbekende tool: " + name } });
         const out = await fn(args, env);
         // Audio is groot: niet ook nog eens als structuredContent meesturen.
@@ -1640,12 +1642,12 @@ async function mcpWachtrijStart(args, env) {
 // Rijplan uit de JO11-2-app (alleen lezen). De app rekent zelf overlap en rijkeuze uit; hier alleen ophalen.
 // Secret JO11_KEY = de sleutel waarvan de sha256 op de server in .data/jarvis.hash staat. JO11_URL is optioneel.
 // ---- Scout-app lezen met een toegangssleutel (Secret SCOUT_SLEUTEL, optioneel SCOUT_URL). Alleen GET; er gaan geen namen of dossiers terug, alleen aantallen. ----
-async function scoutGet(env, query) {
+async function scoutGet(env, query, pad = "api.php") {
   if (!env.SCOUT_SLEUTEL) throw new Error("De scout-app is nog niet gekoppeld: de Secret SCOUT_SLEUTEL ontbreekt in de Worker.");
   const basis = String(env.SCOUT_URL || "https://scout.app1x.online").replace(/\/+$/, "");
   if (!/^https:\/\//.test(basis)) throw new Error("SCOUT_URL moet met https:// beginnen.");
   let r;
-  try { r = await fetch(basis + "/api.php?" + query, { signal: AbortSignal.timeout(20000), redirect: "manual", headers: { Authorization: "Bearer " + String(env.SCOUT_SLEUTEL).trim(), Accept: "application/json", "User-Agent": "Jarvis-scout" } }); }
+  try { r = await fetch(basis + "/" + pad + "?" + query, { signal: AbortSignal.timeout(20000), redirect: "manual", headers: { Authorization: "Bearer " + String(env.SCOUT_SLEUTEL).trim(), Accept: "application/json", "User-Agent": "Jarvis-scout" } }); }
   catch { throw new Error("De scout-app is nu niet bereikbaar."); }
   // Een doorverwijzing volgen we niet, zodat de sleutel nergens anders terechtkomt.
   if (r.status >= 300 && r.status < 400) throw new Error("De scout-app verwijst door naar een ander adres; controleer SCOUT_URL.");
@@ -1826,7 +1828,76 @@ async function mcpScoutLezen(args, env) {
     const onderdelen = Object.keys(d).sort().slice(0, 120).map(k => { const v = lees(d[k]); return { onderdeel: k, soort: Array.isArray(v) ? "lijst" : (v && typeof v === "object" ? "object" : typeof v), aantal: Array.isArray(v) ? v.length : (v && typeof v === "object" ? Object.keys(v).length : null) }; });
     return { club, spelers: spelers.length, per_team: tel(spelers, x => x.huidig || x.team), per_geboortejaar: tel(spelers, jaar), per_lichting: tel(spelers, x => x.lichting), per_club: tel(spelers, x => x.club), spelers_met_meting: metM.length, metingen_totaal: nM, spelers_zonder_team: spelers.filter(x => !(x.huidig || x.team)).length, spelers_zonder_geboortejaar: spelers.filter(x => jaar(x) === "onbekend").length, velden_van_een_speler: spelers[0] ? Object.keys(spelers[0]).sort().slice(0, 80) : [], onderdelen, stand: d.knvb_sync_rev != null ? String(d.knvb_sync_rev) : null };
   }
-  throw new Error("Kies een actie: wie of overzicht.");
+  if (actie === "trainers") return scoutTrainers(args, env);
+  throw new Error("Kies een actie: wie, overzicht, spelers, speler, onderdeel, controle of trainers.");
+}
+// Stand van de trainersformulieren per periode (voor TC-overleg). Geen formulierlinks (token) en geen spelersgegevens.
+const SCOUT_FASE = { ingetrokken: "ingetrokken", geimporteerd: "verwerkt", klaar: "ingeleverd", wacht: "alles ingevuld, niet ingeleverd", bezig: "bezig", geopend: "geopend, niets ingevuld", verstuurd: "verstuurd, niet geopend" };
+function scoutFase(f) {
+  const h = v => v != null && String(v).trim() !== "";
+  if (h(f.ingetrokkenOp) || f.status === "ingetrokken") return "ingetrokken";
+  if (h(f.importAt)) return "geimporteerd";
+  if (h(f.ingeleverdOp) || f.status === "ingeleverd") return "klaar";
+  const a = Number(f.aantalIngevuld) || 0, n = Number(f.aantalSpelers) || 0;
+  if (n > 0 && a >= n) return "wacht";
+  if (a > 0) return "bezig";
+  if (h(f.geopend)) return "geopend";
+  return "verstuurd";
+}
+async function scoutTrainers(args, env) {
+  const q = new URLSearchParams({ action: "state" }); const club = String(args.club || "").replace(/\s+/g, " ").trim(); if (club) q.set("club", club);
+  const d = await scoutGet(env, q.toString(), "periodes.php");
+  const periodes = Array.isArray(d.periodes) ? d.periodes : [];
+  if (!periodes.length) return { periodes: [], let_op: "Er staan nog geen periodes in de scout-app." };
+  const zoekP = String(args.periode || "").toLowerCase().trim();
+  const per = (zoekP && periodes.find(p => String(p.id).toLowerCase() === zoekP || String(p.naam || "").toLowerCase().includes(zoekP))) || periodes.find(p => String(p.id) === String(d.actiefId)) || periodes[periodes.length - 1];
+  const pid = String(per.id), naam = {}; (d.personen || []).forEach(p => { naam[String(p.id)] = String(p.naam || ""); });
+  const uit = new Set((d.formulier_uitsluitingen || []).filter(r => String(r.periode_id) === pid && r.type !== "keeper").map(r => r.club + "|" + r.team_id + "|" + r.user_id));
+  const evals = (d.evaluaties || []).filter(e => String(e.periode_id) === pid);
+  const rijen = (d.team_trainers || []).filter(r => String(r.periode_id) === pid && !uit.has(r.club + "|" + r.team_id + "|" + r.user_id)).map(r => {
+    const f = evals.filter(e => e.club === r.club && e.team_id === r.team_id && String(e.persoon_id) === String(r.user_id) && scoutFase(e) !== "ingetrokken")
+      .sort((a, b) => String(b.created || "").localeCompare(String(a.created || "")))[0];
+    const fase = f ? scoutFase(f) : "geen";
+    const gesloten = !!(f && f.geslotenOp);
+    return { trainer: naam[String(r.user_id)] || "onbekende trainer", rol: r.rol || "HT", club: r.club, team: r.team_id,
+      status: fase === "geen" ? "geen formulier verstuurd" : SCOUT_FASE[fase] + (gesloten && !["klaar", "geimporteerd"].includes(fase) ? " (link gesloten)" : ""),
+      klaar: fase === "klaar" || fase === "geimporteerd",
+      ingevuld: f ? (Number(f.aantalIngevuld) || 0) + " van " + (Number(f.aantalSpelers) || 0) : null,
+      verstuurd: f && f.created ? String(f.created).slice(0, 10) : null, deadline: f && f.verlooptOp ? String(f.verlooptOp).slice(0, 10) : null,
+      ingeleverd: f && f.ingeleverdOp ? String(f.ingeleverdOp).slice(0, 10) : null };
+  }).sort((a, b) => Number(a.klaar) - Number(b.klaar) || String(a.club).localeCompare(String(b.club), "nl") || String(a.team).localeCompare(String(b.team), "nl", { numeric: true }) || a.trainer.localeCompare(b.trainer, "nl"));
+  const alleenOpen = args.alleen_open !== false;
+  const lijst = alleenOpen ? rijen.filter(r => !r.klaar) : rijen;
+  return { periode: { id: pid, naam: per.naam || pid, start: per.start || null, eind: per.eind || null }, andere_periodes: periodes.map(p => p.naam || p.id).slice(-8),
+    totaal_trainers: rijen.length, ingeleverd: rijen.filter(r => r.klaar).length, niet_ingeleverd: rijen.filter(r => !r.klaar).length,
+    per_status: rijen.reduce((o, r) => { o[r.status] = (o[r.status] || 0) + 1; return o; }, {}),
+    lijst: lijst.slice(0, 300), lijst_is: alleenOpen ? "alleen trainers die nog niet hebben ingeleverd (alleen_open:false voor iedereen)" : "alle trainers" };
+}
+const SCOUT_SCHRIJF = { "periodes.php": ["start", "periode", "indeling", "intrek", "uitsluit", "uitsluit_terug", "evaluatie", "keepers", "trainers", "trainers_over"], "kijkplan.php": ["toewijzen", "ontwijzen", "inschrijven", "uitschrijven"] };
+function scoutZonderTokens(v, d = 0) {
+  if (d > 8 || v == null || typeof v !== "object") return v;
+  if (Array.isArray(v)) return v.slice(0, 200).map(x => scoutZonderTokens(x, d + 1));
+  const o = {}; for (const [k, x] of Object.entries(v)) { if (/^(token|link|url|sleutel|secret)$/i.test(k)) continue; o[k] = scoutZonderTokens(x, d + 1); } return o;
+}
+async function mcpScoutWijzigen(args, env) {
+  const m = String(args.route || "").trim().match(/^\/?([a-z]+\.php)\?action=([a-z_]+)$/);
+  if (!m || !SCOUT_SCHRIJF[m[1]] || !SCOUT_SCHRIJF[m[1]].includes(m[2])) throw new Error("Deze route mag niet. Toegestaan: " + Object.entries(SCOUT_SCHRIJF).map(([k, v]) => k + " (" + v.join(", ") + ")").join("; ") + ".");
+  const gegevens = args.gegevens && typeof args.gegevens === "object" && !Array.isArray(args.gegevens) ? args.gegevens : {};
+  const body = JSON.stringify(gegevens); if (body.length > 200000) throw new Error("De gegevens zijn te groot.");
+  if (args.bevestigd !== true) return { voorvertoning: true, route: m[1] + "?action=" + m[2], gegevens, let_op: "Nog niets gewijzigd. Vertel Micha in gewone woorden wat er verandert en vraag om een ja; roep daarna opnieuw aan met dezelfde route en gegevens en bevestigd:true." };
+  if (!env.SCOUT_SLEUTEL) throw new Error("De scout-app is nog niet gekoppeld: de Secret SCOUT_SLEUTEL ontbreekt in de Worker.");
+  const basis = String(env.SCOUT_URL || "https://scout.app1x.online").replace(/\/+$/, "");
+  if (!/^https:\/\//.test(basis)) throw new Error("SCOUT_URL moet met https:// beginnen.");
+  let r;
+  try { r = await fetch(basis + "/" + m[1] + "?action=" + m[2], { method: "POST", body, signal: AbortSignal.timeout(30000), redirect: "manual",
+    headers: { Authorization: "Bearer " + String(env.SCOUT_SLEUTEL).trim(), Origin: basis, "Content-Type": "application/json", Accept: "application/json", "User-Agent": "Jarvis-scout" } }); }
+  catch { throw new Error("De scout-app is nu niet bereikbaar."); }
+  if (r.status >= 300 && r.status < 400) throw new Error("De scout-app verwijst door naar een ander adres; controleer SCOUT_URL.");
+  const tekst = await r.text(); let d = null; try { d = JSON.parse(tekst); } catch { d = null; }
+  if (r.status === 401) throw new Error("De scout-app weigert de sleutel (" + String((d && d.sleutel) || "onbekend") + ").");
+  if (r.status === 403) throw new Error("Niet gewijzigd: " + String((d && (d.reden || d.error)) || "geen toegang") + (/alleen lezen/i.test(String(d && d.reden)) ? " Micha moet in de scout-app een sleutel met niveau lezen en wijzigen maken en die als SCOUT_SLEUTEL in de Worker zetten." : ""));
+  if (!r.ok) throw new Error("Niet gewijzigd: de scout-app gaf " + r.status + (d && (d.error || d.fout) ? " (" + String(d.error || d.fout).slice(0, 200) + ")" : "") + ".");
+  return { gewijzigd: true, route: m[1] + "?action=" + m[2], antwoord: scoutKort(scoutZonderTokens(d), 20000) };
 }
 async function mcpRijplan(args, env) {
   if (!env.JO11_KEY) throw new Error("Het rijplan is nog niet gekoppeld: de Secret JO11_KEY ontbreekt in de Worker.");

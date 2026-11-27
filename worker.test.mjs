@@ -560,7 +560,7 @@ await run("mcp: initialize, notification en tools/list", async () => {
   const n = await mcpCall(env, { jsonrpc: "2.0", method: "notifications/initialized" });
   assert(n.status === 202, "notification → 202", "got " + n.status);
   const list = await (await mcpCall(env, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,rijplan,gmail_lezen", "negenendertig tools");
+  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,scout_wijzigen,rijplan,gmail_lezen", "veertig tools");
 });
 await run("mcp: projecten en overzicht lezen", async () => {
   const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: seed() }) };
@@ -1465,6 +1465,47 @@ await run("mcp: netwerk_client vast_ip: voorvertoning, één wijziging, bezet ad
   } finally { restore(); }
 });
 
+await run("mcp: scout_wijzigen: alleen toegestane routes, eerst voorvertoning, sleutel en Origin mee", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
+    if (u === "https://scout.example/periodes.php?action=trainers") return new Response(JSON.stringify({ ok: true, formulieren: [{ token: "GEHEIM", team_id: "JO13-1" }] }), { status: 200 });
+    if (u === "https://scout.example/kijkplan.php?action=toewijzen") return new Response(JSON.stringify({ error: "Forbidden", reden: "Deze sleutel mag alleen lezen." }), { status: 403 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), SCOUT_SLEUTEL: "ksp_test", SCOUT_URL: "https://scout.example" };
+    const fout = await tool(env, "scout_wijzigen", { route: "forms.php?action=save", gegevens: {}, bevestigd: true });
+    assert(fout.isError && seen.length === 0, "forms.php mag niet");
+    const v = (await tool(env, "scout_wijzigen", { route: "periodes.php?action=trainers", gegevens: { team_id: "JO13-1" } })).structuredContent;
+    assert(v.voorvertoning && seen.length === 0, "zonder bevestigd alleen voorvertoning");
+    const w = await tool(env, "scout_wijzigen", { route: "periodes.php?action=trainers", gegevens: { team_id: "JO13-1" }, bevestigd: true });
+    assert(w.structuredContent.gewijzigd && seen[0].method === "POST" && seen[0].headers.authorization === "Bearer ksp_test" && seen[0].headers.origin === "https://scout.example" && !/GEHEIM|ksp_test/.test(w.content[0].text), "POST met sleutel en Origin, zonder tokens terug", w.content[0].text);
+    const l = await tool(env, "scout_wijzigen", { route: "kijkplan.php?action=toewijzen", gegevens: {}, bevestigd: true });
+    assert(l.isError && /lezen en wijzigen/.test(l.content[0].text), "leessleutel: duidelijke uitleg");
+  } finally { restore(); }
+});
+await run("mcp: scout_lezen trainers: stand per trainer, zonder tokens en spelers", async () => {
+  const seen = [];
+  const restore = mockUpstream((c) => { seen.push(c); const u = String(c.url);
+    if (u === "https://scout.example/periodes.php?action=state") return new Response(JSON.stringify({ actiefId: "p2",
+      periodes: [{ id: "p1", naam: "Najaar" }, { id: "p2", naam: "Winter", start: "2026-11-01" }],
+      personen: [{ id: "t1", naam: "Anna Trainer" }, { id: "t2", naam: "Bert Trainer" }, { id: "t3", naam: "Cor Trainer" }, { id: "t4", naam: "Dirk Trainer" }],
+      team_indeling: [{ periode_id: "p2", club: "C", team_id: "JO13-1", speler_id: "s1", naam: "Kind Geheim" }],
+      team_trainers: [{ periode_id: "p2", club: "C", team_id: "JO13-1", user_id: "t1", rol: "HT" }, { periode_id: "p2", club: "C", team_id: "JO13-1", user_id: "t2", rol: "AS" },
+        { periode_id: "p2", club: "C", team_id: "JO11-2", user_id: "t3", rol: "HT" }, { periode_id: "p2", club: "C", team_id: "JO11-2", user_id: "t4", rol: "AS" }, { periode_id: "p1", club: "C", team_id: "JO9-1", user_id: "t1" }],
+      evaluaties: [{ token: "GEHEIMTOKEN1", periode_id: "p2", club: "C", team_id: "JO13-1", persoon_id: "t1", ingeleverdOp: "2026-11-20T10:00:00Z", aantalSpelers: 10, aantalIngevuld: 10, created: "2026-11-02" },
+        { token: "GEHEIMTOKEN2", periode_id: "p2", club: "C", team_id: "JO13-1", persoon_id: "t2", aantalSpelers: 10, aantalIngevuld: 4, verlooptOp: "2026-12-01", created: "2026-11-02" }],
+      formulier_uitsluitingen: [{ periode_id: "p2", club: "C", team_id: "JO11-2", user_id: "t4", type: "veld" }] }), { status: 200 });
+    return new Response("nee", { status: 500 }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), SCOUT_SLEUTEL: "ksp_test", SCOUT_URL: "https://scout.example" };
+    const r = await tool(env, "scout_lezen", { actie: "trainers" }), d = r.structuredContent;
+    assert(d.periode.naam === "Winter" && d.totaal_trainers === 3 && d.ingeleverd === 1 && d.niet_ingeleverd === 2, "telt de actieve periode, uitgesloten trainer telt niet mee", JSON.stringify(d));
+    assert(d.lijst.map(x => x.trainer).join() === "Cor Trainer,Bert Trainer" && d.lijst[1].status === "bezig" && d.lijst[1].ingevuld === "4 van 10" && d.lijst[0].status === "geen formulier verstuurd", "alleen open trainers met status", JSON.stringify(d.lijst));
+    assert(!/GEHEIMTOKEN|Kind Geheim|ksp_test/.test(r.content[0].text) && seen.every(c => c.method === "GET"), "geen formulierlinks, geen spelers, alleen GET");
+    const a = (await tool(env, "scout_lezen", { actie: "trainers", alleen_open: false, periode: "najaar" })).structuredContent;
+    assert(a.periode.id === "p1" && a.lijst.length === 1 && a.lijst[0].team === "JO9-1", "andere periode en iedereen", JSON.stringify(a));
+  } finally { restore(); }
+});
 await run("mcp: scout_lezen: sleutel in de header, alleen aantallen terug, nette fouten", async () => {
   const seen = []; let status = 200;
   const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);
