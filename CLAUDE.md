@@ -207,3 +207,10 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - Schermgetallen gaan als één tekst met `;` naar osascript (een los argument dat met `-` begint kan als optie gelezen worden).
 - **Niet op de Mac getest.** Onzeker: of elk programma `set size`/`set position` aanneemt (schermvullende vensters niet; dan blijft het venster zoals het is), of cmd + overal inzoomt, en of alles binnen de 20 seconden van de brug blijft. Niet inzoomen bij een extern bureaublad (Windows App, Citrix): de toets gaat naar de andere computer.
 - Pagina (27 november, versie 253): gereedschap `bedien` geeft `app`, `zoom` en `deel` door; de werkwijze staat in de instructies als "SCHERM LEZEN". Per beurt kan de pagina één opname bekijken.
+
+## Jarvis: WhatsApp Business lezen (27 november 2026)
+
+- **Webhook `/whatsapp/webhook`** (Cloud API, coexistence): GET = verificatie van Meta (`hub.verify_token` moet gelijk zijn aan Secret `WA_VERIFY_TOKEN`, een zelfgekozen woord), POST = berichten, alleen aangenomen met een geldige `X-Hub-Signature-256` (HMAC-SHA256 van de ruwe body met Secret `WA_APP_SECRET`). Velden `messages` (binnen) en `smb_message_echoes` (wat Micha zelf in de app stuurde, `uit`).
+- Elk bericht in KV als `wa:<nummer>:<tijd13>:<in|uit>:<id>` met `expirationTtl` 7 dagen (keuze Micha). Gelezen-stand per nummer in KV `wa_gelezen`. Alleen tekst; media als `[afbeelding] <bijschrift>`, niets gedownload.
+- **`whatsapp_lezen`** (alleen lezen): `gesprekken`, `ongelezen`, `lees` (contact = nummer of deel van de naam; zet gelezen). Versturen bestaat bewust niet: Jarvis maakt een concept, Micha verstuurt zelf.
+- In de Meta-app: Webhook-callback `<worker>/whatsapp/webhook`, verify token = `WA_VERIFY_TOKEN`, abonneren op `messages` (en `smb_message_echoes`). Alleen met nagebootste berichten getest.

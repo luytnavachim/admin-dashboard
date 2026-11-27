@@ -560,7 +560,7 @@ await run("mcp: initialize, notification en tools/list", async () => {
   const n = await mcpCall(env, { jsonrpc: "2.0", method: "notifications/initialized" });
   assert(n.status === 202, "notification → 202", "got " + n.status);
   const list = await (await mcpCall(env, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,scout_wijzigen,rijplan,gmail_lezen", "veertig tools");
+  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,scout_wijzigen,rijplan,gmail_lezen,whatsapp_lezen", "eenenveertig tools");
 });
 await run("mcp: projecten en overzicht lezen", async () => {
   const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: seed() }) };
@@ -1580,6 +1580,34 @@ await run("mcp: scout_lezen: sleutel in de header, alleen aantallen terug, nette
     status = 200; const http = await tool({ ...env, SCOUT_URL: "http://scout.example" }, "scout_lezen", { actie: "wie" });
     assert(http.isError && /https/.test(http.content[0].text), "sleutel gaat nooit over http");
   } finally { restore(); }
+});
+
+await run("whatsapp: webhook alleen met juiste handtekening, daarna lezen (alleen lezen)", async () => {
+  const { createHmac } = await import("node:crypto");
+  const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, WA_APP_SECRET: "appgeheim", WA_VERIFY_TOKEN: "woord" };
+  const hook = (body, sig) => worker.fetch(new Request("https://w.workers.dev/whatsapp/webhook", { method: "POST", headers: { "content-type": "application/json", ...(sig ? { "X-Hub-Signature-256": sig } : {}) }, body }), env);
+  const teken = b => "sha256=" + createHmac("sha256", "appgeheim").update(b).digest("hex");
+  const v = await worker.fetch(new Request("https://w.workers.dev/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=woord&hub.challenge=12345"), env);
+  assert(v.status === 200 && (await v.text()) === "12345", "verificatie met het juiste woord");
+  assert((await worker.fetch(new Request("https://w.workers.dev/whatsapp/webhook?hub.mode=subscribe&hub.verify_token=fout&hub.challenge=1"), env)).status === 403, "verkeerd woord geweigerd");
+  const body = JSON.stringify({ entry: [{ changes: [
+    { field: "messages", value: { contacts: [{ wa_id: "31612345678", profile: { name: "Jan Klant" } }], messages: [
+      { from: "31612345678", id: "wamid.A1", timestamp: "1795000000", type: "text", text: { body: "Kun je morgen langskomen?" } },
+      { from: "31612345678", id: "wamid.A2", timestamp: "1795000060", type: "image", image: { caption: "de storing" } }] } },
+    { field: "smb_message_echoes", value: { message_echoes: [{ from: "31500000000", to: "31687654321", id: "wamid.B1", timestamp: "1794990000", type: "text", text: { body: "Graag gedaan" } }] } }] }] });
+  assert((await hook(body)).status === 403 && kv.store.size === 0, "zonder handtekening niets bewaard");
+  assert((await hook(body, "sha256=" + "0".repeat(64))).status === 403 && kv.store.size === 0, "verkeerde handtekening niets bewaard");
+  assert((await hook(body, teken(body))).status === 200 && [...kv.store.keys()].filter(k => k.startsWith("wa:")).length === 3, "juiste handtekening: drie berichten bewaard");
+  const g = (await tool(env, "whatsapp_lezen", { actie: "gesprekken" })).structuredContent;
+  assert(g.aantal === 2 && g.gesprekken[0].naam === "Jan Klant" && g.gesprekken[0].ongelezen === 2 && g.gesprekken[0].laatste === "[afbeelding] de storing" && g.gesprekken[1].van === "Micha", "gesprekken met naam, ongelezen en eigen echo", JSON.stringify(g));
+  assert((await tool(env, "whatsapp_lezen", { actie: "ongelezen" })).structuredContent.aantal === 2, "twee ongelezen");
+  const l = (await tool(env, "whatsapp_lezen", { actie: "lees", contact: "jan" })).structuredContent;
+  assert(l.nummer === "31612345678" && l.berichten.length === 2 && l.berichten[0].tekst === "Kun je morgen langskomen?", "lees op naam", JSON.stringify(l));
+  assert((await tool(env, "whatsapp_lezen", { actie: "ongelezen" })).structuredContent.aantal === 0, "na lezen niets meer ongelezen");
+  assert((await tool(env, "whatsapp_lezen", { actie: "lees", contact: "Piet" })).isError, "onbekend contact: nette fout");
+  const z = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "whatsapp_lezen", { actie: "gesprekken" });
+  assert(z.isError && /WA_APP_SECRET/.test(z.content[0].text), "zonder Secret een nette melding");
+  assert(!JSON.stringify(await tool(env, "whatsapp_lezen", { actie: "gesprekken" })).includes("appgeheim"), "geheim nooit in het antwoord");
 });
 
 console.log(`\n${"=".repeat(60)}`);
