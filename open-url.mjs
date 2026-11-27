@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Vaste opdracht "open-webadres" van de Jarvis-brug. Haalt op wat Jarvis zojuist heeft klaargezet (één keer, kort geldig):
 //  - een webadres: opent het in een nieuw venster van Google Chrome;
-//  - een opdracht voor Chrome: lezen, ergens heen gaan, klikken, typen, scrollen in het voorste venster.
+//  - een opdracht voor Chrome: lezen, ergens heen gaan, klikken, typen, scrollen in het voorste venster;
+//  - dezelfde opdrachten voor Safari als de opdracht browser:"safari" heeft (zie safari()).
 // Veiligheid zit hier, niet bij het taalmodel: knoppen, verzenden en riskante links worden alleen uitgevoerd met bevestigd:true
 // (dat de pagina pas meestuurt na een ja van Micha); wachtwoorden en betaalgegevens worden nooit getypt.
 // Het antwoord staat als JSON op de laatste regel.
@@ -38,6 +39,59 @@ async function js(code) {
   const r = await run("osascript", [...DOEL, "-e", "on run a", "-e", "set w to doel()", "-e", CHROME + " to return execute active tab of w javascript (item 1 of a)", "-e", "end run", code]);
   if (r.code !== 0) return { fout: uitleg(r.err) };
   try { return JSON.parse(r.out); } catch { return { fout: "De pagina gaf geen leesbaar antwoord (mogelijk is hij nog aan het laden)." }; }
+}
+
+// Safari (27 november): zelfde acties als Chrome, met de scripttaal van Safari (do JavaScript, current tab). Het voorste venster dat niet Jarvis is.
+// Eenmalig nodig: in Safari 'Sta JavaScript van Apple Events toe' (Instellingen > Ontwikkelaar) en de macOS-vraag of node Safari mag bedienen.
+const SAFARI = 'tell application "Safari"';
+function uitlegSafari(err) {
+  if (/Allow JavaScript from Apple Events|JavaScript van Apple Events|turned off|uitgeschakeld/i.test(err)) return "Safari staat niet toe dat Jarvis de pagina bedient. Zet aan: Safari > Instellingen > Geavanceerd > 'Toon functies voor webontwikkelaars', daarna tabblad Ontwikkelaar > 'Sta JavaScript van Apple Events toe'.";
+  if (/-1743|not authori[sz]ed|geen toestemming/i.test(err)) return "macOS staat niet toe dat Jarvis Safari bedient. Zet aan: Systeeminstellingen > Privacy en beveiliging > Automatisering > node (of Terminal) > Safari.";
+  if (/-1719|-1728|Can.t get (front )?window|Invalid index|Geen ander venster/i.test(err)) return "Er staat geen Safari-venster open. Laat Jarvis eerst een pagina openen in Safari.";
+  if (/-600|isn.t running/i.test(err)) return "Safari draait niet.";
+  return "Safari gaf een fout: " + err.slice(0, 200);
+}
+const SDOEL = ["-e", "on doel()", "-e", SAFARI, "-e", "repeat with i from 1 to count of windows", "-e", "try", "-e", "set u to URL of current tab of window i", "-e", 'if u is missing value then set u to ""',
+  "-e", 'if u does not start with "https://claude.ai" then return i', "-e", "end try", "-e", "end repeat", "-e", "end tell", "-e", 'error "Geen ander venster" number -1728', "-e", "end doel"];
+async function sjs(code) {
+  const r = await run("/usr/bin/osascript", [...SDOEL, "-e", "on run a", "-e", "set i to doel()", "-e", SAFARI + " to return do JavaScript (item 1 of a) in current tab of window i", "-e", "end run", code]);
+  if (r.code !== 0) return { fout: uitlegSafari(r.err) };
+  try { return JSON.parse(r.out); } catch { return { fout: "De pagina gaf geen leesbaar antwoord (mogelijk is hij nog aan het laden)." }; }
+}
+async function sTabs() {   // aantal tabbladen van het doelvenster
+  const r = await run("/usr/bin/osascript", [...SDOEL, "-e", "on run", "-e", "set i to doel()", "-e", SAFARI + " to return count of tabs of window i", "-e", "end run"], 5000);
+  return r.code === 0 ? Number(r.out) || 0 : 0;
+}
+async function safari(job) {
+  const uit = x => ({ browser: "safari", ...x });
+  if (job.actie === "tabs") {
+    const r = await run("/usr/bin/osascript", ["-e", SAFARI, "-e", 'set uit to ""', "-e", "repeat with w in windows", "-e", "try", "-e", "repeat with t in tabs of w", "-e", 'set uit to uit & (name of t) & "\t" & (URL of t) & "\n"', "-e", "end repeat", "-e", "end try", "-e", "end repeat", "-e", "return uit", "-e", "end tell"]);
+    if (r.code !== 0) return uit({ fout: uitlegSafari(r.err) });
+    return uit({ tabs: r.out.split("\n").filter(Boolean).slice(0, 40).map(l => { const [titel, url] = l.split("\t"); return { titel: (titel || "").slice(0, 100), url: (url || "").slice(0, 200) }; }) });
+  }
+  if (job.actie === "ga") {
+    let u; try { u = new URL(job.url); } catch { u = null; }
+    if (!u || !/^https?:$/.test(u.protocol)) return uit({ fout: "Dit adres wordt niet geopend." });
+    const kaal = u.href.replace(/[#?].*$/, "").replace(/\/$/, "");
+    // staat het adres al open: dat tabblad naar voren; anders in het doelvenster laden; is er geen venster: Safari het adres laten openen
+    const al = await run("/usr/bin/osascript", ["-e", "on run a", "-e", SAFARI, "-e", "repeat with w in windows", "-e", "try", "-e", "repeat with t in tabs of w", "-e", "if (URL of t) starts with (item 1 of a) then", "-e", "set current tab of w to t", "-e", "set index of w to 1", "-e", 'return "ok"', "-e", "end if", "-e", "end repeat", "-e", "end try", "-e", "end repeat", "-e", "end tell", "-e", 'return "nee"', "-e", "end run", kaal], 6000);
+    if (al.code === 0 && al.out === "ok") { await wacht(400); const w = await sjs(SCRIPTS.waar()); return uit({ tabblad_naar_voren: true, ...(w.fout ? {} : w) }); }
+    let r = await run("/usr/bin/osascript", [...SDOEL, "-e", "on run a", "-e", "set i to doel()", "-e", SAFARI + " to set URL of current tab of window i to (item 1 of a)", "-e", "end run", u.href]);
+    if (r.code !== 0 && /-1719|-1728|Invalid index|Geen ander venster|-600|isn.t running/i.test(r.err)) r = await run("/usr/bin/open", ["-a", "Safari", u.href]);
+    if (r.code !== 0) return uit({ fout: uitlegSafari(r.err) });
+    await wacht(2500); const w = await sjs(SCRIPTS.waar()); return uit({ gegaan_naar: u.href, ...(w.fout ? {} : w) });
+  }
+  if (!SCRIPTS[job.actie] || job.actie === "waar") return uit({ fout: "Deze actie werkt niet in Safari." });
+  const voor = job.actie === "klik" ? await sTabs() : 0;
+  const r = await sjs(SCRIPTS[job.actie](job));
+  if (r.fout || r.voorvertoning || job.actie === "lees" || job.actie === "scroll") return uit(r);
+  await wacht(job.actie === "typ" && !job.enter ? 300 : 2200);
+  let nieuwTab = false;
+  if (voor && await sTabs() > voor) {   // de klik opende een nieuw tabblad: dat naar voren, anders leest Jarvis daarna de oude pagina
+    const t = await run("/usr/bin/osascript", [...SDOEL, "-e", "on run", "-e", "set i to doel()", "-e", SAFARI + " to set current tab of window i to last tab of window i", "-e", "end run"], 5000);
+    if (t.code === 0) { nieuwTab = true; await wacht(900); }
+  }
+  const w = await sjs(SCRIPTS.waar()); return uit({ ...r, ...(nieuwTab ? { nieuw_tabblad: true } : {}), nu: w.fout ? undefined : w });
 }
 
 // Hulpfuncties die in de pagina zelf draaien.
@@ -281,6 +335,7 @@ async function chrome(job, key) {
   if (job.actie === "app") return appOpen(String(job.naam || ""));
   if (job.actie === "typ" && String(job.veld || "") === "#outlook-antwoord") return outlookAntwoord(job.tekst);   // via 'typ' omdat de Worker daar lange tekst doorlaat
   if (job.actie === "outlook") return outlook(String(job.zoek || "").trim().slice(0, 120));
+  if (job.browser === "safari") return safari(job);
   if (job.actie === "tabs") {
     const r = await run("osascript", ["-e", CHROME, "-e", 'set uit to ""', "-e", "repeat with w in windows", "-e", "repeat with t in tabs of w", "-e", 'set uit to uit & (title of t) & "\t" & (URL of t) & "\n"', "-e", "end repeat", "-e", "end repeat", "-e", "return uit", "-e", "end tell"]);
     if (r.code !== 0) return { fout: uitleg(r.err) };
@@ -328,4 +383,5 @@ async function main() {
   const r = await run("open", ["-na", "Google Chrome", "--args", "--new-window", u.href]);
   console.log(r.code === 0 ? "Geopend in Chrome: " + u.hostname : "Chrome starten mislukt: " + (r.err || "foutcode " + r.code)); process.exit(r.code || 0);
 }
+export { SDOEL, safari };
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();

@@ -1143,6 +1143,17 @@ await run("mcp: chrome op de Mac: opdracht klaarzetten, antwoord van het script 
   await ch({ actie: "typ", veld: "Zoeken", tekst: "big-ip", enter: true, bevestigd: true });
   const j2 = (await haal()).job; assert(j2.enter === true && j2.bevestigd === true && j2.veld === "Zoeken" && j2.tekst === "big-ip", "typ met enter en bevestiging", JSON.stringify(j2));
   assert((await haal()).fout, "één keer op te halen");
+  // Safari: het veld browser komt alleen door bij webacties; een Mac met de oude versie (antwoord zonder browser) is een nette fout
+  uitvoer = JSON.stringify({ browser: "safari", titel: "Scout", url: "https://scout.app1x.online/", tekst: "Doorstroom", links: [] });
+  const s1 = await ch({ actie: "lees", browser: "Safari" }), js1 = (await haal()).job;
+  assert(!s1.isError && s1.structuredContent.browser === "safari" && js1.browser === "safari" && /buitenstaander/.test(s1.structuredContent.let_op), "safari: lees komt door met browser", JSON.stringify(js1));
+  await ch({ actie: "lees", browser: "firefox" }); assert(!("browser" in (await haal()).job), "onbekende browser valt weg (Chrome)");
+  await ch({ actie: "app", naam: "Safari", browser: "safari" }); assert(!("browser" in (await haal()).job), "browser alleen bij webacties");
+  uitvoer = JSON.stringify({ titel: "Gent", url: "https://ext.gent.be/" });
+  const s2 = await ch({ actie: "lees", browser: "safari" }); await haal();
+  assert(s2.isError && /haal-op-admin/.test(s2.content[0].text), "safari gevraagd maar de Mac antwoordt zonder browser: nette fout");
+  { const bron = (await import("node:fs")).readFileSync(new URL("./open-url.mjs", import.meta.url), "utf8");
+    assert(/if \(job\.browser === "safari"\) return safari\(job\);/.test(bron) && /do JavaScript \(item 1 of a\) in current tab/.test(bron), "open-url.mjs stuurt browser safari naar safari()"); }
   uitvoer = "geen json";
   const f = await ch({ actie: "tabs" }); assert(f.isError && /geen leesbaar antwoord/.test(f.content[0].text), "onleesbaar antwoord is een nette fout");
 });
