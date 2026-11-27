@@ -242,3 +242,4 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - **`whatsapp_lezen` actie `afzender`** (alleen lezen, GET): naam, nummer en status van `WA_PHONE_ID` en `WA_SEND_PHONE_ID` bij Meta; met `waba` ook `hoort_bij_waba` via `/{waba}/phone_numbers`.
 - **`scout_lezen` actie `doorstroom`** (`scoutDoorstroom`): `periodes.php?action=doorstroom_tabel&club=&groep=` (team = groep, bv. O12; optioneel `seizoen`), compacte rijen; 404 = scherm Doorstroom nog niet geopend.
 - Alleen met nagebootste antwoorden getest, niet tegen Meta of de scout-app.
+- **Les (28 november):** `wrangler deploy` haalt gewone variabelen weg die alleen in het Cloudflare-dashboard stonden (niet in `wrangler.jsonc`). Zo verdween `WA_PHONE_ID`; die staat nu als Secret. Zet id's en adressen dus als Secret of in `vars` van `wrangler.jsonc`. `WA_TOKEN` moet een permanent token van de systeemgebruiker zijn; een tijdelijk token uit de API-instellingen verloopt na een paar uur.
