@@ -560,7 +560,7 @@ await run("mcp: initialize, notification en tools/list", async () => {
   const n = await mcpCall(env, { jsonrpc: "2.0", method: "notifications/initialized" });
   assert(n.status === 202, "notification → 202", "got " + n.status);
   const list = await (await mcpCall(env, { jsonrpc: "2.0", id: 2, method: "tools/list" })).json();
-  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,scout_wijzigen,rijplan,gmail_lezen,whatsapp_lezen", "eenenveertig tools");
+  assert(list.result.tools.map(t => t.name).join() === "uren_projecten,uren_overzicht,uren_boeken,uren_wijzigen,project_activiteit,administratie_overzicht,spraak_stemmen,spreek,site_status,camera_beeld,klant_zoeken,klant_aanmaken,winkelprijs,web_zoeken,web_lezen,web_foto,nieuws,offerte_concept,lokaal_status,lokaal_vraag,terminal_opdrachten,terminal_uitvoeren,wachtrij_start,netwerk_dreigingen,huis_register,huis_dashboard,huis_config,huis_systeem,netwerk_overzicht,netwerk_client,netwerk_apparaat,netwerk_wifi,netwerk_firewall,mappen_lijst,mappen_lezen,huis_automatisering,scout_lezen,scout_wijzigen,rijplan,gmail_lezen,whatsapp_lezen,whatsapp_sturen", "tweeënveertig tools");
 });
 await run("mcp: projecten en overzicht lezen", async () => {
   const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv({ projects_v1: seed() }) };
@@ -1682,6 +1682,34 @@ await run("whatsapp: webhook alleen met juiste handtekening, daarna lezen (allee
   const z = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "whatsapp_lezen", { actie: "gesprekken" });
   assert(z.isError && /WA_APP_SECRET/.test(z.content[0].text), "zonder Secret een nette melding");
   assert(!JSON.stringify(await tool(env, "whatsapp_lezen", { actie: "gesprekken" })).includes("appgeheim"), "geheim nooit in het antwoord");
+});
+
+await run("whatsapp_sturen: eerst voorvertoning met code, alleen met code + bevestigd naar Meta, 24-uursvenster", async () => {
+  const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv, WA_TOKEN: "watoken", WA_PHONE_ID: "123456" }, nu = Date.now();
+  kv.store.set(`wa:31612345678:${String(nu - 3600e3).padStart(13, "0")}:in:wamid.X`, JSON.stringify({ nr: "31612345678", naam: "Jan Klant", tekst: "Hoi", richting: "in" }));
+  kv.store.set(`wa:31687654321:${String(nu - 48 * 3600e3).padStart(13, "0")}:in:wamid.Y`, JSON.stringify({ nr: "31687654321", naam: "Paul Oud", tekst: "Hoi", richting: "in" }));
+  const calls = [], restore = mockUpstream(c => { calls.push(c); return new Response(JSON.stringify({ messages: [{ id: "wamid.OUT1" }] }), { status: 200 }); });
+  try {
+    const z = await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "whatsapp_sturen", { contact: "Jan", tekst: "x" });
+    assert(z.isError && /WA_TOKEN/.test(z.content[0].text), "zonder Secrets een nette melding");
+    const v = (await tool(env, "whatsapp_sturen", { contact: "jan", tekst: "Morgen om 10 uur?" })).structuredContent;
+    assert(v.voorvertoning && v.nummer === "31612345678" && v.aan === "Jan Klant" && v.soort === "tekst" && v.venster_open && /^[0-9a-f]{12}$/.test(v.code) && calls.length === 0, "voorvertoning, niets verstuurd", JSON.stringify(v));
+    assert((await tool(env, "whatsapp_sturen", { bevestigd: true, code: "verkeerd" })).isError && calls.length === 0, "onbekende code: niets verstuurd");
+    const s = (await tool(env, "whatsapp_sturen", { bevestigd: true, code: v.code, tekst: "andere tekst", contact: "0611111111" })).structuredContent;
+    assert(s.verstuurd && calls.length === 1 && calls[0].url === "https://graph.facebook.com/v21.0/123456/messages" && calls[0].headers.authorization === "Bearer watoken", "verstuurd naar Meta", JSON.stringify(s));
+    const b = JSON.parse(calls[0].body);
+    assert(b.to === "31612345678" && b.type === "text" && b.text.body === "Morgen om 10 uur?", "precies de voorvertoning, niet de nieuwe argumenten", calls[0].body);
+    assert((await tool(env, "whatsapp_sturen", { bevestigd: true, code: v.code })).isError && calls.length === 1, "zelfde code niet twee keer");
+    assert([...kv.store.keys()].some(k => k.startsWith("wa:31612345678:") && k.includes(":uit:wamid.OUT1")), "verstuurd bericht staat in het gesprek");
+    const buiten = await tool(env, "whatsapp_sturen", { contact: "Paul", tekst: "Hoi Paul" });
+    assert(buiten.isError && /24-uursvenster/.test(buiten.content[0].text), "buiten 24 uur zonder template geweigerd");
+    const tp = (await tool(env, "whatsapp_sturen", { contact: "+31 6 87654321", tekst: "Hoi Paul", template: "update_micha" })).structuredContent;
+    assert(tp.nummer === "31687654321" && tp.soort === "template update_micha" && !tp.venster_open, "template buiten het venster", JSON.stringify(tp));
+    const onb = await tool(env, "whatsapp_sturen", { contact: "Paul Erlings", tekst: "Hoi" });
+    assert(onb.isError && /Vraag Micha het nummer/.test(onb.content[0].text), "onbekende naam: om nummer vragen");
+    assert((await tool(env, "whatsapp_sturen", { contact: "0612345678", tekst: "Hoi" })).structuredContent.nummer === "31612345678", "06-nummer wordt 316");
+    assert(!JSON.stringify(s).includes("watoken"), "token nooit in het antwoord");
+  } finally { restore(); }
 });
 
 await run("privacy.html: openbare privacyverklaring voor de Meta-app", async () => {
