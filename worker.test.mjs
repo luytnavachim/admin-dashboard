@@ -866,6 +866,38 @@ await run("mcp: rijplan haalt het rijplan uit de JO11-2-app met de eigen sleutel
   } finally { restore(); }
 });
 
+await run("afgelastingen: elk uur de clubsite nakijken, nieuwe afgelasting als melding in rijplan", async () => {
+  const seen = []; let lijst; const morgen = new Date(Date.now() + 86400000).toISOString().slice(0, 10), vroeger = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
+  const w = (nr, thuis, uit, datum, af) => ({ wedstrijdnummer: nr, thuisClubEnTeamNaamFriendly: thuis, uitClubEnTeamNaamFriendly: uit, datum, statusAfgelast: af });
+  const restore = mockUpstream((c) => { seen.push(c); return new Response(JSON.stringify(lijst), { status: 200 }); });
+  try {
+    const kv = fakeKv(), env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: kv }, ctx = { waitUntil: (p) => { ctx.p = p; } };
+    lijst = [w(1, "ROHDA Raalte O11-2", "Heino O11-1", morgen + "T09:00:00", false), w(2, "Wijhe O14-1", "ROHDA Raalte O14-2JM", morgen + "T10:30:00", true),
+      w(3, "ROHDA Raalte O11-2", "Oud O11-1", vroeger + "T09:00:00", true), w(4, "ROHDA Raalte O9-1", "X", morgen + "T09:00:00", true)];
+    await worker.scheduled({}, env, ctx); await ctx.p;
+    const c = seen[0], body = JSON.parse(c.body);
+    assert(String(c.url) === "https://site-api.voetbalassi.st/RohdaRaalte/front/programmaenuitslagen/PostWedstrijden" && c.method === "POST" && body.klantAfkorting === "RohdaRaalte" && /-07-01T00:00:00$/.test(body.datumVan), "zelfde bron als de JO11-2-app", c.body);
+    const m1 = JSON.parse(kv.store.get("voetbal_meldingen"));
+    assert(m1.length === 1 && m1[0].team === "JO14-2" && m1[0].kind === "Moos" && m1[0].thuis === false && m1[0].tegenstander === "Wijhe O14-1", "alleen toekomstige afgelasting van de eigen teams", JSON.stringify(m1));
+    // Lezen vlak na de controle: geen nieuwe aanroep naar de clubsite.
+    const n = seen.length, o = (await tool(env, "rijplan", { afgelastingen: true })).structuredContent;
+    assert(seen.length === n && o.afgelastingen.length === 1 && o.nieuw === 1 && o.afgelastingen[0].nieuw && o.laatste_controle && !o.afgelastingen[0].id, "melding te lezen via rijplan", JSON.stringify(o));
+    const o2 = (await tool(env, "rijplan", { afgelastingen: true })).structuredContent;
+    assert(o2.nieuw === 0 && o2.afgelastingen.length === 1, "tweede keer niet meer nieuw");
+    // Wedstrijd 1 afgelast → nieuwe melding; wedstrijd 2 weer ingepland → melding weg.
+    lijst[0].statusAfgelast = true; lijst[1].statusAfgelast = false;
+    await worker.scheduled({}, env, ctx); await ctx.p;
+    const m2 = JSON.parse(kv.store.get("voetbal_meldingen"));
+    assert(m2.length === 1 && m2[0].team === "JO11-2" && m2[0].kind === "Duuk" && m2[0].tijd === "09:00", "wijziging opgepikt", JSON.stringify(m2));
+    // Geen eigen fout naar buiten als de clubsite plat ligt; stand ouder dan 2 uur → lezen probeert zelf.
+    kv.store.set("voetbal_stand", JSON.stringify({ op: "2026-01-01T00:00:00.000Z", wedstrijden: {} }));
+    const restore2 = mockUpstream(() => new Response("x", { status: 500 }));
+    const o3 = (await tool(env, "rijplan", { afgelastingen: true })).structuredContent; restore2();
+    assert(/fout 500/.test(o3.fout) && Array.isArray(o3.afgelastingen), "storing bij de clubsite: melding, geen crash", JSON.stringify(o3));
+    assert(!JSON.stringify(seen.map(x => x.headers)).includes("geheim"), "geen sleutel naar de clubsite");
+  } finally { restore(); }
+});
+
 await run("mcp: huis_automatisering: voorvertoning, daarna aanmaken, alleen eigen id's", async () => {
   const seen = []; let bestaat = false;
   const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c);

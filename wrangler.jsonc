@@ -26,6 +26,8 @@
 		"bindings": [{ "name": "JOBS", "class_name": "JarvisJobs" }]
 	},
 	"migrations": [{ "tag": "v1", "new_sqlite_classes": ["JarvisJobs"] }],
+	// Elk uur op :07 de afgelastingen van JO11-2 en JO14-2 nakijken (scheduled in worker.js).
+	"triggers": { "crons": ["7 * * * *"] },
 	"vars": {
 		"INFORMER_AUTH_METHOD": "apikey",
 		"INFORMER_BASE_URL": "https://api.informer.eu/v1",

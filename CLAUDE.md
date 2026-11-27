@@ -243,3 +243,10 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - **`scout_lezen` actie `doorstroom`** (`scoutDoorstroom`): `periodes.php?action=doorstroom_tabel&club=&groep=` (team = groep, bv. O12; optioneel `seizoen`), compacte rijen; 404 = scherm Doorstroom nog niet geopend.
 - Alleen met nagebootste antwoorden getest, niet tegen Meta of de scout-app.
 - **Les (28 november):** `wrangler deploy` haalt gewone variabelen weg die alleen in het Cloudflare-dashboard stonden (niet in `wrangler.jsonc`). Zo verdween `WA_PHONE_ID`; die staat nu als Secret. Zet id's en adressen dus als Secret of in `vars` van `wrangler.jsonc`. `WA_TOKEN` moet een permanent token van de systeemgebruiker zijn; een tijdelijk token uit de API-instellingen verloopt na een paar uur.
+
+## Jarvis: afgelastingen JO11-2 en JO14-2 (28 november 2026, wachtrij)
+
+- **Cron** (`triggers.crons` = `7 * * * *` in `wrangler.jsonc`) → `scheduled` in `worker.js` → `afgelastControle`: haalt het seizoensprogramma bij voetbalassist (`site-api.voetbalassi.st/RohdaRaalte/.../PostWedstrijden`, zelfde verzoek en teamnamen als `knvb_fetch` in de JO11-2-app), filtert `ROHDA Raalte O11-2` (Duuk) en `O14-2(JM)` (Moos) en vergelijkt `statusAfgelast` met de vorige stand (KV `voetbal_stand`). Nieuwe afgelasting van vandaag of later → KV `voetbal_meldingen`; weer ingepland of voorbij → weg.
+- **Lezen**: `rijplan` met `afgelastingen:true` (geen nieuwe functie). Geeft de afgelastingen met `nieuw` (sinds de vorige keer opvragen, KV `voetbal_gezien`) en `laatste_controle`. Is de stand ouder dan 2 uur (cron nog niet live), dan controleert de aanroep zelf.
+- **Bewust niet**: WhatsApp versturen. Dat bekijkt Micha later (eerst een nieuw permanent `WA_TOKEN`). De melding bovenaan de Jarvis-pagina is de volgende stap in de pagina.
+- Alleen met nagebootste antwoorden getest, niet tegen voetbalassist zelf.
