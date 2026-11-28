@@ -268,3 +268,9 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - **Verzoekbudget** `CODE_BUDGET` = 45 (een Worker op het gratis plan mag 50 verzoeken per aanvraag): 3 per site, de rest gaat naar links; alle zes sites = 4 links per site, één site = 30.
 - JavaScript-fouten in de browser ziet de Worker niet. Andere app1x.online-sites erbij: aan `CODE_SITES` toevoegen.
 - **Niet tegen de echte W3C-diensten getest**: vanuit de wachtrij-sessie zijn ze niet bereikbaar (proxy). Alleen met nagebootste antwoorden in `worker.test.mjs`. De pagina (knop 'Code controleren') is de volgende stap.
+
+## Jarvis: observaties JO11-2 lezen (28 november 2026, wachtrij)
+
+- `rijplan` met `observaties:true` (optioneel `van`, `tot`, `thema`, `speler`) haalt `GET <JO11_URL>/api.php?view=observaties&from=&to=` op met dezelfde kop `X-Jarvis-Key` als het rijplan. Verwacht `{ok:true, observaties:[…]}`; velden in het Nederlands (`datum`, `soort`, `wedstrijd`, `thema`, `spelers`, `gezien`, `mist`, `actie`, `status`) of zoals de app ze opslaat (`date`, `context`, `theme`, `players`, `seen`, `missing`, `action`). Nieuwste eerst, antwoord ingekort tot ±12 kB (`observatiesKort`).
+- **Het eindpunt in de JO11-2-app bestaat nog niet.** Het hoort naast `view=rijplan` in `api.php` te komen (zelfde sleutelcontrole via `.data/jarvis.hash`, observaties uit `read_clubhouse`, bij `context: match` de tegenstander uit `events` als `wedstrijd`). Tot dan geeft de actie een nette melding (404).
+

@@ -936,6 +936,25 @@ await run("mcp: rijplan haalt het rijplan uit de JO11-2-app met de eigen sleutel
   } finally { restore(); }
 });
 
+await run("mcp: rijplan observaties:true leest de notities over JO11-2 (alleen lezen, gefilterd)", async () => {
+  const seen = [], env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), JO11_KEY: "sleutel" };
+  const obs = [{ datum: "2026-11-20", soort: "training", thema: "Trainingsinhoud", spelers: [], gezien: "Lange rijen bij de oefening.", mist: "Balcontacten.", actie: "Kleine partijvormen.", status: "open" },
+    { date: "2026-11-28", context: "match", wedstrijd: "vs Excelsior '31", theme: "Speelwijze", players: ["Duuk"], seen: "Geen opbouw van achteruit.", missing: "", action: "Positiespel oefenen.", status: "open" }];
+  const restore = mockUpstream((c) => { seen.push(c);
+    if (String(c.url).includes("nietlive")) return new Response("{}", { status: 404 });
+    return new Response(JSON.stringify({ ok: true, observaties: obs }), { status: 200 }); });
+  try {
+    const o = (await tool(env, "rijplan", { observaties: true })).structuredContent, u = new URL(String(seen[0].url));
+    assert(u.searchParams.get("view") === "observaties" && !u.searchParams.has("from") && !u.searchParams.has("to") && seen[0].headers["x-jarvis-key"] === "sleutel", "eigen view, zonder datums", String(seen[0].url));
+    assert(o.aantal === 2 && o.observaties[0].datum === "2026-11-28" && o.observaties[0].gezien === "Geen opbouw van achteruit." && o.observaties[0].spelers[0] === "Duuk", "nieuwste eerst, Engelse velden omgezet", JSON.stringify(o));
+    const f = (await tool(env, "rijplan", { observaties: true, van: "2026-11-01", thema: "training" })).structuredContent, u2 = new URL(String(seen[1].url));
+    assert(u2.searchParams.get("from") === "2026-11-01" && !u2.searchParams.has("to") && f.aantal === 1 && f.observaties[0].thema === "Trainingsinhoud", "filter op thema, van zonder tot", JSON.stringify(f));
+    const s = (await tool(env, "rijplan", { observaties: true, speler: "duu" })).structuredContent;
+    assert(s.aantal === 1 && s.observaties[0].soort === "match", "filter op speler");
+    const weg = await tool({ ...env, JO11_URL: "https://nietlive.example" }, "rijplan", { observaties: true });
+    assert(weg.isError && /observaties-eindpunt/.test(weg.content[0].text), "404 = eindpunt nog niet in de app");
+  } finally { restore(); }
+});
 await run("afgelastingen: elk uur de clubsite nakijken, nieuwe afgelasting als melding in rijplan", async () => {
   const seen = []; let lijst; const morgen = new Date(Date.now() + 86400000).toISOString().slice(0, 10), vroeger = new Date(Date.now() - 20 * 86400000).toISOString().slice(0, 10);
   const w = (nr, thuis, uit, datum, af) => ({ wedstrijdnummer: nr, thuisClubEnTeamNaamFriendly: thuis, uitClubEnTeamNaamFriendly: uit, datum, statusAfgelast: af });
