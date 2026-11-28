@@ -506,8 +506,8 @@ const MCP_TOOLS = [
       tekst: { type: "string" }, stem: { type: "string", description: "Stem-id uit spraak_stemmen; leeg = eerste stem" }
     }, required: ["tekst"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
-  { name: "site_status", description: "Meet of de eigen sites bereikbaar zijn en hoe snel ze antwoorden (scout, team, JO11-2, administratie). Alleen lezen.",
-    inputSchema: { type: "object", properties: {}, additionalProperties: false },
+  { name: "site_status", description: "Meet of de eigen sites bereikbaar zijn en hoe snel ze antwoorden (scout, team, JO11-2, administratie, www.triplet-it.nl). Met controle:true ook per site: beveiligingsheaders (HSTS, CSP, nosniff, framing, referrer, permissions), of de webserver zijn versie toont, en het certificaat (geldig tot, dagen over, uitgever) uit de openbare certificaatlogboeken. Eén gewoon verzoek per site, geen scan. Alleen lezen.",
+    inputSchema: { type: "object", properties: { controle: { type: "boolean", description: "true = ook certificaat en beveiligingsheaders nalezen (trager)" } }, additionalProperties: false },
     annotations: { readOnlyHint: true } },
   { name: "camera_beeld", description: "Eén actueel beeld van een bewakingscamera uit Home Assistant, verkleind, als base64-jpeg. camera is g4_doorbell_pro_poe, g6_pro_entry, ai_pro of g5_flex. Alleen lezen.",
     inputSchema: { type: "object", properties: { camera: { type: "string" }, breedte: { type: "number" } }, required: ["camera"], additionalProperties: false },
@@ -2395,18 +2395,51 @@ async function afgelastLezen(env, nu = new Date()) {
   return uit;
 }
 
-const MCP_SITES = [["Scout-app", "https://scout.app1x.online"], ["Team-app", "https://team.app1x.online"], ["JO11-2", "https://o11-2.app1x.online"], ["Administratie", "https://administratie.triplet-it.nl"]];
-async function mcpSites() {
+const MCP_SITES = [["Scout-app", "https://scout.app1x.online"], ["Team-app", "https://team.app1x.online"], ["JO11-2", "https://o11-2.app1x.online"], ["Administratie", "https://administratie.triplet-it.nl"], ["Website", "https://www.triplet-it.nl"]];
+// Beveiligingsheaders die we per site nalezen (alleen uit het gewone antwoord, geen scan).
+const SITE_HEADERS = [["strict-transport-security", "HSTS"], ["content-security-policy", "CSP"], ["x-content-type-options", "nosniff"], ["x-frame-options", "framing"], ["referrer-policy", "referrer"], ["permissions-policy", "permissions"]];
+function siteHeaders(h) {
+  const aanwezig = {}, ontbreekt = [];
+  for (const [k, label] of SITE_HEADERS) {
+    let v = h.get(k);
+    // framing mag ook via CSP frame-ancestors geregeld zijn
+    if (!v && k === "x-frame-options" && /frame-ancestors/i.test(h.get("content-security-policy") || "")) v = "via CSP frame-ancestors";
+    if (v) aanwezig[label] = String(v).slice(0, 160); else ontbreekt.push(label);
+  }
+  const server = h.get("server"), powered = h.get("x-powered-by");
+  const lek = [server, powered].filter(x => x && /\d/.test(x)).map(x => String(x).slice(0, 80));
+  return { aanwezig, ontbreekt, server: server ? String(server).slice(0, 80) : null, versie_zichtbaar: lek.length ? lek : null };
+}
+// Certificaat via de openbare certificaatlogboeken (crt.sh): een Worker ziet het certificaat van een verbinding zelf niet.
+async function siteCert(host) {
+  try {
+    const r = await fetch("https://crt.sh/?q=" + encodeURIComponent(host) + "&output=json&exclude=expired", { signal: AbortSignal.timeout(8000), headers: { "User-Agent": "Jarvis-sitebewaking" } });
+    if (!r.ok) return { fout: "certificaatlogboek gaf " + r.status };
+    const lijst = await r.json();
+    const nu = Date.now(), passend = (Array.isArray(lijst) ? lijst : []).filter(c => c && String(c.name_value || "").split(/\s+/).some(n => n === host || (n.startsWith("*.") && host.endsWith(n.slice(1)))))
+      .map(c => ({ tot: Date.parse(c.not_after + "Z"), van: Date.parse(c.not_before + "Z"), uitgever: String(c.issuer_name || "").match(/O=([^,]+)/)?.[1] || String(c.issuer_name || "").slice(0, 60) }))
+      .filter(c => c.tot > nu && c.van <= nu).sort((a, b) => b.tot - a.tot);
+    if (!passend.length) return { fout: "geen geldig certificaat in de logboeken gevonden" };
+    const c = passend[0];
+    return { geldig_tot: new Date(c.tot).toISOString().slice(0, 10), dagen_over: Math.floor((c.tot - nu) / 86400000), uitgever: c.uitgever };
+  } catch (e) { return { fout: e && e.name === "TimeoutError" ? "certificaatlogboek gaf geen antwoord binnen 8 s" : "certificaatlogboek niet bereikbaar" }; }
+}
+async function mcpSites(args = {}) {
+  const controle = !!(args && args.controle);
   const sites = await Promise.all(MCP_SITES.map(async ([naam, url]) => {
     const t0 = Date.now();
+    let uit;
     try {
       const r = await fetch(url, { method: "GET", redirect: "follow", signal: AbortSignal.timeout(8000), headers: { "User-Agent": "Jarvis-sitebewaking" } });
-      return { naam, url, bereikbaar: r.status < 500, status: r.status, ms: Date.now() - t0 };
+      uit = { naam, url, bereikbaar: r.status < 500, status: r.status, ms: Date.now() - t0 };
+      if (controle) { const eind = r.url || url; uit.beveiliging = Object.assign({ https: /^https:/i.test(eind), eind_url: eind }, siteHeaders(r.headers)); }
     } catch (e) {
-      return { naam, url, bereikbaar: false, status: 0, ms: Date.now() - t0, fout: e && e.name === "TimeoutError" ? "geen antwoord binnen 8 s" : "niet bereikbaar" };
+      uit = { naam, url, bereikbaar: false, status: 0, ms: Date.now() - t0, fout: e && e.name === "TimeoutError" ? "geen antwoord binnen 8 s" : "niet bereikbaar" };
     }
+    if (controle) uit.certificaat = await siteCert(new URL(url).hostname);
+    return uit;
   }));
-  return { gemeten_op: new Date().toISOString(), sites };
+  return controle ? { gemeten_op: new Date().toISOString(), sites, let_op: "Alleen gelezen uit het gewone antwoord en de openbare certificaatlogboeken; geen scan. versie_zichtbaar = de webserver noemt zijn versie (beter verbergen)." } : { gemeten_op: new Date().toISOString(), sites };
 }
 
 // ---- Spraak (ElevenLabs). Sleutel alleen als Secret ELEVENLABS_KEY; model via ELEVENLABS_MODEL. ----

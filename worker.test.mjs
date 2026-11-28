@@ -835,8 +835,35 @@ await run("mcp: site_status meet bereikbaarheid per site", async () => {
   try {
     const o = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "site_status", {})).structuredContent;
     const by = Object.fromEntries(o.sites.map(x => [x.naam, x]));
-    assert(o.sites.length === 4 && by["Scout-app"].bereikbaar && by["Scout-app"].status === 200 && typeof by["Scout-app"].ms === "number", "bereikbare site");
+    assert(o.sites.length === 5 && by["Website"] && by["Website"].url === "https://www.triplet-it.nl" && !by["Scout-app"].beveiliging && !by["Scout-app"].certificaat && by["Scout-app"].bereikbaar && by["Scout-app"].status === 200 && typeof by["Scout-app"].ms === "number", "bereikbare site");
     assert(!by["Team-app"].bereikbaar && /8 s/.test(by["Team-app"].fout) && !by["JO11-2"].bereikbaar && by["JO11-2"].status === 503, "time-out en 503 tellen als onbereikbaar", JSON.stringify(by));
+  } finally { restore(); }
+});
+
+await run("mcp: site_status controle leest headers en certificaat per site (geen scan)", async () => {
+  const seen = [], nu = Date.now(), dag = 86400000, f = t => new Date(t).toISOString().slice(0, 19);
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(u);
+    if (u.startsWith("https://crt.sh/")) {
+      const host = decodeURIComponent(u.match(/q=([^&]+)/)[1]);
+      if (host.includes("team")) return new Response("oeps", { status: 502 });
+      return new Response(JSON.stringify([
+        { name_value: host, not_before: f(nu - 80 * dag), not_after: f(nu + 10 * dag), issuer_name: "C=US, O=Let's Encrypt, CN=R11" },
+        { name_value: "*." + host.split(".").slice(1).join(".") + "\nanders.nl", not_before: f(nu - 5 * dag), not_after: f(nu + 85 * dag), issuer_name: "C=US, O=Let's Encrypt, CN=R10" },
+        { name_value: "ander.voorbeeld.nl", not_before: f(nu - dag), not_after: f(nu + 300 * dag), issuer_name: "O=Iemand" }]), { status: 200 });
+    }
+    if (u.includes("www.triplet-it.nl")) return new Response("ok", { status: 200, headers: { "strict-transport-security": "max-age=31536000", "content-security-policy": "default-src 'self'; frame-ancestors 'none'", "x-content-type-options": "nosniff", "server": "Apache/2.4.58 (Ubuntu)" } });
+    return new Response("ok", { status: 200, headers: { "server": "Apache" } }); });
+  try {
+    const o = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "site_status", { controle: true })).structuredContent;
+    const by = Object.fromEntries(o.sites.map(x => [x.naam, x])), w = by["Website"];
+    assert(w.beveiliging.https && w.beveiliging.aanwezig.HSTS && w.beveiliging.aanwezig.framing === "via CSP frame-ancestors" && w.beveiliging.ontbreekt.join() === "referrer,permissions", "headers website", JSON.stringify(w.beveiliging));
+    assert(w.beveiliging.versie_zichtbaar && /2\.4\.58/.test(w.beveiliging.versie_zichtbaar[0]), "versie van de webserver zichtbaar");
+    assert(by["Scout-app"].beveiliging.versie_zichtbaar === null && by["Scout-app"].beveiliging.ontbreekt.length === 6, "zonder headers alles ontbrekend, kale servernaam is geen lek");
+    assert(w.certificaat.dagen_over >= 84 && w.certificaat.uitgever === "Let's Encrypt" && /^\d{4}-\d{2}-\d{2}$/.test(w.certificaat.geldig_tot), "nieuwste passende certificaat (ook wildcard)", JSON.stringify(w.certificaat));
+    assert(/502/.test(by["Team-app"].certificaat.fout) && by["Team-app"].bereikbaar, "fout van het logboek alleen bij certificaat");
+    assert(seen.filter(u => !u.startsWith("https://crt.sh/")).length === 5, "één verzoek per site", JSON.stringify(seen));
+    const zonder = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() }, "site_status", {})).structuredContent;
+    assert(zonder.sites.every(x => !x.certificaat && !x.beveiliging) && seen.filter(u => u.startsWith("https://crt.sh/")).length === 5, "zonder controle geen logboek");
   } finally { restore(); }
 });
 

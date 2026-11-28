@@ -250,3 +250,8 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - **Lezen**: `rijplan` met `afgelastingen:true` (geen nieuwe functie). Geeft de afgelastingen met `nieuw` (sinds de vorige keer opvragen, KV `voetbal_gezien`) en `laatste_controle`. Is de stand ouder dan 2 uur (cron nog niet live), dan controleert de aanroep zelf.
 - **Bewust niet**: WhatsApp versturen. Dat bekijkt Micha later (eerst een nieuw permanent `WA_TOKEN`). De melding bovenaan de Jarvis-pagina is de volgende stap in de pagina.
 - Alleen met nagebootste antwoorden getest, niet tegen voetbalassist zelf.
+
+## Jarvis: sitecontrole met certificaat en headers (28 november 2026, wachtrij)
+
+- `site_status` meet nu ook `www.triplet-it.nl` (naam "Website"). Met `controle:true` per site: `beveiliging` (https, eind_url, aanwezige/ontbrekende headers HSTS/CSP/nosniff/framing/referrer/permissions, `server`, `versie_zichtbaar` als server of x-powered-by een versienummer noemt) en `certificaat` (geldig_tot, dagen_over, uitgever) via crt.sh (`siteCert`; een Worker ziet het certificaat van een verbinding zelf niet). Eén gewoon verzoek per site plus één naar crt.sh, geen scan. Zonder `controle` blijft het antwoord zoals het was (de pagina pollt dat).
+- Alleen met nagebootste antwoorden getest; crt.sh is soms traag (time-out 8 s, dan `certificaat.fout`).
