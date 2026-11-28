@@ -280,3 +280,10 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - Tabblad `boodschappen` (module onderaan de pagina, na Favorieten): weekmenu per week (database `weekmenu/<JJJJ-MM-DD>`: `gerecht`, `erbij` = ingrediënten met komma's), voorraad (`voorraad`: `naam`, `stand` genoeg/bijna/op) en lijst per winkel Jumbo of Dirk (`boodschappen`: `naam`, `hoeveel`, `winkel`, `gekocht`, `op`, `bron`). Afvinken zet de voorraad weer op genoeg; "Ingrediënten op de lijst" zet de ingrediënten van de week erop (niet dubbel, niet wat genoeg in voorraad is).
 - Jarvis voegt toe via `notitie` actie `boodschap` (`boodTool`): `tekst` (+ `winkel`), of `dag` + `gerecht`; zonder beide = lijst, menu en wat op is. Geen nieuw gereedschap (grens van 16). De omschrijving van `notitie` zit nu op 996 van de 1024 bytes.
 - Geen koppeling met het mandje van Jumbo (keuze Micha: eerst in Jarvis). Terugzetten kan naar versie 290 (1795864850-ccc4).
+
+## Jarvis: Hetzner-overzicht (28 november 2026, wachtrij)
+
+- `jarvis-check.sh` (alleen lezen) heeft er secties bij: `Belasting`, `Geheugen`, `Schijf`, `Diensten` (draaiende systemd-diensten), `Versies` (dpkg van apache2, nginx, openssh, fail2ban, databases, docker, node, php…), `Docker`, `fail2ban IP` (geblokkeerde IP's per jail) en `SSH mislukt 24u` (IP + aantal uit journalctl, anders auth.log). Op de server komt de nieuwe versie pas na opnieuw `hetzner-check-inrichten.sh` draaien (zet het script altijd opnieuw neer, de rest wordt niet dubbel gezet).
+- `terminal_uitvoeren` met `hetzner-beveiliging` geeft naast `uitvoer` (ingekort tot 3000 tekens) een veld `overzicht` (`hetznerOverzicht`): systeem, updates (totaal/beveiliging), herstart_nodig, automatische_updates, ssh, firewall, open_poorten, fail2ban, belasting, geheugen, schijf (met procent), diensten, versies, docker, geblokkeerd, ssh_mislukt_24u en `aanvallen` (tellingen). Geen nieuwe functie.
+- Landen bij de IP-adressen (voor de wereldbol) zitten er nog niet in; het vak op de pagina is de volgende stap.
+- Alleen met nagebootste uitvoer getest, niet tegen de echte server.

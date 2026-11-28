@@ -811,6 +811,26 @@ await run("mcp: brug via tunnel-binding met sleutel; zonder binding een duidelij
   const down = await tool({ ...base, BRUG_KEY: "bk", BRUG: { fetch: async () => { throw new Error("connect"); } } }, "lokaal_vraag", { vraag: "hoi" });
   assert(down.isError && /niet bereikbaar via de tunnel/.test(down.content[0].text), "Mac uit → duidelijke melding");
 });
+await run("mcp: hetzner-beveiliging geeft naast de uitvoer een overzicht voor het vak op de pagina", async () => {
+  const uitvoer = ["== Systeem", "Ubuntu 24.04.1 LTS, kernel 6.8.0-49-generic, up 12 days, 3 hours",
+    "== Openstaande updates", "totaal: 7, security: 3", "== Reboot nodig", "ja", "linux-image-6.8.0-50-generic",
+    "== unattended-upgrades", "enabled", "active", "== SSH", "port 22", "permitrootlogin without-password", "passwordauthentication no",
+    "== Firewall", "Status: active", "== Open poorten", 'tcp   LISTEN 0 511 0.0.0.0:443 0.0.0.0:* users:(("apache2",pid=1,fd=4))',
+    "== fail2ban", "Status", "|- Number of jail:\t1", "`- Jail list:\tsshd", "== Belasting", "0.12 0.20 0.18 cpu 4",
+    "== Geheugen", "mem 7820 2100", "swap 0 0", "== Schijf", "/ 152000 38000", "== Diensten", "apache2.service", "fail2ban.service",
+    "== Versies", "apache2 2.4.58-1ubuntu8.5", "openssh-server 1:9.6p1-3ubuntu13.5", "== Docker",
+    "== fail2ban IP", "sshd 203.0.113.5 198.51.100.7", "== SSH mislukt 24u", "     41 203.0.113.5", "      3 192.0.2.44", "   2 nietgoed"].join("\n");
+  const BRUG = { fetch: async () => new Response(JSON.stringify({ gelukt: true, uitvoer }), { status: 200 }) };
+  const r = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), BRUG, BRUG_KEY: "bk" }, "terminal_uitvoeren", { opdracht: "hetzner-beveiliging" })).structuredContent;
+  const o = r.overzicht;
+  assert(r.gelukt && r.uitvoer === uitvoer && o.systeem.kernel === "6.8.0-49-generic" && o.updates.beveiliging === 3 && o.herstart_nodig === true, "systeem, updates, herstart", JSON.stringify(o));
+  assert(o.automatische_updates.actief && o.ssh.passwordauthentication === "no" && o.firewall === "ufw aan" && o.open_poorten[0].poort === 443 && o.open_poorten[0].programma === "apache2", "ssh, firewall, poorten");
+  assert(o.fail2ban.jails[0] === "sshd" && o.belasting.cpu === 4 && o.geheugen.ram.gebruikt_mb === 2100 && o.schijf[0].procent === 25, "fail2ban, belasting, geheugen, schijf");
+  assert(o.diensten.includes("apache2") && o.versies.apache2 === "2.4.58-1ubuntu8.5" && o.docker.length === 0, "diensten en versies");
+  assert(o.geblokkeerd.length === 2 && o.ssh_mislukt_24u.length === 2 && o.aanvallen.ip_adressen === 3 && o.aanvallen.ssh_pogingen_24u === 44, "aanvallen", JSON.stringify(o.aanvallen));
+  const oud = (await tool({ JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv(), BRUG_KEY: "bk", BRUG: { fetch: async () => new Response(JSON.stringify({ gelukt: true, uitvoer: "== Systeem\nDebian 12, kernel 6.1.0, up 2 days" }), { status: 200 }) } }, "terminal_uitvoeren", { opdracht: "hetzner-beveiliging" })).structuredContent;
+  assert(oud.overzicht.systeem.os === "Debian 12" && !("aanvallen" in oud.overzicht) && !("diensten" in oud.overzicht), "oude jarvis-check.sh: alleen wat er is");
+});
 await run("mcp: wachtrij_start start de geplande taak via zijn API-trigger", async () => {
   const seen = []; let status = 200;
   const restore = mockUpstream((c) => { seen.push(c); return new Response(JSON.stringify({ claude_code_session_url: "https://claude.ai/code/session_x" }), { status }); });
