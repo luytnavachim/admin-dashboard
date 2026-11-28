@@ -2526,9 +2526,11 @@ async function codeCss(url) {
 // Links op de beginpagina: alleen openbare https/http-adressen, elk één keer (HEAD, bij 405/501 GET).
 function codeLinks(html, basis) {
   const uit = [], gezien = new Set();
-  for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+  // links in <script> zijn sjablonen (bv. href="${url}"), geen echte links op de pagina
+  const zicht = html.replace(/<script\b[\s\S]*?<\/script>/gi, "");
+  for (const m of zicht.matchAll(/<a\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
     const ruw = (m[2] ?? m[3] ?? m[4] ?? "").trim();
-    if (!ruw || /^(#|mailto:|tel:|javascript:|data:)/i.test(ruw)) continue;
+    if (!ruw || /^(#|mailto:|tel:|javascript:|data:)/i.test(ruw) || /\$\{|%7B/i.test(ruw)) continue;
     let u; try { u = new URL(ruw.replace(/&amp;/g, "&"), basis); } catch (e) { continue; }
     u.hash = "";
     if (!/^https?:$/.test(u.protocol)) continue;
@@ -2542,7 +2544,8 @@ async function codeLinkTest(url) {
   try {
     let r = await codeHaal(url, { method: "HEAD" }, 8000);
     if (r.status === 405 || r.status === 501 || r.status === 403) r = await codeHaal(url, { method: "GET" }, 8000);
-    return r.status >= 400 ? { url, status: r.status } : null;
+    // 999 (LinkedIn) en 429 = de site weert controles, niet kapot
+    return r.status >= 400 && r.status !== 999 && r.status !== 429 ? { url, status: r.status } : null;
   } catch (e) { return { url, status: 0, fout: e && e.name === "TimeoutError" ? "geen antwoord binnen 8 s" : "niet bereikbaar" }; }
 }
 // Eenvoudige toegankelijkheid uit de HTML zelf (geen volledige audit).
