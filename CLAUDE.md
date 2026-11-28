@@ -255,3 +255,9 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 
 - `site_status` meet nu ook `www.triplet-it.nl` (naam "Website"). Met `controle:true` per site: `beveiliging` (https, eind_url, aanwezige/ontbrekende headers HSTS/CSP/nosniff/framing/referrer/permissions, `server`, `versie_zichtbaar` als server of x-powered-by een versienummer noemt) en `certificaat` (geldig_tot, dagen_over, uitgever) via crt.sh (`siteCert`; een Worker ziet het certificaat van een verbinding zelf niet). Eén gewoon verzoek per site plus één naar crt.sh, geen scan. Zonder `controle` blijft het antwoord zoals het was (de pagina pollt dat).
 - Alleen met nagebootste antwoorden getest; crt.sh is soms traag (time-out 8 s, dan `certificaat.fout`).
+
+## Jarvis: één eigen Chrome-venster (28 november 2026, wachtrij)
+
+- `open-url.mjs` opent een klaargezet webadres (`open-webadres`, ook favorieten via `toon` actie pagina) als nieuw tabblad in één vast Jarvis-venster van Chrome (`openInJarvisVenster`, AppleScript `EIGEN_VENSTER`). Het venster-id staat in `~/.jarvis-chrome-venster` (`JARVIS_VENSTER_BESTAND`); is dat venster dicht of Chrome herstart, dan komt er een nieuw venster dat het Jarvis-venster wordt. Uit met `JARVIS_EIGEN_VENSTER=0`; mislukt het script, dan de oude manier (`open -na … --new-window`).
+- Alleen `open-url.mjs` gewijzigd (Mac): ophalen is genoeg, de Worker hoeft er niet voor opnieuw live. **Niet op de Mac getest**; onzeker is `make new tab at end of tabs` als Chrome nog niet draaide.
+- Tegels op het tabblad Favorieten openen in de browser waarin Jarvis draait (een webpagina kan geen ander venster kiezen); via Jarvis ("open TBO") gaat het naar het Jarvis-venster.
