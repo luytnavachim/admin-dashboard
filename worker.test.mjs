@@ -1328,6 +1328,9 @@ await run("mcp: schermafbeelding van één venster (app, zoom, deel): vorm begre
   assert(gezien.venster === undefined && gezien.zoom === undefined, "zonder velden blijft het hele scherm", JSON.stringify(gezien));
   const m = await import("./open-url.mjs"), v = { x: 0, y: 25, b: 1728, h: 1055 };
   assert(m.schermVak(v).join() === "0,25,1728,1055" && m.schermVak(v, "rechtsonder").join() === "864,553,864,528" && m.schermVak(v, "boven").join() === "0,25,1728,528" && m.schermVak(v, "onzin").join() === "0,25,1728,1055", "vak van het venster en van een deel", m.schermVak(v, "rechtsonder").join());
+  { const sc = m.EIGEN_VENSTER.filter((x, i) => i % 2).join("\n");
+    assert(m.vensterUitkomst("tabblad,1234").soort === "tabblad" && m.vensterUitkomst("venster,99\n").id === "99" && m.vensterUitkomst("fout") === null && m.vensterUitkomst("tabblad,12;rm") === null, "uitkomst van het Jarvis-venster lezen");
+    assert(/make new tab at end of tabs with properties \{URL:u\}/.test(sc) && /set w to make new window/.test(sc) && !/do shell script/.test(sc) && m.EIGEN_VENSTER.every((x, i) => i % 2 || x === "-e"), "webadres als tabblad in het eigen Jarvis-venster, anders nieuw venster"); }
   assert(m.GEHEIM_APP.test("1Password 7") && m.GEHEIM_APP.test("Strongbox") && !m.GEHEIM_APP.test("Google Chrome"), "wachtwoordprogramma's uitgesloten");
   const bron = (await import("node:fs")).readFileSync(new URL("./open-url.mjs", import.meta.url), "utf8");
   assert(/finally \{ if \(st\) await vensterTerug\(st\);/.test(bron), "terugzetten staat in een finally");

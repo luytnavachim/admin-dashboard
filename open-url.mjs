@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Vaste opdracht "open-webadres" van de Jarvis-brug. Haalt op wat Jarvis zojuist heeft klaargezet (één keer, kort geldig):
-//  - een webadres: opent het in een nieuw venster van Google Chrome;
+//  - een webadres: opent het als tabblad in het eigen Jarvis-venster van Google Chrome (zie openInJarvisVenster);
 //  - een opdracht voor Chrome: lezen, ergens heen gaan, klikken, typen, scrollen in het voorste venster;
 //  - dezelfde opdrachten voor Safari als de opdracht browser:"safari" heeft (zie safari()).
 // Veiligheid zit hier, niet bij het taalmodel: knoppen, verzenden en riskante links worden alleen uitgevoerd met bevestigd:true
@@ -430,6 +430,27 @@ async function chrome(job, key) {
   const w = await js(SCRIPTS.waar()); return { ...r, ...(nieuwTab ? { nieuw_tabblad: true } : {}), ...(eigenVenster ? { eigen_venster: true } : {}), nu: w.fout ? undefined : w };
 }
 
+// Eén eigen Jarvis-venster in Chrome (wens Micha, 28 november): elk geopend webadres (ook favorieten) komt als nieuw tabblad in dat venster.
+// Het venster-id staat in een klein bestand; is dat venster weg (of Chrome herstart), dan komt er een nieuw venster en wordt dat het Jarvis-venster.
+// Uit met JARVIS_EIGEN_VENSTER=0 (dan weer elk adres een nieuw venster). Lukt het script niet, dan ook de oude manier.
+const VENSTER_BESTAND = process.env.JARVIS_VENSTER_BESTAND || path.join(os.homedir(), ".jarvis-chrome-venster");
+function leesVenster() { try { const v = fs.readFileSync(VENSTER_BESTAND, "utf8").trim(); return /^\d{1,12}$/.test(v) ? v : ""; } catch { return ""; } }
+function bewaarVenster(id) { try { if (/^\d{1,12}$/.test(String(id))) fs.writeFileSync(VENSTER_BESTAND, String(id)); } catch {} }
+const EIGEN_VENSTER = ["-e", "on run a", "-e", CHROME, "-e", "set u to item 1 of a", "-e", "set oud to item 2 of a", "-e", "set w to missing value",
+  "-e", "if oud is not \"\" then", "-e", "repeat with x in windows", "-e", "if ((id of x) as text) is oud then set w to contents of x", "-e", "end repeat", "-e", "end if",
+  "-e", "if w is missing value then", "-e", "set w to make new window", "-e", "set URL of active tab of w to u", "-e", "set uit to \"venster\"",
+  "-e", "else", "-e", "tell w to make new tab at end of tabs with properties {URL:u}", "-e", "set active tab index of w to (count of tabs of w)", "-e", "set uit to \"tabblad\"", "-e", "end if",
+  "-e", "set index of w to 1", "-e", "activate", "-e", "return uit & \",\" & ((id of w) as text)", "-e", "end tell", "-e", "end run"];
+// Uitkomst van het script lezen: "tabblad,1234" of "venster,1234" → { soort, id }; anders null.
+function vensterUitkomst(out) { const m = /^(tabblad|venster),(\d{1,12})$/.exec(String(out || "").trim()); return m ? { soort: m[1], id: m[2] } : null; }
+async function openInJarvisVenster(href) {
+  if (process.env.JARVIS_EIGEN_VENSTER === "0") return null;
+  const r = await run("/usr/bin/osascript", [...EIGEN_VENSTER, href, leesVenster()], 10000);
+  const u = r.code === 0 ? vensterUitkomst(r.out) : null;
+  if (u) bewaarVenster(u.id);
+  return u;
+}
+
 async function main() {
   let key = process.env.BRUG_KEY || "";
   if (!key) { try { key = fs.readFileSync(process.env.BRUG_KEYFILE || path.join(os.homedir(), "Documents/jarvis-brein/brug.key"), "utf8").trim(); } catch { key = ""; } }
@@ -447,8 +468,10 @@ async function main() {
   if (d.job) { console.log(JSON.stringify(await chrome(d.job, key))); process.exit(0); }
   let u; try { u = new URL(d.url); } catch { u = null; }
   if (!u || !/^https?:$/.test(u.protocol)) { console.log("Dit adres wordt niet geopend."); process.exit(1); }
+  const eigen = await openInJarvisVenster(u.href);
+  if (eigen) { console.log((eigen.soort === "tabblad" ? "Geopend als tabblad in het Jarvis-venster: " : "Geopend in een nieuw Jarvis-venster: ") + u.hostname); process.exit(0); }
   const r = await run("open", ["-na", "Google Chrome", "--args", "--new-window", u.href]);
   console.log(r.code === 0 ? "Geopend in Chrome: " + u.hostname : "Chrome starten mislukt: " + (r.err || "foutcode " + r.code)); process.exit(r.code || 0);
 }
-export { SDOEL, safari, schermVak, DELEN, GEHEIM_APP };
+export { SDOEL, safari, schermVak, DELEN, GEHEIM_APP, EIGEN_VENSTER, vensterUitkomst };
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
