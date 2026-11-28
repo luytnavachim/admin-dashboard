@@ -867,6 +867,49 @@ await run("mcp: site_status controle leest headers en certificaat per site (geen
   } finally { restore(); }
 });
 
+await run("mcp: site_status soort code controleert HTML, CSS, links en toegankelijkheid", async () => {
+  const seen = [];
+  const pagina = '<!doctype html><html><head><title>Triplet</title></head><body><h1>Hoi</h1><h3>Sprong</h3><img src="a.png"><img src="b.png" alt="b">'
+    + '<a href="/goed">Goed</a><a href="/kapot">Kapot</a><a href="mailto:x@y.nl">mail</a><a href="http://192.168.1.1/">router</a><a href="#top">boven</a><a href="https://elders.nl/weg"><img src="c.png"></a>'
+    + '<input name="q"><label>Naam <input name="n"></label><button></button><button aria-label="Zoek"></button></body></html>';
+  const restore = mockUpstream((c) => { const u = String(c.url); seen.push(c.method + " " + u);
+    if (u.startsWith("https://validator.w3.org/nu/")) {
+      assert(c.method === "POST" && String(c.body).includes("<h1>Hoi"), "HTML wordt meegestuurd");
+      return new Response(JSON.stringify({ messages: [{ type: "error", message: "Stray end tag div.", lastLine: 3, extract: "</div>" }, { type: "info", subType: "warning", message: "Consider adding lang." }, { type: "info", message: "zomaar info" }] }), { status: 200 });
+    }
+    if (u.startsWith("https://jigsaw.w3.org/")) {
+      if (u.includes("team.app1x")) return new Response("druk", { status: 503 });
+      return new Response(JSON.stringify({ cssvalidation: { result: { errorcount: 1, warningcount: 2 }, errors: [{ source: "https://www.triplet-it.nl/style.css", line: 12, message: "Value Error : colr", context: "body" }], warnings: [{ line: 3, message: "vendor" }, { line: 4, message: "x" }] } }), { status: 200 });
+    }
+    if (u.endsWith("/kapot")) return new Response("", { status: 404 });
+    if (u.includes("elders.nl")) { if (c.method === "HEAD") return new Response("", { status: 405 }); return new Response("ok", { status: 200 }); }
+    if (u.endsWith("/goed")) return new Response("", { status: 200 });
+    return new Response(pagina, { status: 200, headers: { "content-type": "text/html" } }); });
+  try {
+    const env = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
+    const o = (await tool(env, "site_status", { soort: "code", site: "triplet-it.nl/" })).structuredContent;
+    assert(o.sites.length === 2 && o.sites.map(x => x.naam).join() === "Website,Admin-login", "site-filter op adres", JSON.stringify(o.sites.map(x => x.naam)));
+    const w = o.sites[0];
+    assert(w.html.fouten === 1 && w.html.waarschuwingen === 1 && w.html.details[0].regel === 3, "HTML-meldingen geteld", JSON.stringify(w.html));
+    assert(w.css.fouten === 1 && w.css.waarschuwingen === 2 && w.css.details[0].bestand === "/style.css", "CSS-meldingen", JSON.stringify(w.css));
+    assert(w.links.gevonden === 3 && w.links.kapot === 1 && w.links.details[0].status === 404 && /kapot$/.test(w.links.details[0].url), "kapotte link, geen mailto/intern/anker, GET na 405", JSON.stringify(w.links));
+    const tk = w.toegankelijk.details.map(x => x.tekst).join(" | ");
+    assert(/lang/.test(tk) && /alt-tekst/.test(tk) && /Invoerveld zonder naam/.test(tk) && !/Invoerveld zonder naam \(2/.test(tk) && /Knop zonder tekst/.test(tk) && !/Knop zonder tekst.*\(2/.test(tk) && /niveau over/.test(tk) && /Link zonder tekst/.test(tk) && !/titel/.test(tk), "toegankelijkheid", tk);
+    assert(w.fouten === 1 + 1 + 1 + w.toegankelijk.fouten && w.waarschuwingen === 1 + 2 + w.toegankelijk.waarschuwingen, "totalen");
+    assert(!seen.some(x => x.includes("192.168")), "geen interne adressen opgevraagd");
+    const opgeslagen = JSON.parse(await env.PROJECTS_KV.get("jarvis_code_controle"));
+    assert(opgeslagen.sites.length === 2 && opgeslagen.op, "uitkomst in KV met tijd");
+    seen.length = 0;
+    const alle = (await tool(env, "site_status", { soort: "code" })).structuredContent;
+    assert(alle.sites.length === 6 && seen.length <= 45, "alle sites binnen het verzoekbudget", String(seen.length));
+    const team = alle.sites.find(x => x.naam === "Team-app");
+    assert(/503/.test(team.css.fout) && team.html.fouten === 1, "fout van één dienst blijft bij die dienst");
+    assert(JSON.stringify(alle).length < 32000, "antwoord onder 32 KB");
+    const fout = await tool(env, "site_status", { soort: "code", site: "bestaatniet" });
+    assert(fout.isError && /Kies uit/.test(fout.content[0].text), "onbekende site");
+  } finally { restore(); }
+});
+
 await run("mcp: rijplan haalt het rijplan uit de JO11-2-app met de eigen sleutel", async () => {
   const seen = [], base = { JARVIS_MCP_KEY: "geheim", PROJECTS_KV: fakeKv() };
   const dag = { datum: "2026-11-28", weekdag: "zaterdag", wedstrijden: [{ team: "JO11-2", tijd: "09:00", thuis: true }], beide_teams: false, status: "", oordeel: "", keuze: "" };

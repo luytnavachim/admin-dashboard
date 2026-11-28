@@ -506,8 +506,8 @@ const MCP_TOOLS = [
       tekst: { type: "string" }, stem: { type: "string", description: "Stem-id uit spraak_stemmen; leeg = eerste stem" }
     }, required: ["tekst"], additionalProperties: false },
     annotations: { readOnlyHint: true } },
-  { name: "site_status", description: "Meet of de eigen sites bereikbaar zijn en hoe snel ze antwoorden (scout, team, JO11-2, administratie, www.triplet-it.nl). Met controle:true ook per site: beveiligingsheaders (HSTS, CSP, nosniff, framing, referrer, permissions), of de webserver zijn versie toont, en het certificaat (geldig tot, dagen over, uitgever) uit de openbare certificaatlogboeken. Eén gewoon verzoek per site, geen scan. Alleen lezen.",
-    inputSchema: { type: "object", properties: { controle: { type: "boolean", description: "true = ook certificaat en beveiligingsheaders nalezen (trager)" } }, additionalProperties: false },
+  { name: "site_status", description: "Meet of de eigen sites bereikbaar zijn en hoe snel ze antwoorden (scout, team, JO11-2, administratie, www.triplet-it.nl). Met controle:true ook per site: beveiligingsheaders (HSTS, CSP, nosniff, framing, referrer, permissions), of de webserver zijn versie toont, en het certificaat (geldig tot, dagen over, uitgever) uit de openbare certificaatlogboeken. Eén gewoon verzoek per site, geen scan. soort code = de code nakijken (HTML via W3C, CSS via W3C, kapotte links op de beginpagina, eenvoudige toegankelijkheid) per site met aantallen fouten en waarschuwingen en details; site = deel van naam of adres voor één site (dan meer links). Alleen lezen.",
+    inputSchema: { type: "object", properties: { controle: { type: "boolean", description: "true = ook certificaat en beveiligingsheaders nalezen (trager)" }, soort: { type: "string", enum: ["code"], description: "code = HTML, CSS, links en toegankelijkheid nakijken" }, site: { type: "string", description: "Bij soort code: alleen deze site (naam of adres)" } }, additionalProperties: false },
     annotations: { readOnlyHint: true } },
   { name: "camera_beeld", description: "Eén actueel beeld van een bewakingscamera uit Home Assistant, verkleind, als base64-jpeg. camera is g4_doorbell_pro_poe, g6_pro_entry, ai_pro of g5_flex. Alleen lezen.",
     inputSchema: { type: "object", properties: { camera: { type: "string" }, breedte: { type: "number" } }, required: ["camera"], additionalProperties: false },
@@ -2424,7 +2424,125 @@ async function siteCert(host) {
     return { geldig_tot: new Date(c.tot).toISOString().slice(0, 10), dagen_over: Math.floor((c.tot - nu) / 86400000), uitgever: c.uitgever };
   } catch (e) { return { fout: e && e.name === "TimeoutError" ? "certificaatlogboek gaf geen antwoord binnen 8 s" : "certificaatlogboek niet bereikbaar" }; }
 }
-async function mcpSites(args = {}) {
+// ---- Codecontrole (soort "code"): HTML en CSS via W3C, links en toegankelijkheid zelf. Alleen lezen. ----
+const CODE_SITES = [["Website", "https://www.triplet-it.nl/"], ["Scout-app", "https://scout.app1x.online/"], ["Team-app", "https://team.app1x.online/"], ["JO11-2", "https://o11-2.app1x.online/"], ["Administratie", "https://administratie.app1x.online/"], ["Admin-login", "https://admin.triplet-it.nl/"]];
+const CODE_BUDGET = 45;   // ruim onder de grens van 50 verzoeken per aanvraag van een Worker
+const CODE_DETAIL = 15;   // hooguit zoveel details per soort per site
+const codeKort = (t, n = 160) => String(t == null ? "" : t).replace(/\s+/g, " ").trim().slice(0, n);
+async function codeHaal(url, opts = {}, ms = 12000) {
+  return fetch(url, Object.assign({ redirect: "follow", signal: AbortSignal.timeout(ms) }, opts, { headers: Object.assign({ "User-Agent": "Jarvis-codecontrole" }, opts.headers || {}) }));
+}
+// W3C Nu HTML Checker: de HTML zelf meesturen (POST), zodat de dienst de site niet opnieuw hoeft op te halen.
+async function codeHtml(html) {
+  try {
+    const r = await codeHaal("https://validator.w3.org/nu/?out=json", { method: "POST", body: html, headers: { "Content-Type": "text/html; charset=utf-8" } }, 15000);
+    if (!r.ok) return { fout: "W3C HTML-controle gaf " + r.status };
+    const d = await r.json();
+    const m = Array.isArray(d.messages) ? d.messages : [];
+    const fouten = m.filter(x => x.type === "error" || x.subType === "fatal"), waarsch = m.filter(x => x.type === "info" && x.subType === "warning");
+    const det = x => ({ regel: x.lastLine || null, tekst: codeKort(x.message), stuk: x.extract ? codeKort(x.extract, 100) : undefined });
+    return { fouten: fouten.length, waarschuwingen: waarsch.length, details: [...fouten.map(x => ({ soort: "fout", ...det(x) })), ...waarsch.map(x => ({ soort: "waarschuwing", ...det(x) }))].slice(0, CODE_DETAIL) };
+  } catch (e) { return { fout: e && e.name === "TimeoutError" ? "W3C HTML-controle gaf geen antwoord binnen 15 s" : "W3C HTML-controle niet bereikbaar" }; }
+}
+// W3C CSS Validator: leest zelf de stijlbladen die de pagina gebruikt.
+async function codeCss(url) {
+  try {
+    const r = await codeHaal("https://jigsaw.w3.org/css-validator/validator?uri=" + encodeURIComponent(url) + "&profile=css3svg&warning=1&output=json", { headers: { Accept: "application/json" } }, 20000);
+    if (!r.ok) return { fout: "W3C CSS-controle gaf " + r.status };
+    const d = await r.json(), c = d && d.cssvalidation || {};
+    const fl = Array.isArray(c.errors) ? c.errors : [], wl = Array.isArray(c.warnings) ? c.warnings : [];
+    const det = (x, soort) => ({ soort, bestand: x.source ? codeKort(String(x.source).replace(/^https?:\/\/[^/]+/, ""), 80) || "/" : undefined, regel: x.line || null, tekst: codeKort((x.message || "") + (x.context ? " (" + x.context + ")" : "")) });
+    const res = c.result || {};
+    return { fouten: Number(res.errorcount != null ? res.errorcount : fl.length) || 0, waarschuwingen: Number(res.warningcount != null ? res.warningcount : wl.length) || 0, details: [...fl.map(x => det(x, "fout")), ...wl.map(x => det(x, "waarschuwing"))].slice(0, CODE_DETAIL) };
+  } catch (e) { return { fout: e && e.name === "TimeoutError" ? "W3C CSS-controle gaf geen antwoord binnen 20 s" : "W3C CSS-controle niet bereikbaar" }; }
+}
+// Links op de beginpagina: alleen openbare https/http-adressen, elk één keer (HEAD, bij 405/501 GET).
+function codeLinks(html, basis) {
+  const uit = [], gezien = new Set();
+  for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi)) {
+    const ruw = (m[2] ?? m[3] ?? m[4] ?? "").trim();
+    if (!ruw || /^(#|mailto:|tel:|javascript:|data:)/i.test(ruw)) continue;
+    let u; try { u = new URL(ruw.replace(/&amp;/g, "&"), basis); } catch (e) { continue; }
+    u.hash = "";
+    if (!/^https?:$/.test(u.protocol)) continue;
+    const t = new URL(u.href); t.protocol = "https:";
+    if (!webAdresOk(t.href)) continue;   // geen interne adressen
+    if (!gezien.has(u.href)) { gezien.add(u.href); uit.push(u.href); }
+  }
+  return uit;
+}
+async function codeLinkTest(url) {
+  try {
+    let r = await codeHaal(url, { method: "HEAD" }, 8000);
+    if (r.status === 405 || r.status === 501 || r.status === 403) r = await codeHaal(url, { method: "GET" }, 8000);
+    return r.status >= 400 ? { url, status: r.status } : null;
+  } catch (e) { return { url, status: 0, fout: e && e.name === "TimeoutError" ? "geen antwoord binnen 8 s" : "niet bereikbaar" }; }
+}
+// Eenvoudige toegankelijkheid uit de HTML zelf (geen volledige audit).
+function codeToegankelijk(html) {
+  const p = [], add = (tekst, n, stuk) => { if (n) p.push({ soort: "waarschuwing", tekst: n > 1 ? tekst + " (" + n + "×)" : tekst, ...(stuk ? { stuk: codeKort(stuk, 100) } : {}) }); };
+  const zonder = s => s.replace(/<!--[\s\S]*?-->/g, "").replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, "");
+  const h = zonder(html);
+  const htmlTag = h.match(/<html\b[^>]*>/i);
+  if (!htmlTag || !/\blang\s*=\s*["']?[a-z]/i.test(htmlTag[0])) p.push({ soort: "fout", tekst: "Het html-element mist de taal (lang)." });
+  if (!/<title\b[^>]*>\s*[^<\s]/i.test(h)) p.push({ soort: "fout", tekst: "De pagina heeft geen titel." });
+  const imgs = [...h.matchAll(/<img\b[^>]*>/gi)].map(m => m[0]).filter(t => !/\balt\s*=/i.test(t));
+  add("Afbeelding zonder alt-tekst", imgs.length, imgs[0]);
+  const ids = new Set([...h.matchAll(/<label\b[^>]*\bfor\s*=\s*["']?([^"'\s>]+)/gi)].map(m => m[1]));
+  const velden = [...h.matchAll(/<(input|select|textarea)\b[^>]*>/gi)].map(m => m[0]).filter(t => !/\btype\s*=\s*["']?(hidden|submit|button|reset|image)\b/i.test(t))
+    .filter(t => !/\baria-label(ledby)?\s*=|\btitle\s*=/i.test(t) && !ids.has((t.match(/\bid\s*=\s*["']?([^"'\s>]+)/i) || [])[1]));
+  // velden binnen een <label> tellen als benoemd
+  const inLabel = [...h.matchAll(/<label\b[^>]*>([\s\S]*?)<\/label>/gi)].map(m => m[1]).join(" ");
+  const los = velden.filter(t => !inLabel.includes(t));
+  add("Invoerveld zonder naam (label of aria-label)", los.length, los[0]);
+  const knoppen = [...h.matchAll(/<button\b([^>]*)>([\s\S]*?)<\/button>/gi)].filter(m => !/\baria-label(ledby)?\s*=|\btitle\s*=/i.test(m[1]) && !m[2].replace(/<img\b[^>]*\balt\s*=\s*["']([^"']+)["'][^>]*>/gi, "$1").replace(/<[^>]+>/g, "").trim());
+  add("Knop zonder tekst of aria-label", knoppen.length, knoppen[0] && knoppen[0][0]);
+  const links = [...h.matchAll(/<a\b([^>]*)>([\s\S]*?)<\/a>/gi)].filter(m => /\bhref\s*=/i.test(m[1]) && !/\baria-label(ledby)?\s*=|\btitle\s*=/i.test(m[1]) && !m[2].replace(/<img\b[^>]*\balt\s*=\s*["']([^"']+)["'][^>]*>/gi, "$1").replace(/<[^>]+>/g, "").trim());
+  add("Link zonder tekst", links.length, links[0] && links[0][0]);
+  const niveaus = [...h.matchAll(/<h([1-6])\b/gi)].map(m => +m[1]);
+  let sprong = 0, vorig = 0; for (const n of niveaus) { if (vorig && n > vorig + 1) sprong++; vorig = n; }
+  if (niveaus.length && !niveaus.includes(1)) p.push({ soort: "waarschuwing", tekst: "Geen kop h1 op de pagina." });
+  add("Kop slaat een niveau over", sprong);
+  const fouten = p.filter(x => x.soort === "fout").length;
+  return { fouten, waarschuwingen: p.length - fouten, details: p.slice(0, CODE_DETAIL) };
+}
+async function mcpCode(args = {}, env = {}) {
+  const zoek = String(args.site || "").trim().toLowerCase();
+  const sites = zoek ? CODE_SITES.filter(([n, u]) => n.toLowerCase().includes(zoek) || u.includes(zoek.replace(/^https?:\/\//, "").replace(/\/$/, ""))) : CODE_SITES;
+  if (!sites.length) throw new Error("Onbekende site. Kies uit: " + CODE_SITES.map(([n, u]) => n + " (" + new URL(u).hostname + ")").join(", ") + ".");
+  const perLink = Math.max(0, Math.min(30, Math.floor((CODE_BUDGET - 3 * sites.length) / sites.length)));
+  const uit = await Promise.all(sites.map(async ([naam, url]) => {
+    const s = { naam, url };
+    let html = "", eind = url;
+    try {
+      const r = await codeHaal(url, { headers: { Accept: "text/html" } }, 10000);
+      s.status = r.status; eind = r.url || url;
+      if (eind !== url) s.eind_url = eind;
+      html = (await r.text()).slice(0, 1500000);
+      if (!/<html|<!doctype/i.test(html)) s.let_op = "Het antwoord lijkt geen HTML-pagina.";
+    } catch (e) {
+      s.bereikbaar = false; s.fout = e && e.name === "TimeoutError" ? "geen antwoord binnen 10 s" : "niet bereikbaar";
+      s.fouten = 0; s.waarschuwingen = 0;
+      return s;
+    }
+    const linkLijst = codeLinks(html, eind);
+    const [h, c, kapot] = await Promise.all([codeHtml(html), codeCss(eind), Promise.all(linkLijst.slice(0, perLink).map(codeLinkTest))]);
+    const k = kapot.filter(Boolean);
+    s.html = h; s.css = c;
+    s.links = { gevonden: linkLijst.length, gecontroleerd: Math.min(perLink, linkLijst.length), kapot: k.length, details: k.slice(0, CODE_DETAIL).map(x => ({ soort: "fout", url: codeKort(x.url, 200), status: x.status, ...(x.fout ? { tekst: x.fout } : {}) })) };
+    s.toegankelijk = codeToegankelijk(html);
+    s.fouten = (h.fouten || 0) + (c.fouten || 0) + k.length + s.toegankelijk.fouten;
+    s.waarschuwingen = (h.waarschuwingen || 0) + (c.waarschuwingen || 0) + s.toegankelijk.waarschuwingen;
+    return s;
+  }));
+  const res = { gecontroleerd_op: new Date().toISOString(), sites: uit,
+    let_op: "Alleen de beginpagina van elke site. HTML en CSS door de W3C-diensten, links en toegankelijkheid door de Worker zelf (eenvoudige controle, geen volledige audit). JavaScript-fouten in de browser vallen erbuiten." + (perLink < 30 ? " Per site " + perLink + " links gecontroleerd; vraag één site (site) voor meer." : "") };
+  if (env.PROJECTS_KV) { try { await env.PROJECTS_KV.put("jarvis_code_controle", JSON.stringify({ op: res.gecontroleerd_op, sites: uit.map(x => ({ naam: x.naam, fouten: x.fouten, waarschuwingen: x.waarschuwingen })) })); } catch (e) {} }
+  return res;
+}
+async function mcpSites(args = {}, env = {}) {
+  if (args && args.soort === "code") return mcpCode(args, env);
+  if (args && args.soort) throw new Error("Onbekende soort. Alleen \"code\" kan (of laat soort weg).");
   const controle = !!(args && args.controle);
   const sites = await Promise.all(MCP_SITES.map(async ([naam, url]) => {
     const t0 = Date.now();
