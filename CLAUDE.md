@@ -287,3 +287,10 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - `terminal_uitvoeren` met `hetzner-beveiliging` geeft naast `uitvoer` (ingekort tot 3000 tekens) een veld `overzicht` (`hetznerOverzicht`): systeem, updates (totaal/beveiliging), herstart_nodig, automatische_updates, ssh, firewall, open_poorten, fail2ban, belasting, geheugen, schijf (met procent), diensten, versies, docker, geblokkeerd, ssh_mislukt_24u en `aanvallen` (tellingen). Geen nieuwe functie.
 - Landen bij de IP-adressen (voor de wereldbol) zitten er nog niet in; het vak op de pagina is de volgende stap.
 - Alleen met nagebootste uitvoer getest, niet tegen de echte server.
+
+## Jarvis: wachtrij past de pagina zelf aan (28 november 2026)
+
+- Een wachtrij-run kán de Jarvis-pagina (ruim 900 kB) gericht wijzigen: Artifact `read` met de url van de pagina bewaart de volledige HTML lokaal; daarop zoek-en-vervang doen (elke oude tekst precies één keer), syntax controleren (`new Function` over de scripts), eventueel in Chromium bekijken, en publiceren met `url` + `file_path` (of `edits`). Een publish die niet op de nieuwste versie gebouwd is wordt geweigerd met de nieuwe versie erbij: dan de eigen wijzigingen op die versie opnieuw toepassen. Geen vraag meer aan Micha zetten over "geen gereedschap".
+- Punten in `nodig` altijd als losse tekst opslaan, nooit als object (`{vraag: …}` gaf '[object Object]'). De pagina zet objecten nu zelf om (`needTxt` in `needsOf` en `needAnswer`).
+- Codecontrole (`site_status` soort code): W3C geeft vanuit de Worker 403 (vanuit de wachtrij-omgeving niet na te bootsen); links in `<script>` en status 999/429 tellen niet meer als kapot. Op de pagina: vak "Sitecode" onder Netwerk, details in het rapportpaneel, en actie `code` in het gereedschap `mac`.
+- Kop van de pagina: Volledig scherm verborgen (`#fs` blijft in de DOM, `geld-t`/`fx-t` worden ernaast ingevoegd), tandwiel `#kop-menu` met skin, fit, kr-maat, vk-herstel, fx-t en macdict, en één statuslampje `#p-alles` in plaats van de vier pills (die blijven verborgen bestaan, `pill()` werkt erop).
