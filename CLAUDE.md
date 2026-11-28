@@ -274,3 +274,9 @@ Negen functies in de MCP-server van de Worker (`worker.js`), nog niet live tot `
 - `rijplan` met `observaties:true` (optioneel `van`, `tot`, `thema`, `speler`) haalt `GET <JO11_URL>/api.php?view=observaties&from=&to=` op met dezelfde kop `X-Jarvis-Key` als het rijplan. Verwacht `{ok:true, observaties:[…]}`; velden in het Nederlands (`datum`, `soort`, `wedstrijd`, `thema`, `spelers`, `gezien`, `mist`, `actie`, `status`) of zoals de app ze opslaat (`date`, `context`, `theme`, `players`, `seen`, `missing`, `action`). Nieuwste eerst, antwoord ingekort tot ±12 kB (`observatiesKort`).
 - **Het eindpunt in de JO11-2-app bestaat nog niet.** Het hoort naast `view=rijplan` in `api.php` te komen (zelfde sleutelcontrole via `.data/jarvis.hash`, observaties uit `read_clubhouse`, bij `context: match` de tegenstander uit `events` als `wedstrijd`). Tot dan geeft de actie een nette melding (404).
 
+
+## Jarvis-pagina: tabblad Boodschappen (28 november 2026, wachtrij, versie 291)
+
+- Tabblad `boodschappen` (module onderaan de pagina, na Favorieten): weekmenu per week (database `weekmenu/<JJJJ-MM-DD>`: `gerecht`, `erbij` = ingrediënten met komma's), voorraad (`voorraad`: `naam`, `stand` genoeg/bijna/op) en lijst per winkel Jumbo of Dirk (`boodschappen`: `naam`, `hoeveel`, `winkel`, `gekocht`, `op`, `bron`). Afvinken zet de voorraad weer op genoeg; "Ingrediënten op de lijst" zet de ingrediënten van de week erop (niet dubbel, niet wat genoeg in voorraad is).
+- Jarvis voegt toe via `notitie` actie `boodschap` (`boodTool`): `tekst` (+ `winkel`), of `dag` + `gerecht`; zonder beide = lijst, menu en wat op is. Geen nieuw gereedschap (grens van 16). De omschrijving van `notitie` zit nu op 996 van de 1024 bytes.
+- Geen koppeling met het mandje van Jumbo (keuze Micha: eerst in Jarvis). Terugzetten kan naar versie 290 (1795864850-ccc4).
